@@ -1,4 +1,12 @@
-import { FormEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  FormEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent
+} from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { apiFetch } from "../lib/api";
@@ -38,6 +46,10 @@ async function fetchImageAsObjectUrl(url: string) {
 
 function clamp01(value: number) {
   return Math.min(1, Math.max(0, value));
+}
+
+function clampRange(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function wrapHue01(value: number) {
@@ -85,9 +97,13 @@ export function MatchColorPage() {
 
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const objectUrlsRef = useRef<string[]>([]);
+  const fullResCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const sourceCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const inspectCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const inspectScratchCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const webglRendererRef = useRef<MatchColorWebGLRenderer | null>(null);
   const drawRafRef = useRef<number | null>(null);
+  const inspectDrawRafRef = useRef<number | null>(null);
   const fastPreviewTimerRef = useRef<number | null>(null);
 
   const [previewMode, setPreviewMode] = useState<PreviewMode>("webgl");
@@ -97,6 +113,10 @@ export function MatchColorPage() {
   const [statusText, setStatusText] = useState("Loading output image...");
   const [displayImageUrl, setDisplayImageUrl] = useState<string | null>(null);
   const [sourceImageData, setSourceImageData] = useState<ImageData | null>(null);
+  const [fullResReady, setFullResReady] = useState(false);
+  const [inspectOpen, setInspectOpen] = useState(false);
+  const [inspectZoom, setInspectZoom] = useState(2.2);
+  const [inspectCenter, setInspectCenter] = useState({ x: 0.5, y: 0.5 });
   const [swatches, setSwatches] = useState<string[]>([]);
   const [selectedSwatch, setSelectedSwatch] = useState<string | null>(null);
   const [adjustmentsBySwatch, setAdjustmentsBySwatch] = useState<Record<string, SwatchAdjustment>>(
@@ -203,6 +223,77 @@ export function MatchColorPage() {
     }
   }
 
+  function drawInspectCanvas() {
+    if (!inspectOpen) return;
+    const fullResCanvas = fullResCanvasRef.current;
+    const inspectCanvas = inspectCanvasRef.current;
+    if (!fullResCanvas || !inspectCanvas) return;
+
+    const sourceCtx = fullResCanvas.getContext("2d", { willReadFrequently: true });
+    const outCtx = inspectCanvas.getContext("2d");
+    if (!sourceCtx || !outCtx) return;
+
+    const zoom = clampRange(inspectZoom, 1.2, 6);
+    const cropWidth = Math.max(48, Math.round(fullResCanvas.width / zoom));
+    const cropHeight = Math.max(48, Math.round(fullResCanvas.height / zoom));
+    const maxLeft = Math.max(0, fullResCanvas.width - cropWidth);
+    const maxTop = Math.max(0, fullResCanvas.height - cropHeight);
+
+    const centerX = inspectCenter.x * fullResCanvas.width;
+    const centerY = inspectCenter.y * fullResCanvas.height;
+    const cropLeft = Math.round(clampRange(centerX - cropWidth / 2, 0, maxLeft));
+    const cropTop = Math.round(clampRange(centerY - cropHeight / 2, 0, maxTop));
+
+    const roiImageData = sourceCtx.getImageData(cropLeft, cropTop, cropWidth, cropHeight);
+    const rendered = applyLivePreviewAdjustment(roiImageData, selectedSwatch, currentAdjustment);
+
+    const dpr = window.devicePixelRatio || 1;
+    const cssWidth = Math.max(260, Math.round(inspectCanvas.clientWidth || 320));
+    const cssHeight = Math.max(280, Math.round(cssWidth * (rendered.height / rendered.width)));
+    const outputWidth = Math.max(1, Math.round(cssWidth * dpr));
+    const outputHeight = Math.max(1, Math.round(cssHeight * dpr));
+
+    if (inspectCanvas.width !== outputWidth || inspectCanvas.height !== outputHeight) {
+      inspectCanvas.width = outputWidth;
+      inspectCanvas.height = outputHeight;
+      inspectCanvas.style.height = `${cssHeight}px`;
+    }
+
+    const scratch = inspectScratchCanvasRef.current ?? document.createElement("canvas");
+    inspectScratchCanvasRef.current = scratch;
+    scratch.width = rendered.width;
+    scratch.height = rendered.height;
+    const scratchCtx = scratch.getContext("2d");
+    if (!scratchCtx) return;
+    scratchCtx.putImageData(rendered, 0, 0);
+
+    outCtx.clearRect(0, 0, outputWidth, outputHeight);
+    outCtx.imageSmoothingEnabled = true;
+    outCtx.imageSmoothingQuality = "high";
+    outCtx.drawImage(scratch, 0, 0, outputWidth, outputHeight);
+
+    const crossX = outputWidth / 2;
+    const crossY = outputHeight / 2;
+    outCtx.strokeStyle = "rgb(248 250 252 / 88%)";
+    outCtx.lineWidth = Math.max(1.5, Math.round(dpr));
+    outCtx.beginPath();
+    outCtx.moveTo(crossX - 16 * dpr, crossY);
+    outCtx.lineTo(crossX + 16 * dpr, crossY);
+    outCtx.moveTo(crossX, crossY - 16 * dpr);
+    outCtx.lineTo(crossX, crossY + 16 * dpr);
+    outCtx.stroke();
+  }
+
+  function scheduleInspectDraw() {
+    if (!inspectOpen) return;
+    if (inspectDrawRafRef.current !== null) return;
+
+    inspectDrawRafRef.current = window.requestAnimationFrame(() => {
+      inspectDrawRafRef.current = null;
+      drawInspectCanvas();
+    });
+  }
+
   useEffect(() => {
     return () => {
       for (const url of objectUrlsRef.current) URL.revokeObjectURL(url);
@@ -213,6 +304,11 @@ export function MatchColorPage() {
         drawRafRef.current = null;
       }
 
+      if (inspectDrawRafRef.current !== null) {
+        window.cancelAnimationFrame(inspectDrawRafRef.current);
+        inspectDrawRafRef.current = null;
+      }
+
       if (fastPreviewTimerRef.current !== null) {
         window.clearTimeout(fastPreviewTimerRef.current);
         fastPreviewTimerRef.current = null;
@@ -220,6 +316,8 @@ export function MatchColorPage() {
 
       webglRendererRef.current?.dispose();
       webglRendererRef.current = null;
+      fullResCanvasRef.current = null;
+      inspectScratchCanvasRef.current = null;
     };
   }, []);
 
@@ -249,6 +347,18 @@ export function MatchColorPage() {
     scheduleWebGLDraw();
   }, [selectedSwatch, currentAdjustment, previewMode]);
 
+  useEffect(() => {
+    if (!inspectOpen) return;
+    scheduleInspectDraw();
+  }, [inspectOpen, inspectCenter, inspectZoom, selectedSwatch, currentAdjustment, sourceImageData]);
+
+  useEffect(() => {
+    if (!inspectOpen) return;
+    const handleResize = () => scheduleInspectDraw();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [inspectOpen]);
+
   async function fetchDownloadUrl(id: string) {
     if (!accessToken) throw new Error("Missing access token");
     const response = await apiFetch<DownloadUrlResponse>(`/generations/${id}/download-url`, accessToken, {
@@ -260,6 +370,10 @@ export function MatchColorPage() {
   async function loadMatchColorData() {
     if (!accessToken || !generationId) return;
     setLoading(true);
+    setInspectOpen(false);
+    setInspectCenter({ x: 0.5, y: 0.5 });
+    setInspectZoom(2.2);
+    setFullResReady(false);
     try {
       setStatusText("Loading generation...");
       const generation = await apiFetch<GenerationRow>(`/generations/${generationId}`, accessToken, {
@@ -278,6 +392,17 @@ export function MatchColorPage() {
       objectUrlsRef.current.push(objectUrl);
 
       const image = await loadImageElement(objectUrl);
+      const fullResCanvas = document.createElement("canvas");
+      fullResCanvas.width = image.naturalWidth;
+      fullResCanvas.height = image.naturalHeight;
+      const fullCtx = fullResCanvas.getContext("2d", { willReadFrequently: true });
+      if (!fullCtx) {
+        throw new Error("Canvas context unavailable");
+      }
+      fullCtx.drawImage(image, 0, 0, fullResCanvas.width, fullResCanvas.height);
+      fullResCanvasRef.current = fullResCanvas;
+      setFullResReady(true);
+
       const canvas = resizeImageToCanvas(image, 680);
       sourceCanvasRef.current = canvas;
 
@@ -313,6 +438,18 @@ export function MatchColorPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function handlePreviewInspectTap(
+    event: ReactPointerEvent<HTMLCanvasElement | HTMLImageElement>
+  ) {
+    if (!fullResReady) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const nextX = clamp01((event.clientX - rect.left) / rect.width);
+    const nextY = clamp01((event.clientY - rect.top) / rect.height);
+    setInspectCenter({ x: nextX, y: nextY });
+    setInspectOpen(true);
   }
 
   useEffect(() => {
@@ -448,20 +585,76 @@ export function MatchColorPage() {
         <section className="card stack-sm">
           <div className="between">
             <h2>Preview</h2>
-            <button className="btn btn-light" onClick={loadMatchColorData} disabled={actionBusy}>
-              {loading ? "Refreshing..." : "Refresh Colors"}
-            </button>
+            <div className="row">
+              <button className="btn btn-light" onClick={loadMatchColorData} disabled={actionBusy}>
+                {loading ? "Refreshing..." : "Refresh Colors"}
+              </button>
+              <button
+                className="btn btn-light"
+                onClick={() => setInspectOpen((prev) => !prev)}
+                disabled={!fullResReady}
+              >
+                {inspectOpen ? "Hide Inspect" : "Inspect"}
+              </button>
+            </div>
           </div>
           <div className="match-preview-wrap">
             {sourceImageData ? (
-              <canvas ref={previewCanvasRef} className="match-preview-canvas" />
+              <canvas
+                ref={previewCanvasRef}
+                className="match-preview-canvas"
+                onPointerUp={handlePreviewInspectTap}
+              />
             ) : displayImageUrl ? (
-              <img className="preview-image" src={displayImageUrl} alt="Output preview" />
+              <img
+                className="preview-image"
+                src={displayImageUrl}
+                alt="Output preview"
+                onPointerUp={handlePreviewInspectTap}
+              />
             ) : (
               <div className="preview-placeholder">No preview available</div>
             )}
+            {fullResReady ? (
+              <span
+                className="inspect-focus-dot"
+                style={{
+                  left: `${inspectCenter.x * 100}%`,
+                  top: `${inspectCenter.y * 100}%`
+                }}
+                aria-hidden
+              />
+            ) : null}
           </div>
+          <p className="tiny muted inspect-help-text">Tap image to set inspect focus.</p>
         </section>
+
+        {inspectOpen ? (
+          <section className="card stack-sm">
+            <div className="between">
+              <h2>Inspect (High Quality)</h2>
+              <span className="chip">{inspectZoom.toFixed(1)}x</span>
+            </div>
+            <p className="tiny muted">
+              Zoomed crop from original image. Center crosshair shows current inspect point.
+            </p>
+            <div className="inspect-canvas-wrap">
+              <canvas ref={inspectCanvasRef} className="inspect-canvas" />
+            </div>
+            <label className="range-field">
+              <span>Inspect Zoom: {inspectZoom.toFixed(1)}x</span>
+              <input
+                className="range-input"
+                type="range"
+                min={1.2}
+                max={6}
+                step={0.1}
+                value={inspectZoom}
+                onInput={(event) => setInspectZoom(Number((event.currentTarget as HTMLInputElement).value))}
+              />
+            </label>
+          </section>
+        ) : null}
 
         <section className="card stack-sm">
           <h2>Adjust Colors</h2>

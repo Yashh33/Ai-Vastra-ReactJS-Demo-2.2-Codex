@@ -706,6 +706,8 @@ code {
 }
 
 .match-preview-wrap {
+  position: relative;
+  overflow: hidden;
   border-radius: 14px;
   border: 1px solid #334155;
   background: #111827;
@@ -719,6 +721,38 @@ code {
   height: auto;
   max-height: min(70vh, 540px);
   border-radius: 10px;
+  cursor: crosshair;
+}
+
+.inspect-focus-dot {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 2px solid rgb(248 250 252 / 95%);
+  box-shadow: 0 0 0 2px rgb(15 23 42 / 70%);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.inspect-help-text {
+  margin-top: 0.1rem;
+}
+
+.inspect-canvas-wrap {
+  border-radius: 12px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  padding: 0.35rem;
+}
+
+.inspect-canvas {
+  width: 100%;
+  height: auto;
+  min-height: 280px;
+  border-radius: 10px;
+  background: #111827;
+  display: block;
 }
 
 .swatch-row {
