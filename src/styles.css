@@ -180,12 +180,14 @@ code {
 
 .field input,
 .field textarea,
+.field select,
 .range-field input[type="range"] {
   font: inherit;
 }
 
 .field input,
-.field textarea {
+.field textarea,
+.field select {
   width: 100%;
   min-height: 44px;
   border: 1px solid #d8d1c6;
@@ -198,6 +200,16 @@ code {
 .field textarea {
   min-height: 92px;
   resize: vertical;
+}
+
+.field select {
+  min-height: 44px;
+  background:
+    linear-gradient(45deg, transparent 50%, #6b7280 50%) calc(100% - 16px) calc(50% - 3px) / 7px 7px no-repeat,
+    linear-gradient(135deg, #6b7280 50%, transparent 50%) calc(100% - 11px) calc(50% - 3px) / 7px 7px no-repeat,
+    #fff;
+  padding-right: 2rem;
+  appearance: none;
 }
 
 .btn {
@@ -438,6 +450,17 @@ code {
   color: #6b7280;
   text-align: center;
   padding: 0.8rem;
+}
+
+.fabric-draft-card {
+  border: 1px solid #dfd8cc;
+  border-radius: 14px;
+  padding: 0.65rem;
+  background: #fff;
+}
+
+.select-input {
+  font-weight: 700;
 }
 
 .output-tile {
@@ -921,3 +944,4 @@ code {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
+

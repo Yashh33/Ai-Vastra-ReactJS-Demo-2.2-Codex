@@ -42,6 +42,13 @@ export type FabricImageRow = {
 
 export type GenerationStatus = "queued" | "processing" | "done" | "failed" | string;
 
+export type ApplyToTarget = "shirt" | "pant" | "suit_full_body" | "suit_upper" | "koti";
+
+export type GenerationFabricAssignmentPayload = {
+  fabric_image_id: string;
+  apply_to: ApplyToTarget;
+};
+
 export type GenerationRow = {
   id: string;
   shop_id: string;

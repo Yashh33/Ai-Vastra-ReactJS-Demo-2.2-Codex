@@ -5,14 +5,40 @@ import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { createSignedUrl, uploadToStorage } from "../lib/storage";
 import type {
+  ApplyToTarget,
   FabricImageRow,
   FolderRow,
   GenerationCreateResponse,
+  GenerationFabricAssignmentPayload,
   GenerationRow,
   HeroImageRow,
   ShopContext
 } from "../lib/types";
 import { guessFileExtension, isPendingStatus, makeRandomSuffix } from "../lib/utils";
+
+type FabricDraft = {
+  draftId: string;
+  fabricImage: FabricImageRow | null;
+  previewUrl: string | null;
+  applyTo: ApplyToTarget | "";
+};
+
+const APPLY_TO_OPTIONS: Array<{ value: ApplyToTarget; label: string }> = [
+  { value: "shirt", label: "Shirt" },
+  { value: "pant", label: "Pant" },
+  { value: "suit_full_body", label: "Suit-Full Body" },
+  { value: "suit_upper", label: "Suit-Upper" },
+  { value: "koti", label: "Koti" }
+];
+
+function createEmptyFabricDraft(): FabricDraft {
+  return {
+    draftId: makeRandomSuffix(),
+    fabricImage: null,
+    previewUrl: null,
+    applyTo: ""
+  };
+}
 
 export function VisualizePage() {
   const { accessToken } = useAuth();
@@ -30,8 +56,8 @@ export function VisualizePage() {
   const [selectedHeroImageId, setSelectedHeroImageId] = useState("");
   const [selectedHeroPreviewUrl, setSelectedHeroPreviewUrl] = useState<string | null>(null);
 
-  const [selectedFabricImage, setSelectedFabricImage] = useState<FabricImageRow | null>(null);
-  const [selectedFabricPreviewUrl, setSelectedFabricPreviewUrl] = useState<string | null>(null);
+  const [fabricDrafts, setFabricDrafts] = useState<FabricDraft[]>([createEmptyFabricDraft()]);
+  const [activeFabricDraftId, setActiveFabricDraftId] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [uploadingFabric, setUploadingFabric] = useState(false);
@@ -47,6 +73,11 @@ export function VisualizePage() {
   const selectedHero = useMemo(
     () => heroImages.find((hero) => hero.id === selectedHeroImageId) ?? null,
     [heroImages, selectedHeroImageId]
+  );
+
+  const configuredFabricCount = useMemo(
+    () => fabricDrafts.filter((item) => item.fabricImage && item.applyTo).length,
+    [fabricDrafts]
   );
 
   const actionBusy = loading || uploadingFabric || creatingGeneration || !!visualizingGenerationId;
@@ -117,16 +148,6 @@ export function VisualizePage() {
   }, [selectedHero?.id, selectedHero?.storage_path]);
 
   useEffect(() => {
-    if (!selectedFabricImage?.storage_path) {
-      setSelectedFabricPreviewUrl(null);
-      return;
-    }
-    createSignedUrl("fabric-images", selectedFabricImage.storage_path, 3600)
-      .then((signed) => setSelectedFabricPreviewUrl(signed))
-      .catch(() => setSelectedFabricPreviewUrl(null));
-  }, [selectedFabricImage?.id, selectedFabricImage?.storage_path]);
-
-  useEffect(() => {
     if (!accessToken || !visualizingGenerationId) return;
     let cancelled = false;
 
@@ -169,8 +190,8 @@ export function VisualizePage() {
     };
   }, [visualizingGenerationId, accessToken, navigate]);
 
-  async function handleFabricPicked(file: File | null) {
-    if (!file || !accessToken || !shopContext) return;
+  async function handleFabricPicked(file: File | null, draftId: string | null) {
+    if (!file || !accessToken || !shopContext || !draftId) return;
     setUploadingFabric(true);
     try {
       const ext = guessFileExtension(file.name, file.type);
@@ -192,23 +213,119 @@ export function VisualizePage() {
         })
       });
 
-      setSelectedFabricImage(row);
+      const preview = await createSignedUrl("fabric-images", row.storage_path, 3600).catch(() => null);
+
+      setFabricDrafts((prev) =>
+        prev.map((item) =>
+          item.draftId === draftId
+            ? {
+                ...item,
+                fabricImage: row,
+                previewUrl: preview
+              }
+            : item
+        )
+      );
+
       setStatusText("Fabric image selected.");
     } catch (err) {
       setStatusText(`Fabric upload failed: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
       setUploadingFabric(false);
+      setActiveFabricDraftId(null);
       if (galleryInputRef.current) galleryInputRef.current.value = "";
       if (cameraInputRef.current) cameraInputRef.current.value = "";
     }
   }
 
   function onFabricGalleryChange(event: ChangeEvent<HTMLInputElement>) {
-    void handleFabricPicked(event.target.files?.[0] ?? null);
+    void handleFabricPicked(event.target.files?.[0] ?? null, activeFabricDraftId);
   }
 
   function onFabricCameraChange(event: ChangeEvent<HTMLInputElement>) {
-    void handleFabricPicked(event.target.files?.[0] ?? null);
+    void handleFabricPicked(event.target.files?.[0] ?? null, activeFabricDraftId);
+  }
+
+  function openFabricPicker(draftId: string, mode: "camera" | "gallery") {
+    if (actionBusy) return;
+    setActiveFabricDraftId(draftId);
+    if (mode === "camera") {
+      cameraInputRef.current?.click();
+      return;
+    }
+    galleryInputRef.current?.click();
+  }
+
+  function handleApplyToChange(draftId: string, value: string) {
+    const normalized = value as ApplyToTarget | "";
+    setFabricDrafts((prev) =>
+      prev.map((item) =>
+        item.draftId === draftId
+          ? {
+              ...item,
+              applyTo: normalized
+            }
+          : item
+      )
+    );
+  }
+
+  function handleAddFabric() {
+    if (fabricDrafts.length >= 3) {
+      setStatusText("Maximum 3 fabrics allowed in one generation.");
+      return;
+    }
+    setFabricDrafts((prev) => [...prev, createEmptyFabricDraft()]);
+  }
+
+  function handleRemoveFabric(draftId: string) {
+    setFabricDrafts((prev) => {
+      if (prev.length <= 1) {
+        return [createEmptyFabricDraft()];
+      }
+      return prev.filter((item) => item.draftId !== draftId);
+    });
+  }
+
+  function buildGenerationFabrics(): GenerationFabricAssignmentPayload[] | null {
+    const touched = fabricDrafts.filter((item) => item.fabricImage || item.applyTo);
+
+    if (!touched.length) {
+      setStatusText("Upload at least one fabric image.");
+      return null;
+    }
+
+    const payload: GenerationFabricAssignmentPayload[] = [];
+
+    for (const [index, item] of touched.entries()) {
+      if (!item.fabricImage?.id) {
+        setStatusText(`Fabric image missing in slot ${index + 1}.`);
+        return null;
+      }
+      if (!item.applyTo) {
+        setStatusText(`Select Apply to for fabric slot ${index + 1}.`);
+        return null;
+      }
+
+      payload.push({
+        fabric_image_id: item.fabricImage.id,
+        apply_to: item.applyTo
+      });
+    }
+
+    const targets = payload.map((item) => item.apply_to);
+    const uniqueTargets = new Set(targets);
+    if (uniqueTargets.size !== targets.length) {
+      setStatusText("Duplicate Apply to values are not allowed.");
+      return null;
+    }
+
+    if (payload.length > 1 && targets.includes("suit_full_body")) {
+      setStatusText("Suit-Full Body cannot be combined with other Apply to values.");
+      return null;
+    }
+
+    return payload;
   }
 
   async function handleCreateGeneration() {
@@ -217,8 +334,15 @@ export function VisualizePage() {
       setStatusText("Select a hero image first.");
       return;
     }
-    if (!selectedFabricImage?.id) {
-      setStatusText("Upload or capture a fabric image first.");
+
+    const generationFabrics = buildGenerationFabrics();
+    if (!generationFabrics?.length) {
+      return;
+    }
+
+    const primaryFabric = generationFabrics[0];
+    if (!primaryFabric) {
+      setStatusText("Upload at least one fabric image.");
       return;
     }
 
@@ -229,7 +353,9 @@ export function VisualizePage() {
         method: "POST",
         body: JSON.stringify({
           hero_image_id: selectedHeroImageId,
-          fabric_image_id: selectedFabricImage.id
+          // Keep legacy field for backward-compatible backend paths.
+          fabric_image_id: primaryFabric.fabric_image_id,
+          fabrics: generationFabrics
         })
       });
 
@@ -248,7 +374,7 @@ export function VisualizePage() {
         <header className="page-header">
           <div>
             <h1>Visualize</h1>
-            <p className="muted">Select hero image + fabric image, then generate.</p>
+            <p className="muted">Select hero image + one or more fabrics, then generate.</p>
           </div>
           <button className="btn btn-light" onClick={() => navigate(-1)}>
             Back
@@ -280,29 +406,72 @@ export function VisualizePage() {
         </section>
 
         <section className="card stack-sm">
-          <h2>Fabric Image Selection</h2>
-          {selectedFabricPreviewUrl ? (
-            <img className="preview-image" src={selectedFabricPreviewUrl} alt="Selected fabric" />
-          ) : (
-            <div className="preview-placeholder">Capture or choose a fabric image</div>
-          )}
-
-          <div className="row">
-            <button
-              className="btn btn-light flex-1"
-              onClick={() => cameraInputRef.current?.click()}
-              disabled={actionBusy}
-            >
-              Capture
-            </button>
-            <button
-              className="btn btn-light flex-1"
-              onClick={() => galleryInputRef.current?.click()}
-              disabled={actionBusy}
-            >
-              Gallery
-            </button>
+          <div className="between">
+            <h2>Fabric Image Selection</h2>
+            <span className="chip">{configuredFabricCount}/{fabricDrafts.length} configured</span>
           </div>
+
+          {fabricDrafts.map((item, index) => (
+            <article className="fabric-draft-card stack-sm" key={item.draftId}>
+              <div className="between">
+                <p className="tiny"><strong>Fabric {index + 1}</strong></p>
+                {fabricDrafts.length > 1 ? (
+                  <button
+                    className="btn btn-light"
+                    type="button"
+                    onClick={() => handleRemoveFabric(item.draftId)}
+                    disabled={actionBusy}
+                  >
+                    Remove
+                  </button>
+                ) : null}
+              </div>
+
+              {item.previewUrl ? (
+                <img className="preview-image" src={item.previewUrl} alt={`Fabric ${index + 1}`} />
+              ) : (
+                <div className="preview-placeholder">Capture or choose a fabric image</div>
+              )}
+
+              <label className="field">
+                <span>Apply to</span>
+                <select
+                  className="select-input"
+                  value={item.applyTo}
+                  onChange={(event) => handleApplyToChange(item.draftId, event.target.value)}
+                  disabled={actionBusy}
+                >
+                  <option value="">Select target garment</option>
+                  {APPLY_TO_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="row">
+                <button
+                  className="btn btn-light flex-1"
+                  onClick={() => openFabricPicker(item.draftId, "camera")}
+                  disabled={actionBusy}
+                >
+                  Capture
+                </button>
+                <button
+                  className="btn btn-light flex-1"
+                  onClick={() => openFabricPicker(item.draftId, "gallery")}
+                  disabled={actionBusy}
+                >
+                  Gallery
+                </button>
+              </div>
+            </article>
+          ))}
+
+          <button className="btn btn-light" onClick={handleAddFabric} disabled={actionBusy || fabricDrafts.length >= 3}>
+            Add Fabric
+          </button>
 
           <input
             ref={cameraInputRef}
@@ -325,7 +494,7 @@ export function VisualizePage() {
           <h2>Generate</h2>
           <button
             className="btn btn-dark"
-            disabled={actionBusy || !selectedHeroImageId || !selectedFabricImage?.id}
+            disabled={actionBusy || !selectedHeroImageId || configuredFabricCount === 0}
             onClick={handleCreateGeneration}
           >
             {creatingGeneration ? "Starting..." : "Generate"}
@@ -342,3 +511,5 @@ export function VisualizePage() {
     </main>
   );
 }
+
+
