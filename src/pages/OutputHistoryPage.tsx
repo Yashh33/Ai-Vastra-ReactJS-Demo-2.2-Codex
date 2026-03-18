@@ -84,6 +84,10 @@ export function OutputHistoryPage() {
     () => rows.filter((row) => row.status === "done" && !!row.output_path),
     [rows]
   );
+  function getFabricSummaryLabel(row: GenerationRow) {
+    const label = row.fabric_summary_label?.trim();
+    return label || "Garment";
+  }
 
   async function getDownloadUrl(generationId: string) {
     if (!accessToken) throw new Error("Missing access token");
@@ -253,7 +257,7 @@ export function OutputHistoryPage() {
                 </button>
 
                 <div className="catalog-meta-row">
-                  <p className="catalog-garment-label">Garment</p>
+                  <p className="catalog-garment-label">{getFabricSummaryLabel(row)}</p>
                   <div className="catalog-action-row">
                     <button
                       className="catalog-chip-btn catalog-chip-delete"
@@ -281,3 +285,4 @@ export function OutputHistoryPage() {
     </main>
   );
 }
+

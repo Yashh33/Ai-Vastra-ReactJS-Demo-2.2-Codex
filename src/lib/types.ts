@@ -47,6 +47,16 @@ export type ApplyToTarget = "shirt" | "pant" | "suit_full_body" | "suit_upper" |
 export type GenerationFabricAssignmentPayload = {
   fabric_image_id: string;
   apply_to: ApplyToTarget;
+  fabric_code: string;
+  fabric_color?: string | null;
+};
+
+export type GenerationFabricSnapshot = {
+  generation_id: string;
+  apply_to: ApplyToTarget | string;
+  sort_order: number;
+  fabric_code: string | null;
+  fabric_color: string | null;
 };
 
 export type GenerationRow = {
@@ -64,6 +74,8 @@ export type GenerationRow = {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
+  fabric_summary_label?: string;
+  generation_fabrics?: GenerationFabricSnapshot[];
 };
 
 export type GenerationCreateResponse = {
@@ -95,3 +107,4 @@ export type MatchColorEditPayload = {
   saturation_delta_percent: number;
   lightness_delta_percent: number;
 };
+

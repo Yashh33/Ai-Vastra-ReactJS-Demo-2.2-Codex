@@ -21,6 +21,8 @@ type FabricDraft = {
   fabricImage: FabricImageRow | null;
   previewUrl: string | null;
   applyTo: ApplyToTarget | "";
+  fabricCode: string;
+  fabricColor: string;
 };
 
 const APPLY_TO_OPTIONS: Array<{ value: ApplyToTarget; label: string }> = [
@@ -36,7 +38,9 @@ function createEmptyFabricDraft(): FabricDraft {
     draftId: makeRandomSuffix(),
     fabricImage: null,
     previewUrl: null,
-    applyTo: ""
+    applyTo: "",
+    fabricCode: "",
+    fabricColor: ""
   };
 }
 
@@ -76,7 +80,7 @@ export function VisualizePage() {
   );
 
   const configuredFabricCount = useMemo(
-    () => fabricDrafts.filter((item) => item.fabricImage && item.applyTo).length,
+    () => fabricDrafts.filter((item) => item.fabricImage && item.applyTo && item.fabricCode.trim()).length,
     [fabricDrafts]
   );
 
@@ -270,6 +274,32 @@ export function VisualizePage() {
     );
   }
 
+  function handleFabricCodeChange(draftId: string, value: string) {
+    setFabricDrafts((prev) =>
+      prev.map((item) =>
+        item.draftId === draftId
+          ? {
+              ...item,
+              fabricCode: value
+            }
+          : item
+      )
+    );
+  }
+
+  function handleFabricColorChange(draftId: string, value: string) {
+    setFabricDrafts((prev) =>
+      prev.map((item) =>
+        item.draftId === draftId
+          ? {
+              ...item,
+              fabricColor: value
+            }
+          : item
+      )
+    );
+  }
+
   function handleAddFabric() {
     if (fabricDrafts.length >= 3) {
       setStatusText("Maximum 3 fabrics allowed in one generation.");
@@ -288,7 +318,7 @@ export function VisualizePage() {
   }
 
   function buildGenerationFabrics(): GenerationFabricAssignmentPayload[] | null {
-    const touched = fabricDrafts.filter((item) => item.fabricImage || item.applyTo);
+    const touched = fabricDrafts.filter((item) => item.fabricImage || item.applyTo || item.fabricCode.trim() || item.fabricColor.trim());
 
     if (!touched.length) {
       setStatusText("Upload at least one fabric image.");
@@ -306,10 +336,17 @@ export function VisualizePage() {
         setStatusText(`Select Apply to for fabric slot ${index + 1}.`);
         return null;
       }
+      const fabricCode = item.fabricCode.trim();
+      if (!fabricCode) {
+        setStatusText(`Enter Fabric Code for slot ${index + 1}.`);
+        return null;
+      }
 
       payload.push({
         fabric_image_id: item.fabricImage.id,
-        apply_to: item.applyTo
+        apply_to: item.applyTo,
+        fabric_code: fabricCode,
+        fabric_color: item.fabricColor.trim() || null
       });
     }
 
@@ -450,6 +487,28 @@ export function VisualizePage() {
                 </select>
               </label>
 
+              <label className="field">
+                <span>Fabric Code <strong>*</strong></span>
+                <input
+                  type="text"
+                  value={item.fabricCode}
+                  onChange={(event) => handleFabricCodeChange(item.draftId, event.target.value)}
+                  disabled={actionBusy}
+                  placeholder="e.g. F123"
+                />
+              </label>
+
+              <label className="field">
+                <span>Fabric Color (optional)</span>
+                <input
+                  type="text"
+                  value={item.fabricColor}
+                  onChange={(event) => handleFabricColorChange(item.draftId, event.target.value)}
+                  disabled={actionBusy}
+                  placeholder="e.g. Navy Blue"
+                />
+              </label>
+
               <div className="row">
                 <button
                   className="btn btn-light flex-1"
@@ -511,5 +570,4 @@ export function VisualizePage() {
     </main>
   );
 }
-
 

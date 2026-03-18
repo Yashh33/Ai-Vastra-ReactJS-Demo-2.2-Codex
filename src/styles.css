@@ -649,6 +649,9 @@ code {
   font-size: 0.83rem;
   color: #111827;
   font-weight: 700;
+  line-height: 1.25;
+  flex: 1;
+  min-width: 0;
 }
 
 .catalog-action-row {
