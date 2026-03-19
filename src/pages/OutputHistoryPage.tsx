@@ -9,6 +9,11 @@ import { withCacheBust } from "../lib/utils";
 
 type PreviewMap = Record<string, string>;
 
+type HistoryFilters = {
+  fabricCode: string;
+  fabricColor: string;
+};
+
 function RefreshIcon() {
   return (
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden focusable="false">
@@ -69,6 +74,28 @@ function DownloadIcon() {
   );
 }
 
+function buildHistoryPath(filters: HistoryFilters) {
+  const params = new URLSearchParams();
+  params.set("status", "done");
+  params.set("limit", "100");
+
+  if (filters.fabricCode) {
+    params.set("fabric_code", filters.fabricCode);
+  }
+  if (filters.fabricColor) {
+    params.set("fabric_color", filters.fabricColor);
+  }
+
+  return `/generations?${params.toString()}`;
+}
+
+function summarizeFilters(filters: HistoryFilters) {
+  const parts: string[] = [];
+  if (filters.fabricCode) parts.push(`code: ${filters.fabricCode}`);
+  if (filters.fabricColor) parts.push(`color: ${filters.fabricColor}`);
+  return parts.join(", ");
+}
+
 export function OutputHistoryPage() {
   const { accessToken } = useAuth();
   const navigate = useNavigate();
@@ -80,10 +107,15 @@ export function OutputHistoryPage() {
   const [downloadingGenerationId, setDownloadingGenerationId] = useState<string | null>(null);
   const [deletingGenerationId, setDeletingGenerationId] = useState<string | null>(null);
 
+  const [fabricCodeInput, setFabricCodeInput] = useState("");
+  const [fabricColorInput, setFabricColorInput] = useState("");
+  const [appliedFilters, setAppliedFilters] = useState<HistoryFilters>({ fabricCode: "", fabricColor: "" });
+
   const visibleRows = useMemo(
     () => rows.filter((row) => row.status === "done" && !!row.output_path),
     [rows]
   );
+
   function getFabricSummaryLabel(row: GenerationRow) {
     const label = row.fabric_summary_label?.trim();
     return label || "Garment";
@@ -99,16 +131,23 @@ export function OutputHistoryPage() {
     return withCacheBust(response.download_url);
   }
 
-  async function loadHistory() {
+  async function loadHistory(filters: HistoryFilters) {
     if (!accessToken) return;
     setLoading(true);
     try {
       setPreviewUrls({});
-      const rows = await apiFetch<GenerationRow[]>("/generations?status=done&limit=100", accessToken, {
+      const path = buildHistoryPath(filters);
+      const rows = await apiFetch<GenerationRow[]>(path, accessToken, {
         method: "GET"
       });
       setRows(rows);
-      setStatusText(rows.length ? `Loaded ${rows.length} output image(s)` : "No outputs yet.");
+
+      const filterSummary = summarizeFilters(filters);
+      if (!rows.length) {
+        setStatusText(filterSummary ? `No outputs found for ${filterSummary}.` : "No outputs yet.");
+      } else {
+        setStatusText(filterSummary ? `Loaded ${rows.length} output image(s) for ${filterSummary}.` : `Loaded ${rows.length} output image(s)`);
+      }
     } catch (err) {
       setStatusText(`Failed to load output history: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
@@ -117,8 +156,8 @@ export function OutputHistoryPage() {
   }
 
   useEffect(() => {
-    loadHistory();
-  }, [accessToken]);
+    void loadHistory(appliedFilters);
+  }, [accessToken, appliedFilters]);
 
   useEffect(() => {
     if (!accessToken || !visibleRows.length) return;
@@ -148,6 +187,19 @@ export function OutputHistoryPage() {
         // best effort previews
       });
   }, [accessToken, visibleRows, previewUrls]);
+
+  function applyFilters() {
+    setAppliedFilters({
+      fabricCode: fabricCodeInput.trim(),
+      fabricColor: fabricColorInput.trim()
+    });
+  }
+
+  function clearFilters() {
+    setFabricCodeInput("");
+    setFabricColorInput("");
+    setAppliedFilters({ fabricCode: "", fabricColor: "" });
+  }
 
   async function handleQuickDownload(row: GenerationRow) {
     if (!row.output_path) return;
@@ -220,7 +272,7 @@ export function OutputHistoryPage() {
           <div className="catalog-header-actions">
             <button
               className="catalog-icon-btn"
-              onClick={loadHistory}
+              onClick={() => loadHistory(appliedFilters)}
               disabled={loading}
               aria-label="Refresh"
               title="Refresh"
@@ -232,6 +284,41 @@ export function OutputHistoryPage() {
             </button>
           </div>
         </header>
+
+        <section className="card stack-sm">
+          <h2>Filters</h2>
+          <div className="row">
+            <label className="field flex-1">
+              <span>Fabric Code</span>
+              <input
+                type="text"
+                value={fabricCodeInput}
+                onChange={(event) => setFabricCodeInput(event.target.value)}
+                placeholder="e.g. LAX123"
+                disabled={loading}
+              />
+            </label>
+            <label className="field flex-1">
+              <span>Fabric Color</span>
+              <input
+                type="text"
+                value={fabricColorInput}
+                onChange={(event) => setFabricColorInput(event.target.value)}
+                placeholder="e.g. White"
+                disabled={loading}
+              />
+            </label>
+          </div>
+          <div className="row">
+            <button className="btn btn-dark" onClick={applyFilters} disabled={loading}>
+              Apply Filters
+            </button>
+            <button className="btn btn-light" onClick={clearFilters} disabled={loading}>
+              Clear
+            </button>
+          </div>
+          <p className="tiny muted">{statusText}</p>
+        </section>
 
         {loading ? (
           <div className="loading-box">
