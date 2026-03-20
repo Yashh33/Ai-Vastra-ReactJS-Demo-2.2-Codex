@@ -37,10 +37,10 @@ export function HomePage() {
     <main className="screen">
       <section className="page-shell">
         <header className="hero-panel">
-          <h1>Ai Vastra</h1>
-          <p className="muted">Shop account</p>
-          <p className="tiny">{statusText}</p>
-          <p className="tiny muted">{shopContext?.shop_id ? `Shop ID: ${shopContext.shop_id}` : ""}</p>
+          <h1>Create Looks</h1>
+          <p className="muted-light">Shop account</p>
+          <p className="tiny muted-light">{statusText}</p>
+          <p className="tiny muted-light">{shopContext?.shop_id ? `Shop ID: ${shopContext.shop_id}` : ""}</p>
         </header>
 
         <button className="home-card home-card-visualize" onClick={() => navigate("/visualize")}>
@@ -62,6 +62,9 @@ export function HomePage() {
         </button>
 
         <div className="row">
+          <button className="btn btn-light flex-1" onClick={() => navigate("/")}>
+            Switch Mode
+          </button>
           <button className="btn btn-light flex-1" onClick={handleLogout}>
             Logout
           </button>

@@ -292,6 +292,34 @@ code {
   background: var(--accent-rose);
 }
 
+.mode-card {
+  min-height: 124px;
+  border: 1px solid #d7d1c6;
+  border-radius: 18px;
+  padding: 1rem;
+  text-align: left;
+  display: grid;
+  gap: 0.35rem;
+  cursor: pointer;
+}
+
+.mode-card strong {
+  font-size: 1.3rem;
+}
+
+.mode-card span {
+  color: #374151;
+  font-size: 0.83rem;
+}
+
+.mode-card-create {
+  background: #e9f3ff;
+}
+
+.mode-card-catalog {
+  background: #f8ecd8;
+}
+
 .switch-row {
   display: inline-flex;
   align-items: center;
@@ -947,4 +975,5 @@ code {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
+
 
