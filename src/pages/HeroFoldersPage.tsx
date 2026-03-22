@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { apiFetch } from "../lib/api";
@@ -19,11 +19,7 @@ export function HeroFoldersPage() {
   const [folders, setFolders] = useState<FolderRow[]>([]);
   const [includeInactive, setIncludeInactive] = useState(true);
   const [loading, setLoading] = useState(false);
-  const [creating, setCreating] = useState(false);
   const [statusText, setStatusText] = useState("Loading folders...");
-
-  const [name, setName] = useState("");
-  const [promptTemplate, setPromptTemplate] = useState("");
 
   async function loadFolders() {
     if (!accessToken) return;
@@ -36,7 +32,7 @@ export function HeroFoldersPage() {
       );
 
       setFolders(rows);
-      setStatusText(rows.length ? `Loaded ${rows.length} folder(s)` : "No folders yet");
+      setStatusText(rows.length ? `Loaded ${rows.length} folder(s)` : "No folders found");
     } catch (err) {
       setStatusText(`Failed to load folders: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
@@ -45,37 +41,8 @@ export function HeroFoldersPage() {
   }
 
   useEffect(() => {
-    loadFolders();
+    void loadFolders();
   }, [accessToken, includeInactive]);
-
-  async function onCreateFolder(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!accessToken) return;
-    if (!name.trim()) {
-      setStatusText("Folder name is required");
-      return;
-    }
-
-    setCreating(true);
-    try {
-      await apiFetch<FolderRow>("/folders", accessToken, {
-        method: "POST",
-        body: JSON.stringify({
-          name: name.trim(),
-          prompt_template: promptTemplate.trim()
-        })
-      });
-
-      setName("");
-      setPromptTemplate("");
-      setStatusText("Folder created");
-      await loadFolders();
-    } catch (err) {
-      setStatusText(`Create failed: ${err instanceof Error ? err.message : "Unknown error"}`);
-    } finally {
-      setCreating(false);
-    }
-  }
 
   function openFolder(folderId: string) {
     const query = pickerMode ? "?picker=1" : "";
@@ -91,41 +58,10 @@ export function HeroFoldersPage() {
             <p className="muted">
               {pickerMode
                 ? "Pick a folder, then choose a hero image for Visualize."
-                : "Create folders and open a folder to manage hero images."}
+                : "Open a folder to manage hero images."}
             </p>
           </div>
-          <button className="btn btn-light" onClick={() => navigate(-1)}>
-            Back
-          </button>
         </header>
-
-        <section className="card stack-sm">
-          <h2>Create Folder</h2>
-          <form className="stack-sm" onSubmit={onCreateFolder}>
-            <label className="field">
-              <span>Folder name</span>
-              <input
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="e.g. Saree, Suit, Shirt"
-                disabled={creating}
-              />
-            </label>
-            <label className="field">
-              <span>Prompt template (optional)</span>
-              <textarea
-                value={promptTemplate}
-                onChange={(event) => setPromptTemplate(event.target.value)}
-                placeholder="Category-specific prompt instructions"
-                rows={4}
-                disabled={creating}
-              />
-            </label>
-            <button className="btn btn-dark" type="submit" disabled={creating}>
-              {creating ? "Creating..." : "Create Folder"}
-            </button>
-          </form>
-        </section>
 
         <section className="card stack-sm">
           <div className="between">
@@ -139,7 +75,7 @@ export function HeroFoldersPage() {
                 />
                 <span>Show inactive</span>
               </label>
-              <button className="btn btn-light" onClick={loadFolders} disabled={loading}>
+              <button className="btn btn-light" onClick={() => void loadFolders()} disabled={loading}>
                 {loading ? "Refreshing..." : "Refresh"}
               </button>
             </div>
@@ -179,3 +115,4 @@ export function HeroFoldersPage() {
     </main>
   );
 }
+

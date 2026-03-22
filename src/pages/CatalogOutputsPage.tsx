@@ -123,14 +123,6 @@ export function CatalogOutputsPage() {
       <section className="catalog-shell">
         <header className="catalog-header">
           <div className="catalog-header-left">
-            <button
-              className="catalog-back-btn"
-              onClick={() => navigate("/catalog")}
-              aria-label="Back to folders"
-            >
-              <span aria-hidden>&larr;</span>
-            </button>
-
             <div className="catalog-brand-mark" aria-hidden>
               AV
             </div>
@@ -184,3 +176,6 @@ export function CatalogOutputsPage() {
     </main>
   );
 }
+
+
+

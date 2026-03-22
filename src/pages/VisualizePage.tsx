@@ -413,10 +413,7 @@ export function VisualizePage() {
             <h1>Visualize</h1>
             <p className="muted">Select hero image + one or more fabrics, then generate.</p>
           </div>
-          <button className="btn btn-light" onClick={() => navigate(-1)}>
-            Back
-          </button>
-        </header>
+          </header>
 
         <section className="card stack-sm">
           <p className="tiny">{statusText}</p>
@@ -570,4 +567,7 @@ export function VisualizePage() {
     </main>
   );
 }
+
+
+
 

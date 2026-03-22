@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
+import { AppShell } from "./components/AppShell";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { CatalogFoldersPage } from "./pages/CatalogFoldersPage";
 import { CatalogOutputsPage } from "./pages/CatalogOutputsPage";
@@ -20,17 +21,19 @@ export function AppRouter() {
       <Route path="/login" element={<LoginPage />} />
 
       <Route element={<ProtectedRoute />}>
-        <Route path="/" element={<ModeSelectionPage />} />
-        <Route path="/create-looks" element={<HomePage />} />
-        <Route path="/catalog" element={<CatalogFoldersPage />} />
-        <Route path="/catalog/folders/:folderId" element={<CatalogOutputsPage />} />
-        <Route path="/hero-folders" element={<HeroFoldersPage />} />
-        <Route path="/hero-folders/:folderId" element={<HeroFolderDetailPage />} />
-        <Route path="/visualize" element={<VisualizePage />} />
-        <Route path="/output-history" element={<OutputHistoryPage />} />
-        <Route path="/output-viewer" element={<OutputViewerPage />} />
-        <Route path="/match-color" element={<MatchColorPage />} />
-        <Route path="/carousel" element={<CarouselPage />} />
+        <Route element={<AppShell />}>
+          <Route path="/" element={<ModeSelectionPage />} />
+          <Route path="/create-looks" element={<HomePage />} />
+          <Route path="/catalog" element={<CatalogFoldersPage />} />
+          <Route path="/catalog/folders/:folderId" element={<CatalogOutputsPage />} />
+          <Route path="/hero-folders" element={<HeroFoldersPage />} />
+          <Route path="/hero-folders/:folderId" element={<HeroFolderDetailPage />} />
+          <Route path="/visualize" element={<VisualizePage />} />
+          <Route path="/output-history" element={<OutputHistoryPage />} />
+          <Route path="/output-viewer" element={<OutputViewerPage />} />
+          <Route path="/match-color" element={<MatchColorPage />} />
+          <Route path="/carousel" element={<CarouselPage />} />
+        </Route>
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

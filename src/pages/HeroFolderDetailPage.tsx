@@ -4,6 +4,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { createSignedUrl, uploadToStorage } from "../lib/storage";
+import { supabase } from "../lib/supabase";
 import type { FolderRow, HeroImageRow, ShopContext } from "../lib/types";
 import { formatDateLabel, guessFileExtension, makeRandomSuffix } from "../lib/utils";
 
@@ -29,6 +30,7 @@ export function HeroFolderDetailPage() {
   const [previewUrls, setPreviewUrls] = useState<PreviewMap>({});
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [deletingImageId, setDeletingImageId] = useState<string | null>(null);
   const [statusText, setStatusText] = useState("Loading folder...");
 
   const sortedImages = useMemo(
@@ -67,7 +69,7 @@ export function HeroFolderDetailPage() {
   }
 
   useEffect(() => {
-    loadFolderAndImages();
+    void loadFolderAndImages();
   }, [accessToken, folderId]);
 
   useEffect(() => {
@@ -140,6 +142,52 @@ export function HeroFolderDetailPage() {
     void handleUploadFile(event.target.files?.[0] ?? null);
   }
 
+  async function handleDeleteImage(row: HeroImageRow) {
+    if (!shopContext || deletingImageId) return;
+
+    const confirmed = window.confirm("Delete this hero image? It will no longer be available for Visualize.");
+    if (!confirmed) return;
+
+    setDeletingImageId(row.id);
+    try {
+      const { error: metadataDeleteError } = await supabase
+        .from("hero_images")
+        .delete()
+        .eq("id", row.id)
+        .eq("shop_id", shopContext.shop_id);
+
+      if (metadataDeleteError) {
+        const message = metadataDeleteError.message || "Delete failed";
+        if (message.toLowerCase().includes("foreign key")) {
+          throw new Error("This hero image is already used in generation history and cannot be deleted.");
+        }
+        throw new Error(message);
+      }
+
+      const { error: storageDeleteError } = await supabase.storage
+        .from("hero-images")
+        .remove([row.storage_path]);
+
+      setImages((prev) => prev.filter((image) => image.id !== row.id));
+      setPreviewUrls((prev) => {
+        if (!prev[row.id]) return prev;
+        const next = { ...prev };
+        delete next[row.id];
+        return next;
+      });
+
+      if (storageDeleteError) {
+        setStatusText(`Hero image removed, but storage cleanup failed: ${storageDeleteError.message}`);
+      } else {
+        setStatusText("Hero image deleted");
+      }
+    } catch (err) {
+      setStatusText(`Delete failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setDeletingImageId(null);
+    }
+  }
+
   async function onImageClick(row: HeroImageRow) {
     let imageUrl = previewUrls[row.id] || "";
     if (!imageUrl) {
@@ -182,9 +230,6 @@ export function HeroFolderDetailPage() {
                 : "Manage hero images. Tap any image to open detailed view."}
             </p>
           </div>
-          <button className="btn btn-light" onClick={() => navigate(-1)}>
-            Back
-          </button>
         </header>
 
         <section className="card stack-sm">
@@ -194,19 +239,23 @@ export function HeroFolderDetailPage() {
             <button
               className="btn btn-dark flex-1"
               onClick={() => galleryInputRef.current?.click()}
-              disabled={uploading || loading}
+              disabled={uploading || loading || !!deletingImageId}
             >
               {uploading ? "Uploading..." : "Add from Gallery"}
             </button>
             <button
               className="btn btn-light flex-1"
               onClick={() => cameraInputRef.current?.click()}
-              disabled={uploading || loading}
+              disabled={uploading || loading || !!deletingImageId}
             >
               Use Camera
             </button>
           </div>
-          <button className="btn btn-light" onClick={loadFolderAndImages} disabled={loading || uploading}>
+          <button
+            className="btn btn-light"
+            onClick={() => void loadFolderAndImages()}
+            disabled={loading || uploading || !!deletingImageId}
+          >
             {loading ? "Refreshing..." : "Refresh Images"}
           </button>
 
@@ -236,19 +285,39 @@ export function HeroFolderDetailPage() {
             <div className="empty-box">No hero images in this folder yet.</div>
           ) : (
             <div className="tile-grid">
-              {sortedImages.map((row) => (
-                <button key={row.id} className="image-tile" onClick={() => void onImageClick(row)}>
-                  {previewUrls[row.id] ? (
-                    <img src={previewUrls[row.id]} alt={row.original_filename ?? row.id} />
-                  ) : (
-                    <div className="image-placeholder">
-                      <div className="spinner spinner-small" />
+              {sortedImages.map((row) => {
+                const isDeleting = deletingImageId === row.id;
+                return (
+                  <article key={row.id} className="image-tile">
+                    <button
+                      className="image-tile-press"
+                      onClick={() => void onImageClick(row)}
+                      disabled={isDeleting}
+                    >
+                      {previewUrls[row.id] ? (
+                        <img src={previewUrls[row.id]} alt={row.original_filename ?? row.id} />
+                      ) : (
+                        <div className="image-placeholder">
+                          <div className="spinner spinner-small" />
+                        </div>
+                      )}
+                    </button>
+                    <div className="image-tile-footer">
+                      <div className="tile-meta-stack">
+                        {pickerMode ? <span className="tile-chip">Tap to Select</span> : null}
+                        <span className="tiny muted">{formatDateLabel(row.created_at)}</span>
+                      </div>
+                      <button
+                        className="tile-delete-btn"
+                        onClick={() => void handleDeleteImage(row)}
+                        disabled={!!deletingImageId || loading || uploading}
+                      >
+                        {isDeleting ? "Deleting..." : "Delete"}
+                      </button>
                     </div>
-                  )}
-                  {pickerMode ? <span className="tile-chip">Tap to Select</span> : null}
-                  <span className="tiny muted">{formatDateLabel(row.created_at)}</span>
-                </button>
-              ))}
+                  </article>
+                );
+              })}
             </div>
           )}
         </section>
@@ -256,3 +325,4 @@ export function HeroFolderDetailPage() {
     </main>
   );
 }
+

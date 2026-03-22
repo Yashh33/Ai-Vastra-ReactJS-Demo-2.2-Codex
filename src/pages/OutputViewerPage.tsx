@@ -221,9 +221,6 @@ export function OutputViewerPage() {
       <section className="page-shell viewer-shell">
         <header className="page-header">
           <h1>{title}</h1>
-          <button className="btn btn-light" onClick={handleClose}>
-            Close
-          </button>
         </header>
 
         <p className="tiny muted">{statusText}</p>
@@ -310,3 +307,5 @@ export function OutputViewerPage() {
     </main>
   );
 }
+
+

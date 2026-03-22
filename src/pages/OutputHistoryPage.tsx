@@ -29,11 +29,11 @@ function RefreshIcon() {
   );
 }
 
-function PlaceholderIcon() {
+function FilterIcon() {
   return (
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden focusable="false">
       <path
-        d="M4 7h16v13H4zM9 7V5h6v2"
+        d="M4 6h16M7 12h10M10 18h4"
         fill="none"
         stroke="currentColor"
         strokeWidth="2"
@@ -107,6 +107,7 @@ export function OutputHistoryPage() {
   const [downloadingGenerationId, setDownloadingGenerationId] = useState<string | null>(null);
   const [deletingGenerationId, setDeletingGenerationId] = useState<string | null>(null);
 
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [fabricCodeInput, setFabricCodeInput] = useState("");
   const [fabricColorInput, setFabricColorInput] = useState("");
   const [appliedFilters, setAppliedFilters] = useState<HistoryFilters>({ fabricCode: "", fabricColor: "" });
@@ -115,6 +116,17 @@ export function OutputHistoryPage() {
     () => rows.filter((row) => row.status === "done" && !!row.output_path),
     [rows]
   );
+
+  useEffect(() => {
+    function handleExternalToggle() {
+      setFiltersOpen((prev) => !prev);
+    }
+
+    window.addEventListener("aivastra:toggle-fabric-filters", handleExternalToggle);
+    return () => {
+      window.removeEventListener("aivastra:toggle-fabric-filters", handleExternalToggle);
+    };
+  }, []);
 
   function getFabricSummaryLabel(row: GenerationRow) {
     const label = row.fabric_summary_label?.trim();
@@ -146,7 +158,11 @@ export function OutputHistoryPage() {
       if (!rows.length) {
         setStatusText(filterSummary ? `No outputs found for ${filterSummary}.` : "No outputs yet.");
       } else {
-        setStatusText(filterSummary ? `Loaded ${rows.length} output image(s) for ${filterSummary}.` : `Loaded ${rows.length} output image(s)`);
+        setStatusText(
+          filterSummary
+            ? `Loaded ${rows.length} output image(s) for ${filterSummary}.`
+            : `Loaded ${rows.length} output image(s)`
+        );
       }
     } catch (err) {
       setStatusText(`Failed to load output history: ${err instanceof Error ? err.message : "Unknown error"}`);
@@ -199,6 +215,10 @@ export function OutputHistoryPage() {
     setFabricCodeInput("");
     setFabricColorInput("");
     setAppliedFilters({ fabricCode: "", fabricColor: "" });
+  }
+
+  function toggleFilters() {
+    setFiltersOpen((prev) => !prev);
   }
 
   async function handleQuickDownload(row: GenerationRow) {
@@ -255,10 +275,6 @@ export function OutputHistoryPage() {
       <section className="catalog-shell">
         <header className="catalog-header">
           <div className="catalog-header-left">
-            <button className="catalog-back-btn" onClick={() => navigate(-1)} aria-label="Back">
-              <span aria-hidden>&larr;</span>
-            </button>
-
             <div className="catalog-brand-mark" aria-hidden>
               AV
             </div>
@@ -272,51 +288,70 @@ export function OutputHistoryPage() {
           <div className="catalog-header-actions">
             <button
               className="catalog-icon-btn"
-              onClick={() => loadHistory(appliedFilters)}
+              onClick={() => void loadHistory(appliedFilters)}
               disabled={loading}
               aria-label="Refresh"
               title="Refresh"
             >
               <RefreshIcon />
             </button>
-            <button className="catalog-icon-btn" aria-label="Icon placeholder" title="Icon slot">
-              <PlaceholderIcon />
+            <button
+              className={`catalog-icon-btn ${filtersOpen ? "catalog-icon-btn-active" : ""}`}
+              onClick={toggleFilters}
+              disabled={loading}
+              aria-label="Fabric filters"
+              title="Fabric Filters"
+            >
+              <FilterIcon />
             </button>
           </div>
         </header>
 
         <section className="card stack-sm">
-          <h2>Filters</h2>
-          <div className="row">
-            <label className="field flex-1">
-              <span>Fabric Code</span>
-              <input
-                type="text"
-                value={fabricCodeInput}
-                onChange={(event) => setFabricCodeInput(event.target.value)}
-                placeholder="e.g. LAX123"
-                disabled={loading}
-              />
-            </label>
-            <label className="field flex-1">
-              <span>Fabric Color</span>
-              <input
-                type="text"
-                value={fabricColorInput}
-                onChange={(event) => setFabricColorInput(event.target.value)}
-                placeholder="e.g. White"
-                disabled={loading}
-              />
-            </label>
-          </div>
-          <div className="row">
-            <button className="btn btn-dark" onClick={applyFilters} disabled={loading}>
-              Apply Filters
-            </button>
-            <button className="btn btn-light" onClick={clearFilters} disabled={loading}>
-              Clear
+          <div className="between">
+            <h2>Filters</h2>
+            <button className="btn btn-light" onClick={toggleFilters} disabled={loading}>
+              {filtersOpen ? "Hide Filters" : "Show Filters"}
             </button>
           </div>
+
+          {filtersOpen ? (
+            <>
+              <div className="row">
+                <label className="field flex-1">
+                  <span>Fabric Code</span>
+                  <input
+                    type="text"
+                    value={fabricCodeInput}
+                    onChange={(event) => setFabricCodeInput(event.target.value)}
+                    placeholder="e.g. LAX123"
+                    disabled={loading}
+                  />
+                </label>
+                <label className="field flex-1">
+                  <span>Fabric Color</span>
+                  <input
+                    type="text"
+                    value={fabricColorInput}
+                    onChange={(event) => setFabricColorInput(event.target.value)}
+                    placeholder="e.g. White"
+                    disabled={loading}
+                  />
+                </label>
+              </div>
+              <div className="row">
+                <button className="btn btn-dark" onClick={applyFilters} disabled={loading}>
+                  Apply Filters
+                </button>
+                <button className="btn btn-light" onClick={clearFilters} disabled={loading}>
+                  Clear
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="tiny muted">Open filters to search by fabric code and fabric color.</p>
+          )}
+
           <p className="tiny muted">{statusText}</p>
         </section>
 
@@ -348,7 +383,7 @@ export function OutputHistoryPage() {
                   <div className="catalog-action-row">
                     <button
                       className="catalog-chip-btn catalog-chip-delete"
-                      onClick={() => handleDeleteGeneration(row)}
+                      onClick={() => void handleDeleteGeneration(row)}
                       disabled={deletingGenerationId === row.id || downloadingGenerationId === row.id}
                       aria-label="Delete output"
                     >
@@ -356,7 +391,7 @@ export function OutputHistoryPage() {
                     </button>
                     <button
                       className="catalog-chip-btn catalog-chip-download"
-                      onClick={() => handleQuickDownload(row)}
+                      onClick={() => void handleQuickDownload(row)}
                       disabled={downloadingGenerationId === row.id || deletingGenerationId === row.id}
                       aria-label="Download output"
                     >
@@ -372,4 +407,3 @@ export function OutputHistoryPage() {
     </main>
   );
 }
-

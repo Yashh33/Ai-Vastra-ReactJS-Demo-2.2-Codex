@@ -58,10 +58,6 @@ export function CatalogFoldersPage() {
       <section className="catalog-shell">
         <header className="catalog-header">
           <div className="catalog-header-left">
-            <button className="catalog-back-btn" onClick={() => navigate("/")} aria-label="Back to modes">
-              <span aria-hidden>&larr;</span>
-            </button>
-
             <div className="catalog-brand-mark" aria-hidden>
               AV
             </div>
@@ -105,3 +101,6 @@ export function CatalogFoldersPage() {
     </main>
   );
 }
+
+
+

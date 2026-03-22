@@ -573,9 +573,6 @@ export function MatchColorPage() {
             <h1>Match Color</h1>
             <p className="muted">Pick a prominent swatch and tune H/S/L with live preview.</p>
           </div>
-          <button className="btn btn-light" onClick={() => navigate(-1)}>
-            Close
-          </button>
         </header>
 
         <section className="card stack-sm">
@@ -759,3 +756,5 @@ export function MatchColorPage() {
     </main>
   );
 }
+
+

@@ -3,7 +3,7 @@ import { supabase } from "./supabase";
 const DEFAULT_TTL_SECONDS = 3600;
 
 export async function createSignedUrl(
-  bucket: "hero-images" | "fabric-images" | "generated-outputs",
+  bucket: "hero-images" | "fabric-images" | "generated-outputs" | "shop-logos",
   path: string,
   expiresInSeconds = DEFAULT_TTL_SECONDS
 ) {
@@ -40,3 +40,4 @@ export async function uploadToStorage(
     throw new Error(error.message);
   }
 }
+

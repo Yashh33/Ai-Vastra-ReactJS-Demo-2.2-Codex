@@ -117,9 +117,6 @@ export function CarouselPage() {
               {visibleRows.length > 1 && autoAdvance ? ` - Auto ${AUTO_ADVANCE_MS / 1000}s` : ""}
             </p>
           </div>
-          <button className="btn btn-dark" onClick={() => navigate(-1)}>
-            Close
-          </button>
         </header>
 
         <section className="carousel-viewer" onClick={goNext} role="button" tabIndex={0}>
@@ -169,3 +166,6 @@ export function CarouselPage() {
     </main>
   );
 }
+
+
+
