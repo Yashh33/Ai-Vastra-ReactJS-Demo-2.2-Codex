@@ -121,18 +121,23 @@ export function CatalogOutputsPage() {
     setLoading(true);
     try {
       setPreviewUrls({});
-      const [fetchedCatalogRows, fetchedGenerationRows] = await Promise.all([
+      const [catalogResult, generationResult] = await Promise.allSettled([
         apiFetch<CatalogImageRow[]>(`/catalog-images?folder_id=${encodeURIComponent(folderId)}&limit=200`, accessToken, {
           method: "GET",
         }),
         apiFetch<GenerationRow[]>(
-          `/generations?status=done&folder_id=${encodeURIComponent(folderId)}&limit=200`,
+          `/generations?status=done&folder_id=${encodeURIComponent(folderId)}&limit=100`,
           accessToken,
           {
             method: "GET",
           }
         ),
       ]);
+
+      const fetchedCatalogRows =
+        catalogResult.status === "fulfilled" ? catalogResult.value : [];
+      const fetchedGenerationRows =
+        generationResult.status === "fulfilled" ? generationResult.value : [];
 
       setCatalogRows(fetchedCatalogRows);
       setGenerationRows(fetchedGenerationRows);
@@ -141,9 +146,18 @@ export function CatalogOutputsPage() {
       const generationCount = fetchedGenerationRows.filter((row) => row.status === "done" && !!row.output_path).length;
       const total = catalogCount + generationCount;
 
+      if (catalogResult.status === "rejected" && generationResult.status === "rejected") {
+        throw new Error("Both catalog and generation loads failed");
+      }
+
+      const partialSuffix =
+        catalogResult.status === "rejected" || generationResult.status === "rejected"
+          ? " (partial)"
+          : "";
+
       setStatusText(
         total
-          ? `Loaded ${total} item(s): ${generationCount} generated + ${catalogCount} catalog.`
+          ? `Loaded ${total} item(s): ${generationCount} generated + ${catalogCount} catalog${partialSuffix}.`
           : "No images in this folder yet."
       );
     } catch (err) {
