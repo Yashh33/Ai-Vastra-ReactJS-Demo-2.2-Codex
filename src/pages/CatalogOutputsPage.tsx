@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import type { DownloadUrlResponse, GenerationRow } from "../lib/types";
+import type { CatalogImageDownloadUrlResponse, CatalogImageRow } from "../lib/types";
 import { withCacheBust } from "../lib/utils";
 
 type PreviewMap = Record<string, string>;
@@ -31,25 +31,25 @@ export function CatalogOutputsPage() {
 
   const folderName = (searchParams.get("folderName") ?? "Folder").trim() || "Folder";
 
-  const [rows, setRows] = useState<GenerationRow[]>([]);
+  const [rows, setRows] = useState<CatalogImageRow[]>([]);
   const [previewUrls, setPreviewUrls] = useState<PreviewMap>({});
   const [loading, setLoading] = useState(false);
-  const [statusText, setStatusText] = useState("Loading outputs...");
+  const [statusText, setStatusText] = useState("Loading catalog images...");
 
   const visibleRows = useMemo(
-    () => rows.filter((row) => row.status === "done" && !!row.output_path),
+    () => rows.filter((row) => row.is_active !== false && !!row.storage_path),
     [rows]
   );
 
-  function getFabricSummaryLabel(row: GenerationRow) {
-    const label = row.fabric_summary_label?.trim();
-    return label || "Garment";
+  function getCatalogLabel(row: CatalogImageRow) {
+    const filename = (row.original_filename ?? "").trim();
+    return filename || "Catalog Image";
   }
 
-  async function getDownloadUrl(generationId: string) {
+  async function getDownloadUrl(catalogImageId: string) {
     if (!accessToken) throw new Error("Missing access token");
-    const response = await apiFetch<DownloadUrlResponse>(
-      `/generations/${generationId}/download-url`,
+    const response = await apiFetch<CatalogImageDownloadUrlResponse>(
+      `/catalog-images/${catalogImageId}/download-url`,
       accessToken,
       { method: "GET" }
     );
@@ -61,15 +61,19 @@ export function CatalogOutputsPage() {
     setLoading(true);
     try {
       setPreviewUrls({});
-      const fetchedRows = await apiFetch<GenerationRow[]>(
-        `/generations?status=done&folder_id=${encodeURIComponent(folderId)}&limit=100`,
+      const fetchedRows = await apiFetch<CatalogImageRow[]>(
+        `/catalog-images?folder_id=${encodeURIComponent(folderId)}&limit=200`,
         accessToken,
         { method: "GET" }
       );
       setRows(fetchedRows);
-      setStatusText(fetchedRows.length ? `Loaded ${fetchedRows.length} output image(s).` : "No outputs in this folder yet.");
+      setStatusText(
+        fetchedRows.length
+          ? `Loaded ${fetchedRows.length} catalog image(s).`
+          : "No catalog images in this folder yet."
+      );
     } catch (err) {
-      setStatusText(`Failed to load outputs: ${err instanceof Error ? err.message : "Unknown error"}`);
+      setStatusText(`Failed to load catalog images: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
       setLoading(false);
     }
@@ -108,12 +112,12 @@ export function CatalogOutputsPage() {
       });
   }, [accessToken, visibleRows, previewUrls]);
 
-  function openViewer(generationId: string) {
+  function openViewer(catalogImageId: string) {
     const params = new URLSearchParams({
-      generationId,
+      catalogImageId,
       mode: "catalog",
       catalogFolderId: folderId,
-      catalogFolderName: folderName
+      catalogFolderName: folderName,
     });
     navigate(`/output-viewer?${params.toString()}`);
   }
@@ -150,14 +154,14 @@ export function CatalogOutputsPage() {
             <div className="spinner" />
           </div>
         ) : visibleRows.length === 0 ? (
-          <div className="empty-box">No outputs available in this folder.</div>
+          <div className="empty-box">No catalog images available in this folder.</div>
         ) : (
           <section className="catalog-grid">
             {visibleRows.map((row) => (
               <article className="catalog-tile" key={row.id}>
                 <button className="catalog-image-btn" onClick={() => openViewer(row.id)}>
                   {previewUrls[row.id] ? (
-                    <img className="catalog-image" src={previewUrls[row.id]} alt={`Output ${row.id}`} />
+                    <img className="catalog-image" src={previewUrls[row.id]} alt={getCatalogLabel(row)} />
                   ) : (
                     <div className="image-placeholder">
                       <div className="spinner spinner-small" />
@@ -166,7 +170,7 @@ export function CatalogOutputsPage() {
                 </button>
 
                 <div className="catalog-meta-row">
-                  <p className="catalog-garment-label">{getFabricSummaryLabel(row)}</p>
+                  <p className="catalog-garment-label">{getCatalogLabel(row)}</p>
                 </div>
               </article>
             ))}
@@ -176,6 +180,3 @@ export function CatalogOutputsPage() {
     </main>
   );
 }
-
-
-

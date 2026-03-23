@@ -101,10 +101,33 @@ export type MatchColorSaveResponse = {
   applied_edits?: number;
 };
 
+export type CatalogImageRow = {
+  id: string;
+  shop_id: string;
+  folder_id: string;
+  storage_path: string;
+  original_filename: string | null;
+  mime_type: string | null;
+  file_size_bytes: number | null;
+  width: number | null;
+  height: number | null;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CatalogImageDownloadUrlResponse = {
+  catalog_image_id: string;
+  download_url: string;
+  expires_in_seconds: number;
+};
+
 export type MatchColorEditPayload = {
   selected_hex: string;
   hue_shift_degrees: number;
   saturation_delta_percent: number;
   lightness_delta_percent: number;
 };
+
 

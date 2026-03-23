@@ -4,7 +4,12 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { buildGenerationDownloadFilename, triggerBrowserDownload } from "../lib/download";
-import type { DownloadUrlResponse, GenerationRow } from "../lib/types";
+import type {
+  CatalogImageDownloadUrlResponse,
+  CatalogImageRow,
+  DownloadUrlResponse,
+  GenerationRow,
+} from "../lib/types";
 import { isPendingStatus, withCacheBust } from "../lib/utils";
 
 export function OutputViewerPage() {
@@ -13,6 +18,7 @@ export function OutputViewerPage() {
   const [searchParams] = useSearchParams();
 
   const generationId = searchParams.get("generationId") ?? "";
+  const catalogImageId = searchParams.get("catalogImageId") ?? "";
   const externalImageUrl = searchParams.get("imageUrl") ?? "";
   const externalTitle = searchParams.get("title") ?? "Image Viewer";
   const refreshNonce = searchParams.get("refreshNonce") ?? "";
@@ -25,36 +31,69 @@ export function OutputViewerPage() {
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [statusText, setStatusText] = useState("Loading image...");
-  const [catalogRows, setCatalogRows] = useState<GenerationRow[]>([]);
+  const [catalogGenerationRows, setCatalogGenerationRows] = useState<GenerationRow[]>([]);
+  const [catalogImageRows, setCatalogImageRows] = useState<CatalogImageRow[]>([]);
 
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
 
   const generationMode = !!generationId;
-  const catalogMode = generationMode && viewMode === "catalog";
+  const catalogImageMode = !!catalogImageId;
+  const dataMode = generationMode || catalogImageMode;
+  const catalogMode = dataMode && viewMode === "catalog";
   const generationReady = !!generation && generation.status === "done" && !!generation.output_path;
 
-  const catalogVisibleRows = useMemo(
-    () => catalogRows.filter((row) => row.status === "done" && !!row.output_path),
-    [catalogRows]
+  const generationCatalogVisibleRows = useMemo(
+    () => catalogGenerationRows.filter((row) => row.status === "done" && !!row.output_path),
+    [catalogGenerationRows]
   );
 
-  const catalogIndex = useMemo(
-    () => catalogVisibleRows.findIndex((row) => row.id === generationId),
-    [catalogVisibleRows, generationId]
+  const catalogImageVisibleRows = useMemo(
+    () => catalogImageRows.filter((row) => row.is_active !== false && !!row.storage_path),
+    [catalogImageRows]
   );
 
-  const canNavigateCatalog = catalogMode && catalogVisibleRows.length > 1 && catalogIndex >= 0;
+  const activeCatalogCount = generationMode ? generationCatalogVisibleRows.length : catalogImageVisibleRows.length;
+
+  const activeCatalogIndex = useMemo(() => {
+    if (!catalogMode) return -1;
+    if (generationMode) {
+      return generationCatalogVisibleRows.findIndex((row) => row.id === generationId);
+    }
+    if (catalogImageMode) {
+      return catalogImageVisibleRows.findIndex((row) => row.id === catalogImageId);
+    }
+    return -1;
+  }, [
+    catalogMode,
+    generationMode,
+    generationCatalogVisibleRows,
+    generationId,
+    catalogImageMode,
+    catalogImageVisibleRows,
+    catalogImageId,
+  ]);
+
+  const canNavigateCatalog = catalogMode && activeCatalogCount > 1 && activeCatalogIndex >= 0;
 
   const title = useMemo(() => {
     if (catalogMode) return `${catalogFolderName} Catalog`;
     if (generationMode) return "Output Viewer";
+    if (catalogImageMode) return "Catalog Viewer";
     return externalTitle;
-  }, [catalogMode, catalogFolderName, generationMode, externalTitle]);
+  }, [catalogMode, catalogFolderName, generationMode, catalogImageMode, externalTitle]);
 
-  async function fetchDownloadUrl(id: string) {
+  async function fetchGenerationDownloadUrl(id: string) {
     if (!accessToken) throw new Error("Missing access token");
     const response = await apiFetch<DownloadUrlResponse>(`/generations/${id}/download-url`, accessToken, {
-      method: "GET"
+      method: "GET",
+    });
+    return withCacheBust(response.download_url);
+  }
+
+  async function fetchCatalogImageDownloadUrl(id: string) {
+    if (!accessToken) throw new Error("Missing access token");
+    const response = await apiFetch<CatalogImageDownloadUrlResponse>(`/catalog-images/${id}/download-url`, accessToken, {
+      method: "GET",
     });
     return withCacheBust(response.download_url);
   }
@@ -65,12 +104,12 @@ export function OutputViewerPage() {
     setLoading(true);
     try {
       const row = await apiFetch<GenerationRow>(`/generations/${generationId}`, accessToken, {
-        method: "GET"
+        method: "GET",
       });
       setGeneration(row);
 
       if (row.status === "done" && row.output_path) {
-        const signed = await fetchDownloadUrl(generationId);
+        const signed = await fetchGenerationDownloadUrl(generationId);
         setImageUrl(signed);
         setStatusText(catalogMode ? "Catalog image" : "Output ready");
       } else if (isPendingStatus(row.status)) {
@@ -87,31 +126,67 @@ export function OutputViewerPage() {
     }
   }
 
+  async function loadCatalogImageView() {
+    if (!catalogImageMode || !accessToken || !catalogImageId) return;
+
+    setLoading(true);
+    try {
+      const signed = await fetchCatalogImageDownloadUrl(catalogImageId);
+      setImageUrl(signed);
+      setStatusText("Catalog image");
+    } catch (err) {
+      setImageUrl(null);
+      setStatusText(`Load failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function loadCatalogRows() {
     if (!catalogMode || !accessToken || !catalogFolderId) {
-      setCatalogRows([]);
+      setCatalogGenerationRows([]);
+      setCatalogImageRows([]);
       return;
     }
 
     try {
-      const rows = await apiFetch<GenerationRow[]>(
-        `/generations?status=done&folder_id=${encodeURIComponent(catalogFolderId)}&limit=100`,
+      if (generationMode) {
+        const rows = await apiFetch<GenerationRow[]>(
+          `/generations?status=done&folder_id=${encodeURIComponent(catalogFolderId)}&limit=100`,
+          accessToken,
+          { method: "GET" }
+        );
+        setCatalogGenerationRows(rows);
+        setCatalogImageRows([]);
+        return;
+      }
+
+      const rows = await apiFetch<CatalogImageRow[]>(
+        `/catalog-images?folder_id=${encodeURIComponent(catalogFolderId)}&limit=200`,
         accessToken,
         { method: "GET" }
       );
-      setCatalogRows(rows);
+      setCatalogImageRows(rows);
+      setCatalogGenerationRows([]);
     } catch {
-      setCatalogRows([]);
+      setCatalogGenerationRows([]);
+      setCatalogImageRows([]);
     }
   }
 
   useEffect(() => {
-    if (!generationMode) {
-      setStatusText(externalImageUrl ? "Image loaded" : "No image supplied");
+    if (generationMode) {
+      void loadGenerationView();
       return;
     }
-    void loadGenerationView();
-  }, [generationId, generationMode, accessToken, refreshNonce, catalogMode]);
+
+    if (catalogImageMode) {
+      void loadCatalogImageView();
+      return;
+    }
+
+    setStatusText(externalImageUrl ? "Image loaded" : "No image supplied");
+  }, [generationId, generationMode, catalogImageId, catalogImageMode, accessToken, refreshNonce, catalogMode]);
 
   useEffect(() => {
     if (!accessToken || !generationId || !isPendingStatus(generation?.status)) return;
@@ -123,23 +198,30 @@ export function OutputViewerPage() {
 
   useEffect(() => {
     void loadCatalogRows();
-  }, [catalogMode, accessToken, catalogFolderId]);
+  }, [catalogMode, accessToken, catalogFolderId, generationMode]);
 
   async function handleDownload() {
-    if (!generationMode || !generation?.output_path || !generationId) return;
-    setDownloading(true);
-    try {
-      const fresh = await fetchDownloadUrl(generationId);
-      setImageUrl(fresh);
-      triggerBrowserDownload(
-        fresh,
-        buildGenerationDownloadFilename(generationId, generation.output_path, fresh)
-      );
+    if (generationMode && generation?.output_path && generationId) {
+      setDownloading(true);
+      try {
+        const fresh = await fetchGenerationDownloadUrl(generationId);
+        setImageUrl(fresh);
+        triggerBrowserDownload(
+          fresh,
+          buildGenerationDownloadFilename(generationId, generation.output_path, fresh)
+        );
+        setStatusText("Download started");
+      } catch (err) {
+        setStatusText(`Download failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+      } finally {
+        setDownloading(false);
+      }
+      return;
+    }
+
+    if (catalogImageMode && imageUrl && catalogImageId) {
+      triggerBrowserDownload(imageUrl, `ai-vastra-catalog-${catalogImageId}.jpg`);
       setStatusText("Download started");
-    } catch (err) {
-      setStatusText(`Download failed: ${err instanceof Error ? err.message : "Unknown error"}`);
-    } finally {
-      setDownloading(false);
     }
   }
 
@@ -158,31 +240,47 @@ export function OutputViewerPage() {
   }
 
   function goToCatalogIndex(nextIndex: number) {
-    if (!catalogMode || nextIndex < 0 || nextIndex >= catalogVisibleRows.length) return;
-    const nextGeneration = catalogVisibleRows[nextIndex];
-    if (!nextGeneration) return;
+    if (!catalogMode || nextIndex < 0 || nextIndex >= activeCatalogCount) return;
 
-    const params = new URLSearchParams({
-      generationId: nextGeneration.id,
-      mode: "catalog",
-      catalogFolderId,
-      catalogFolderName
-    });
+    if (generationMode) {
+      const nextGeneration = generationCatalogVisibleRows[nextIndex];
+      if (!nextGeneration) return;
 
-    navigate(`/output-viewer?${params.toString()}`, { replace: true });
+      const params = new URLSearchParams({
+        generationId: nextGeneration.id,
+        mode: "catalog",
+        catalogFolderId,
+        catalogFolderName,
+      });
+
+      navigate(`/output-viewer?${params.toString()}`, { replace: true });
+      return;
+    }
+
+    if (catalogImageMode) {
+      const nextCatalogImage = catalogImageVisibleRows[nextIndex];
+      if (!nextCatalogImage) return;
+
+      const params = new URLSearchParams({
+        catalogImageId: nextCatalogImage.id,
+        mode: "catalog",
+        catalogFolderId,
+        catalogFolderName,
+      });
+
+      navigate(`/output-viewer?${params.toString()}`, { replace: true });
+    }
   }
 
   function handleCatalogPrev() {
     if (!canNavigateCatalog) return;
-    const total = catalogVisibleRows.length;
-    const nextIndex = (catalogIndex - 1 + total) % total;
+    const nextIndex = (activeCatalogIndex - 1 + activeCatalogCount) % activeCatalogCount;
     goToCatalogIndex(nextIndex);
   }
 
   function handleCatalogNext() {
     if (!canNavigateCatalog) return;
-    const total = catalogVisibleRows.length;
-    const nextIndex = (catalogIndex + 1) % total;
+    const nextIndex = (activeCatalogIndex + 1) % activeCatalogCount;
     goToCatalogIndex(nextIndex);
   }
 
@@ -225,11 +323,7 @@ export function OutputViewerPage() {
 
         <p className="tiny muted">{statusText}</p>
 
-        <section
-          className="viewer-card"
-          onTouchStart={handleTouchStart}
-          onTouchEnd={handleTouchEnd}
-        >
+        <section className="viewer-card" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
           {loading ? (
             <div className="loading-box dark">
               <div className="spinner" />
@@ -262,11 +356,7 @@ export function OutputViewerPage() {
           ) : null}
 
           {generationMode && !catalogMode ? (
-            <button
-              className="btn btn-light flex-1"
-              onClick={handleDownload}
-              disabled={downloading || !generationReady}
-            >
+            <button className="btn btn-light flex-1" onClick={handleDownload} disabled={downloading || !generationReady}>
               {downloading ? "Preparing..." : "Download"}
             </button>
           ) : null}
@@ -277,13 +367,13 @@ export function OutputViewerPage() {
             </button>
           ) : null}
 
-          {!generationMode ? (
+          {!dataMode ? (
             <button className="btn btn-light flex-1" onClick={handleClose}>
               Close
             </button>
           ) : null}
 
-          {generationMode && catalogMode ? (
+          {dataMode && catalogMode ? (
             <button className="btn btn-light flex-1" onClick={handleClose}>
               Back to Folder
             </button>
@@ -299,13 +389,11 @@ export function OutputViewerPage() {
         {catalogMode ? (
           <p className="tiny muted">
             {canNavigateCatalog
-              ? `Swipe left/right or use Previous/Next (${catalogIndex + 1}/${catalogVisibleRows.length})`
-              : "Swipe navigation is available when this folder has multiple outputs."}
+              ? `Swipe left/right or use Previous/Next (${activeCatalogIndex + 1}/${activeCatalogCount})`
+              : "Swipe navigation is available when this folder has multiple images."}
           </p>
         ) : null}
       </section>
     </main>
   );
 }
-
-

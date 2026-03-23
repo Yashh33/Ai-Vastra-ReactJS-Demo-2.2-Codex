@@ -77,7 +77,7 @@ export function CatalogFoldersPage() {
 
         <section className="card stack-sm">
           <p className="tiny muted">{statusText}</p>
-          <p className="tiny muted">Tap a folder to view generated catalog outputs.</p>
+          <p className="tiny muted">Tap a folder to view catalog images.</p>
         </section>
 
         {loading ? (
@@ -101,6 +101,7 @@ export function CatalogFoldersPage() {
     </main>
   );
 }
+
 
 
 
