@@ -3,10 +3,23 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import type { CatalogImageDownloadUrlResponse, CatalogImageRow } from "../lib/types";
+import type {
+  CatalogImageDownloadUrlResponse,
+  CatalogImageRow,
+  DownloadUrlResponse,
+  GenerationRow,
+} from "../lib/types";
 import { withCacheBust } from "../lib/utils";
 
 type PreviewMap = Record<string, string>;
+
+type CatalogCardItem = {
+  key: string;
+  kind: "catalog" | "generation";
+  id: string;
+  label: string;
+  createdAtMs: number;
+};
 
 function RefreshIcon() {
   return (
@@ -23,6 +36,22 @@ function RefreshIcon() {
   );
 }
 
+function toTimestamp(value?: string | null): number {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getCatalogLabel(row: CatalogImageRow) {
+  const filename = (row.original_filename ?? "").trim();
+  return filename || "Catalog Image";
+}
+
+function getGenerationLabel(row: GenerationRow) {
+  const label = row.fabric_summary_label?.trim();
+  return label || "Garment";
+}
+
 export function CatalogOutputsPage() {
   const { folderId = "" } = useParams();
   const [searchParams] = useSearchParams();
@@ -31,25 +60,56 @@ export function CatalogOutputsPage() {
 
   const folderName = (searchParams.get("folderName") ?? "Folder").trim() || "Folder";
 
-  const [rows, setRows] = useState<CatalogImageRow[]>([]);
+  const [catalogRows, setCatalogRows] = useState<CatalogImageRow[]>([]);
+  const [generationRows, setGenerationRows] = useState<GenerationRow[]>([]);
   const [previewUrls, setPreviewUrls] = useState<PreviewMap>({});
   const [loading, setLoading] = useState(false);
-  const [statusText, setStatusText] = useState("Loading catalog images...");
+  const [statusText, setStatusText] = useState("Loading folder images...");
 
-  const visibleRows = useMemo(
-    () => rows.filter((row) => row.is_active !== false && !!row.storage_path),
-    [rows]
+  const visibleCatalogRows = useMemo(
+    () => catalogRows.filter((row) => row.is_active !== false && !!row.storage_path),
+    [catalogRows]
   );
 
-  function getCatalogLabel(row: CatalogImageRow) {
-    const filename = (row.original_filename ?? "").trim();
-    return filename || "Catalog Image";
-  }
+  const visibleGenerationRows = useMemo(
+    () => generationRows.filter((row) => row.status === "done" && !!row.output_path),
+    [generationRows]
+  );
 
-  async function getDownloadUrl(catalogImageId: string) {
+  const visibleItems = useMemo<CatalogCardItem[]>(() => {
+    const catalogItems: CatalogCardItem[] = visibleCatalogRows.map((row) => ({
+      key: `catalog:${row.id}`,
+      kind: "catalog",
+      id: row.id,
+      label: getCatalogLabel(row),
+      createdAtMs: toTimestamp(row.created_at),
+    }));
+
+    const generationItems: CatalogCardItem[] = visibleGenerationRows.map((row) => ({
+      key: `generation:${row.id}`,
+      kind: "generation",
+      id: row.id,
+      label: getGenerationLabel(row),
+      createdAtMs: toTimestamp(row.created_at),
+    }));
+
+    return [...catalogItems, ...generationItems].sort((a, b) => b.createdAtMs - a.createdAtMs);
+  }, [visibleCatalogRows, visibleGenerationRows]);
+
+  async function getCatalogDownloadUrl(catalogImageId: string) {
     if (!accessToken) throw new Error("Missing access token");
     const response = await apiFetch<CatalogImageDownloadUrlResponse>(
       `/catalog-images/${catalogImageId}/download-url`,
+      accessToken,
+      { method: "GET" }
+    );
+    return withCacheBust(response.download_url);
+  }
+
+  async function getGenerationDownloadUrl(generationId: string) {
+    if (!accessToken) throw new Error("Missing access token");
+    const response = await apiFetch<DownloadUrlResponse>(
+      `/generations/${generationId}/download-url`,
       accessToken,
       { method: "GET" }
     );
@@ -61,19 +121,33 @@ export function CatalogOutputsPage() {
     setLoading(true);
     try {
       setPreviewUrls({});
-      const fetchedRows = await apiFetch<CatalogImageRow[]>(
-        `/catalog-images?folder_id=${encodeURIComponent(folderId)}&limit=200`,
-        accessToken,
-        { method: "GET" }
-      );
-      setRows(fetchedRows);
+      const [fetchedCatalogRows, fetchedGenerationRows] = await Promise.all([
+        apiFetch<CatalogImageRow[]>(`/catalog-images?folder_id=${encodeURIComponent(folderId)}&limit=200`, accessToken, {
+          method: "GET",
+        }),
+        apiFetch<GenerationRow[]>(
+          `/generations?status=done&folder_id=${encodeURIComponent(folderId)}&limit=200`,
+          accessToken,
+          {
+            method: "GET",
+          }
+        ),
+      ]);
+
+      setCatalogRows(fetchedCatalogRows);
+      setGenerationRows(fetchedGenerationRows);
+
+      const catalogCount = fetchedCatalogRows.filter((row) => row.is_active !== false && !!row.storage_path).length;
+      const generationCount = fetchedGenerationRows.filter((row) => row.status === "done" && !!row.output_path).length;
+      const total = catalogCount + generationCount;
+
       setStatusText(
-        fetchedRows.length
-          ? `Loaded ${fetchedRows.length} catalog image(s).`
-          : "No catalog images in this folder yet."
+        total
+          ? `Loaded ${total} item(s): ${generationCount} generated + ${catalogCount} catalog.`
+          : "No images in this folder yet."
       );
     } catch (err) {
-      setStatusText(`Failed to load catalog images: ${err instanceof Error ? err.message : "Unknown error"}`);
+      setStatusText(`Failed to load folder images: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
       setLoading(false);
     }
@@ -84,41 +158,51 @@ export function CatalogOutputsPage() {
   }, [accessToken, folderId]);
 
   useEffect(() => {
-    if (!accessToken || !visibleRows.length) return;
-    const missing = visibleRows.filter((row) => !previewUrls[row.id]);
+    if (!accessToken || !visibleItems.length) return;
+
+    const missing = visibleItems.filter((item) => !previewUrls[item.key]);
     if (!missing.length) return;
 
     Promise.all(
-      missing.map(async (row) => {
+      missing.map(async (item) => {
         try {
-          const url = await getDownloadUrl(row.id);
-          return { id: row.id, url };
+          const url =
+            item.kind === "catalog"
+              ? await getCatalogDownloadUrl(item.id)
+              : await getGenerationDownloadUrl(item.id);
+          return { key: item.key, url };
         } catch {
           return null;
         }
       })
     )
       .then((items) => {
-        const valid = items.filter((item): item is { id: string; url: string } => !!item);
+        const valid = items.filter((item): item is { key: string; url: string } => !!item);
         if (!valid.length) return;
         setPreviewUrls((prev) => {
           const next = { ...prev };
-          for (const item of valid) next[item.id] = item.url;
+          for (const item of valid) next[item.key] = item.url;
           return next;
         });
       })
       .catch(() => {
         // best effort previews
       });
-  }, [accessToken, visibleRows, previewUrls]);
+  }, [accessToken, visibleItems, previewUrls]);
 
-  function openViewer(catalogImageId: string) {
+  function openViewer(item: CatalogCardItem) {
     const params = new URLSearchParams({
-      catalogImageId,
       mode: "catalog",
       catalogFolderId: folderId,
       catalogFolderName: folderName,
     });
+
+    if (item.kind === "catalog") {
+      params.set("catalogImageId", item.id);
+    } else {
+      params.set("generationId", item.id);
+    }
+
     navigate(`/output-viewer?${params.toString()}`);
   }
 
@@ -133,7 +217,7 @@ export function CatalogOutputsPage() {
 
             <div className="catalog-title-wrap">
               <h1 className="catalog-title">{folderName}</h1>
-              <p className="catalog-subtitle">{visibleRows.length} items</p>
+              <p className="catalog-subtitle">{visibleItems.length} items</p>
             </div>
           </div>
 
@@ -153,15 +237,15 @@ export function CatalogOutputsPage() {
           <div className="loading-box">
             <div className="spinner" />
           </div>
-        ) : visibleRows.length === 0 ? (
-          <div className="empty-box">No catalog images available in this folder.</div>
+        ) : visibleItems.length === 0 ? (
+          <div className="empty-box">No images available in this folder.</div>
         ) : (
           <section className="catalog-grid">
-            {visibleRows.map((row) => (
-              <article className="catalog-tile" key={row.id}>
-                <button className="catalog-image-btn" onClick={() => openViewer(row.id)}>
-                  {previewUrls[row.id] ? (
-                    <img className="catalog-image" src={previewUrls[row.id]} alt={getCatalogLabel(row)} />
+            {visibleItems.map((item) => (
+              <article className="catalog-tile" key={item.key}>
+                <button className="catalog-image-btn" onClick={() => openViewer(item)}>
+                  {previewUrls[item.key] ? (
+                    <img className="catalog-image" src={previewUrls[item.key]} alt={item.label} />
                   ) : (
                     <div className="image-placeholder">
                       <div className="spinner spinner-small" />
@@ -170,7 +254,7 @@ export function CatalogOutputsPage() {
                 </button>
 
                 <div className="catalog-meta-row">
-                  <p className="catalog-garment-label">{getCatalogLabel(row)}</p>
+                  <p className="catalog-garment-label">{item.label}</p>
                 </div>
               </article>
             ))}
