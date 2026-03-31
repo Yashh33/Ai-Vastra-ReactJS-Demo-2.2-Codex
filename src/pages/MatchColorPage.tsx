@@ -248,15 +248,14 @@ export function MatchColorPage() {
     const rendered = applyLivePreviewAdjustment(roiImageData, selectedSwatch, currentAdjustment);
 
     const dpr = window.devicePixelRatio || 1;
-    const cssWidth = Math.max(260, Math.round(inspectCanvas.clientWidth || 320));
-    const cssHeight = Math.max(280, Math.round(cssWidth * (rendered.height / rendered.width)));
+    const cssWidth = Math.max(1, Math.round(inspectCanvas.clientWidth || 240));
+    const cssHeight = Math.max(1, Math.round(inspectCanvas.clientHeight || 240));
     const outputWidth = Math.max(1, Math.round(cssWidth * dpr));
     const outputHeight = Math.max(1, Math.round(cssHeight * dpr));
 
     if (inspectCanvas.width !== outputWidth || inspectCanvas.height !== outputHeight) {
       inspectCanvas.width = outputWidth;
       inspectCanvas.height = outputHeight;
-      inspectCanvas.style.height = `${cssHeight}px`;
     }
 
     const scratch = inspectScratchCanvasRef.current ?? document.createElement("canvas");
