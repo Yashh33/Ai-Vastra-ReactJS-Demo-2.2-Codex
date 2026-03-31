@@ -229,9 +229,8 @@ export function MatchColorPage() {
     const inspectCanvas = inspectCanvasRef.current;
     if (!fullResCanvas || !inspectCanvas) return;
 
-    const sourceCtx = fullResCanvas.getContext("2d", { willReadFrequently: true });
     const outCtx = inspectCanvas.getContext("2d");
-    if (!sourceCtx || !outCtx) return;
+    if (!outCtx) return;
 
     const zoom = clampRange(inspectZoom, 1.2, 6);
     const cropWidth = Math.max(48, Math.round(fullResCanvas.width / zoom));
@@ -243,9 +242,6 @@ export function MatchColorPage() {
     const centerY = inspectCenter.y * fullResCanvas.height;
     const cropLeft = Math.round(clampRange(centerX - cropWidth / 2, 0, maxLeft));
     const cropTop = Math.round(clampRange(centerY - cropHeight / 2, 0, maxTop));
-
-    const roiImageData = sourceCtx.getImageData(cropLeft, cropTop, cropWidth, cropHeight);
-    const rendered = applyLivePreviewAdjustment(roiImageData, selectedSwatch, currentAdjustment);
 
     const dpr = window.devicePixelRatio || 1;
     const cssWidth = Math.max(1, Math.round(inspectCanvas.clientWidth || 240));
@@ -260,10 +256,31 @@ export function MatchColorPage() {
 
     const scratch = inspectScratchCanvasRef.current ?? document.createElement("canvas");
     inspectScratchCanvasRef.current = scratch;
-    scratch.width = rendered.width;
-    scratch.height = rendered.height;
-    const scratchCtx = scratch.getContext("2d");
+    const processMaxSide = 384;
+    const processWidth = Math.max(1, Math.min(outputWidth, processMaxSide));
+    const processHeight = Math.max(1, Math.min(outputHeight, processMaxSide));
+    scratch.width = processWidth;
+    scratch.height = processHeight;
+    const scratchCtx = scratch.getContext("2d", { willReadFrequently: true });
     if (!scratchCtx) return;
+
+    scratchCtx.clearRect(0, 0, processWidth, processHeight);
+    scratchCtx.imageSmoothingEnabled = true;
+    scratchCtx.imageSmoothingQuality = "high";
+    scratchCtx.drawImage(
+      fullResCanvas,
+      cropLeft,
+      cropTop,
+      cropWidth,
+      cropHeight,
+      0,
+      0,
+      processWidth,
+      processHeight
+    );
+
+    const roiImageData = scratchCtx.getImageData(0, 0, processWidth, processHeight);
+    const rendered = applyLivePreviewAdjustment(roiImageData, selectedSwatch, currentAdjustment);
     scratchCtx.putImageData(rendered, 0, 0);
 
     outCtx.clearRect(0, 0, outputWidth, outputHeight);

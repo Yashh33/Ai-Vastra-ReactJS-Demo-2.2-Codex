@@ -800,6 +800,9 @@ code {
   padding: 0.35rem;
   display: grid;
   place-items: center;
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
 }
 
 .inspect-canvas {
