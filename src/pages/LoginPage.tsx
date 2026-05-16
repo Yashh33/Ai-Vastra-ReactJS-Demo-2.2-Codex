@@ -2,7 +2,6 @@ import { FormEvent, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../lib/auth";
-import { APP_ENV } from "../lib/env";
 import { supabase } from "../lib/supabase";
 
 type AuthMode = "login" | "signup";
@@ -14,8 +13,8 @@ export function LoginPage() {
 
   const [mode, setMode] = useState<AuthMode>("login");
   const [shopName, setShopName] = useState("");
-  const [email, setEmail] = useState(APP_ENV.demoEmail);
-  const [password, setPassword] = useState(APP_ENV.demoPassword);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>("");
   const [notice, setNotice] = useState<string>("");
@@ -164,11 +163,6 @@ export function LoginPage() {
           {mode === "login"
             ? "Use the shop account email/password."
             : "Signup creates a shop automatically (via Supabase DB trigger)."}
-        </p>
-
-        <p className="tiny muted">
-          Configure default login prefill in <code>.env</code> via
-          <code> VITE_DEMO_EMAIL </code> and <code> VITE_DEMO_PASSWORD</code>.
         </p>
       </section>
     </main>

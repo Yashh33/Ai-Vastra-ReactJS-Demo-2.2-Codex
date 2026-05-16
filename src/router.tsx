@@ -2,18 +2,15 @@ import { Navigate, Route, Routes } from "react-router-dom";
 
 import { AppShell } from "./components/AppShell";
 import { ProtectedRoute } from "./components/ProtectedRoute";
-import { CatalogFoldersPage } from "./pages/CatalogFoldersPage";
-import { CatalogOutputsPage } from "./pages/CatalogOutputsPage";
+import { CatalogPage } from "./pages/CatalogPage";
 import { CarouselPage } from "./pages/CarouselPage";
-import { HeroFolderDetailPage } from "./pages/HeroFolderDetailPage";
-import { HeroFoldersPage } from "./pages/HeroFoldersPage";
+import { FabricSiloPage } from "./pages/FabricSiloPage";
+import { GeneratePage } from "./pages/GeneratePage";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
 import { MatchColorPage } from "./pages/MatchColorPage";
-import { ModeSelectionPage } from "./pages/ModeSelectionPage";
 import { OutputHistoryPage } from "./pages/OutputHistoryPage";
 import { OutputViewerPage } from "./pages/OutputViewerPage";
-import { VisualizePage } from "./pages/VisualizePage";
 
 export function AppRouter() {
   return (
@@ -22,13 +19,11 @@ export function AppRouter() {
 
       <Route element={<ProtectedRoute />}>
         <Route element={<AppShell />}>
-          <Route path="/" element={<ModeSelectionPage />} />
+          <Route path="/" element={<HomePage />} />
           <Route path="/create-looks" element={<HomePage />} />
-          <Route path="/catalog" element={<CatalogFoldersPage />} />
-          <Route path="/catalog/folders/:folderId" element={<CatalogOutputsPage />} />
-          <Route path="/hero-folders" element={<HeroFoldersPage />} />
-          <Route path="/hero-folders/:folderId" element={<HeroFolderDetailPage />} />
-          <Route path="/visualize" element={<VisualizePage />} />
+          <Route path="/generate" element={<GeneratePage />} />
+          <Route path="/catalog" element={<CatalogPage />} />
+          <Route path="/fabric-silo" element={<FabricSiloPage />} />
           <Route path="/output-history" element={<OutputHistoryPage />} />
           <Route path="/output-viewer" element={<OutputViewerPage />} />
           <Route path="/match-color" element={<MatchColorPage />} />

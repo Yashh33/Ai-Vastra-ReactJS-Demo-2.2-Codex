@@ -182,7 +182,7 @@ export function AppShell() {
           {menuOpen ? (
             <div className="app-menu-popover" role="menu" aria-label="Header menu">
               <button className="app-menu-item" onClick={handleSwitchMode} role="menuitem">
-                Switch Mode
+                Home
               </button>
               {showFabricOption ? (
                 <button className="app-menu-item" onClick={handleFabricFilters} role="menuitem">

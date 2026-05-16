@@ -15,6 +15,14 @@ export type FolderRow = {
   updated_at: string;
 };
 
+export type GarmentType = {
+  id: string;
+  name: string;
+  prompt_template: string;
+  default_hero_image_id: string | null;
+  hero_image_signed_url: string | null;
+};
+
 export type HeroImageRow = {
   id: string;
   shop_id: string;

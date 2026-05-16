@@ -6,19 +6,23 @@ export function HomePage() {
   return (
     <main className="screen screen-fill">
       <section className="page-shell equal-fill-shell equal-fill-shell-3">
-        <button className="home-card home-card-visualize equal-fill-card" onClick={() => navigate("/visualize")}>
-          <strong>Visualize</strong>
-          <span>Select hero image and fabric image, then generate output.</span>
+        <button className="home-card home-card-visualize equal-fill-card" onClick={() => navigate("/generate")}>
+          <strong>Generate Look</strong>
+          <span>Select fabric and garment type, then generate output.</span>
         </button>
 
-        <button className="home-card home-card-hero equal-fill-card" onClick={() => navigate("/hero-folders")}>
-          <strong>Hero Image</strong>
-          <span>Upload Hero Image</span>
+        <button className="home-card home-card-hero equal-fill-card" onClick={() => navigate("/catalog")}>
+          <strong>Catalog</strong>
+          <span>Browse generated looks by garment type.</span>
         </button>
 
-        <button className="home-card home-card-history equal-fill-card" onClick={() => navigate("/output-history")}>
-          <strong>Output History</strong>
-          <span>View output tiles, quick download, and match color.</span>
+        <button
+          className="home-card equal-fill-card"
+          style={{ background: "#eee7ff" }}
+          onClick={() => navigate("/fabric-silo")}
+        >
+          <strong>Fabric Silo</strong>
+          <span>Add, browse, and reuse saved fabric images.</span>
         </button>
       </section>
     </main>

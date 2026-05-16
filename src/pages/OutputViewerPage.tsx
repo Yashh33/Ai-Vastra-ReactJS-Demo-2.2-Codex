@@ -76,7 +76,7 @@ export function OutputViewerPage() {
   const canNavigateCatalog = catalogMode && activeCatalogCount > 1 && activeCatalogIndex >= 0;
 
   const title = useMemo(() => {
-    if (catalogMode) return `${catalogFolderName} Catalog`;
+    if (catalogMode) return catalogFolderName;
     if (generationMode) return "Output Viewer";
     if (catalogImageMode) return "Catalog Viewer";
     return externalTitle;
