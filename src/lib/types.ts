@@ -57,6 +57,7 @@ export type GenerationFabricAssignmentPayload = {
   apply_to: ApplyToTarget;
   fabric_code: string;
   fabric_color?: string | null;
+  fabric_scale?: "fine" | "medium" | "bold" | null;
 };
 
 export type GenerationFabricSnapshot = {

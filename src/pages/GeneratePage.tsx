@@ -71,6 +71,24 @@ async function findFabricImageById(accessToken: string, fabricImageId: string) {
   return null;
 }
 
+const FINE_CHECKS_SVG = `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <rect width="64" height="64" fill="#B8C8E0"/>
+  ${Array.from({ length: 15 }, (_, i) => `<line x1="0" y1="${(i + 1) * 4}" x2="64" y2="${(i + 1) * 4}" stroke="#2B4B8A" stroke-width="0.7" opacity="0.7"/>`).join("")}
+  ${Array.from({ length: 15 }, (_, i) => `<line x1="${(i + 1) * 4}" y1="0" x2="${(i + 1) * 4}" y2="64" stroke="#2B4B8A" stroke-width="0.7" opacity="0.7"/>`).join("")}
+</svg>`;
+
+const MEDIUM_CHECKS_SVG = `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <rect width="64" height="64" fill="#B8C8E0"/>
+  ${Array.from({ length: 7 }, (_, i) => `<line x1="0" y1="${(i + 1) * 8}" x2="64" y2="${(i + 1) * 8}" stroke="#2B4B8A" stroke-width="1.5" opacity="0.8"/>`).join("")}
+  ${Array.from({ length: 7 }, (_, i) => `<line x1="${(i + 1) * 8}" y1="0" x2="${(i + 1) * 8}" y2="64" stroke="#2B4B8A" stroke-width="1.5" opacity="0.8"/>`).join("")}
+</svg>`;
+
+const BOLD_CHECKS_SVG = `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <rect width="64" height="64" fill="#B8C8E0"/>
+  ${Array.from({ length: 3 }, (_, i) => `<line x1="0" y1="${(i + 1) * 16}" x2="64" y2="${(i + 1) * 16}" stroke="#2B4B8A" stroke-width="3" opacity="0.9"/>`).join("")}
+  ${Array.from({ length: 3 }, (_, i) => `<line x1="${(i + 1) * 16}" y1="0" x2="${(i + 1) * 16}" y2="64" stroke="#2B4B8A" stroke-width="3" opacity="0.9"/>`).join("")}
+</svg>`;
+
 export function GeneratePage() {
   const { accessToken } = useAuth();
   const navigate = useNavigate();
@@ -93,6 +111,8 @@ export function GeneratePage() {
   const [saveToSilo, setSaveToSilo] = useState(false);
   const [fabricCode, setFabricCode] = useState("");
   const [fabricColor, setFabricColor] = useState("");
+  const [hasPattern, setHasPattern] = useState(false);
+  const [fabricScale, setFabricScale] = useState<"fine" | "medium" | "bold" | null>(null);
 
   const [heroChangeOpen, setHeroChangeOpen] = useState(false);
   const [heroReplacementFile, setHeroReplacementFile] = useState<File | null>(null);
@@ -190,6 +210,8 @@ export function GeneratePage() {
         setExistingFabricImage(row);
         setFabricFile(null);
         setFabricPreviewUrl(signed);
+        setHasPattern(false);
+        setFabricScale(null);
         setStatusText("Fabric selected from silo.");
       } catch (err) {
         if (!cancelled) {
@@ -256,6 +278,8 @@ export function GeneratePage() {
     setFabricFile(file);
     setExistingFabricImage(null);
     setFabricPreviewUrl(URL.createObjectURL(file));
+    setHasPattern(false);
+    setFabricScale(null);
     setStatusText("Fabric image selected.");
   }
 
@@ -354,7 +378,8 @@ export function GeneratePage() {
         fabric_image_id: fabricImage.id,
         apply_to: mapGarmentToApplyTo(selectedGarment),
         fabric_code: saveToSilo ? fabricCode.trim() : "unknown",
-        fabric_color: saveToSilo ? fabricColor.trim() || null : null
+        fabric_color: saveToSilo ? fabricColor.trim() || null : null,
+        fabric_scale: hasPattern && fabricScale ? fabricScale : null
       };
 
       setStatusText("Creating generation job...");
@@ -459,6 +484,89 @@ export function GeneratePage() {
             />
             <span>Save new cloth to My Fabrics</span>
           </label>
+
+          {/* Pattern selector */}
+          <div style={{
+            background: "var(--white)",
+            border: "0.5px solid var(--border)",
+            borderRadius: "12px",
+            padding: "12px"
+          }}>
+            <label style={{
+              display: "flex", alignItems: "center", gap: "10px", cursor: "pointer"
+            }}>
+              <input
+                type="checkbox"
+                checked={hasPattern}
+                onChange={(e) => {
+                  setHasPattern(e.target.checked);
+                  if (!e.target.checked) setFabricScale(null);
+                }}
+                style={{ width: "16px", height: "16px", accentColor: "#1B1B2F" }}
+              />
+              <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-primary)" }}>
+                This fabric has a pattern (checks, stripes, print)
+              </span>
+            </label>
+
+            {hasPattern && (
+              <div style={{ marginTop: "12px", display: "grid", gap: "8px" }}>
+                <span style={{
+                  fontSize: "11px", fontWeight: 600,
+                  color: "var(--text-muted)",
+                  textTransform: "uppercase", letterSpacing: "0.06em"
+                }}>
+                  How large is the pattern?
+                </span>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "8px" }}>
+                  {([
+                    { key: "fine", label: "Fine", hint: "Small, tight" },
+                    { key: "medium", label: "Medium", hint: "Classic size" },
+                    { key: "bold", label: "Bold", hint: "Large, wide" },
+                  ] as const).map((opt) => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => setFabricScale(opt.key)}
+                      style={{
+                        border: fabricScale === opt.key
+                          ? "2px solid #C9A84C"
+                          : "1px solid var(--border)",
+                        borderRadius: "12px",
+                        padding: "8px 6px",
+                        background: fabricScale === opt.key ? "#FDF6E8" : "var(--white)",
+                        cursor: "pointer",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}
+                    >
+                      <div style={{
+                        width: "56px", height: "56px", borderRadius: "8px",
+                        overflow: "hidden", border: "0.5px solid var(--border)"
+                      }}
+                        dangerouslySetInnerHTML={{
+                          __html:
+                            opt.key === "fine" ? FINE_CHECKS_SVG :
+                              opt.key === "medium" ? MEDIUM_CHECKS_SVG :
+                                BOLD_CHECKS_SVG
+                        }}
+                      />
+                      <span style={{
+                        fontSize: "12px", fontWeight: 600,
+                        color: fabricScale === opt.key ? "#8B6914" : "var(--text-primary)"
+                      }}>{opt.label}</span>
+                      <span style={{
+                        fontSize: "10px",
+                        color: "var(--text-muted)"
+                      }}>{opt.hint}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
 
           {saveToSilo ? (
             <>
