@@ -306,7 +306,7 @@ export function GeneratePage() {
     if (!accessToken || !shopContext) throw new Error("Shop context is still loading.");
 
     const ext = guessFileExtension(file.name, file.type);
-    const storagePath = `temp/${shopContext.shop_id}/${Date.now()}.${ext}`;
+    const storagePath = `temp/${shopContext.shop_id}/${Date.now()}-${makeRandomSuffix()}.${ext}`;
 
     setStatusText("Uploading temporary hero image...");
     await uploadToStorage("hero-images", storagePath, file);

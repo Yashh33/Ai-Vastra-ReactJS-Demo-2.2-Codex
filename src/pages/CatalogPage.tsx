@@ -31,7 +31,9 @@ function RefreshIcon() {
 
 function getFabricSummaryLabel(row: GenerationRow) {
   const label = row.fabric_summary_label?.trim();
-  return label || "Garment";
+  if (!label) return "Garment";
+  // Remove ": unknown" or ":unknown" suffix if present
+  return label.replace(/:\s*unknown$/i, "").trim() || "Garment";
 }
 
 function GenerationTile({ row, imageUrl, onOpen, onVisible }: GenerationTileProps & { onVisible: (id: string) => void }) {
