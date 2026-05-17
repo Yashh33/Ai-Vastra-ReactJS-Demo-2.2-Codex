@@ -86,47 +86,16 @@ export function LoginPage() {
   }
 
   return (
-    <main className="screen auth-screen">
-      <section className="auth-card">
-        <h1>Ai Vastra</h1>
-        <p className="muted">Shop account access</p>
+    <main className="auth-screen">
+      <div className="login-hero">
+        <div className="login-wordmark">AI VASTRA</div>
+        <div className="login-tagline">Craft Your Collection</div>
+        <div className="login-divider" />
+      </div>
+      <div className="login-sheet">
+        <h2>Welcome back</h2>
 
-        <div className="auth-mode-row" role="tablist" aria-label="Auth mode">
-          <button
-            className={`auth-mode-btn ${mode === "login" ? "auth-mode-btn-active" : ""}`}
-            type="button"
-            onClick={() => setMode("login")}
-            disabled={busy}
-            aria-pressed={mode === "login"}
-          >
-            Login
-          </button>
-          <button
-            className={`auth-mode-btn ${mode === "signup" ? "auth-mode-btn-active" : ""}`}
-            type="button"
-            onClick={() => setMode("signup")}
-            disabled={busy}
-            aria-pressed={mode === "signup"}
-          >
-            Signup
-          </button>
-        </div>
-
-        <form className="stack-md" onSubmit={onSubmit}>
-          {mode === "signup" ? (
-            <label className="field">
-              <span>Shop Name</span>
-              <input
-                type="text"
-                autoComplete="organization"
-                value={shopName}
-                onChange={(event) => setShopName(event.target.value)}
-                placeholder="e.g. Yash Tailors"
-                disabled={busy}
-              />
-            </label>
-          ) : null}
-
+        <form className="stack-sm" onSubmit={onSubmit}>
           <label className="field">
             <span>Email</span>
             <input
@@ -154,17 +123,15 @@ export function LoginPage() {
           {notice ? <p className="tiny notice-text">{notice}</p> : null}
           {error ? <p className="error-text">{error}</p> : null}
 
-          <button className="btn btn-dark" type="submit" disabled={busy}>
+          <button className="btn-primary" type="submit" disabled={busy}>
             {busy ? "Please wait..." : mode === "login" ? "Login" : "Create Shop Account"}
           </button>
         </form>
 
-        <p className="tiny muted">
-          {mode === "login"
-            ? "Use the shop account email/password."
-            : "Signup creates a shop automatically (via Supabase DB trigger)."}
+        <p className="tiny muted" style={{ textAlign: "center" }}>
+          Shop account access only
         </p>
-      </section>
+      </div>
     </main>
   );
 }

@@ -70,9 +70,9 @@ function FabricTile({ row, imageUrl, pickerMode, onSelect, onVisible }: FabricTi
       >
         {imageUrl ? (
           <img
+            className="catalog-image"
             src={imageUrl}
             alt="fabric"
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />
         ) : (
           <div className="image-placeholder">
@@ -115,7 +115,7 @@ export function FabricSiloPage() {
   const [draftFabricColor, setDraftFabricColor] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const pageTitle = pickerMode ? "Select a fabric" : "Fabric Silo";
+  const pageTitle = pickerMode ? "Select a Cloth" : "My Fabrics";
 
   useEffect(() => {
     if (!draftPreviewUrl?.startsWith("blob:")) return;
@@ -265,13 +265,9 @@ export function FabricSiloPage() {
       <section className="catalog-shell">
         <header className="catalog-header">
           <div className="catalog-header-left">
-            <div className="catalog-brand-mark" aria-hidden>
-              AV
-            </div>
-
             <div className="catalog-title-wrap">
               <h1 className="catalog-title">{pageTitle}</h1>
-              <p className="catalog-subtitle">{rows.length} fabrics</p>
+              <p className="catalog-subtitle">{rows.length} cloths saved</p>
             </div>
           </div>
 
@@ -289,17 +285,12 @@ export function FabricSiloPage() {
         </header>
 
         <section className="card stack-sm">
-          <div className="between">
-            <p className="tiny muted">{statusText}</p>
-            <button className="btn btn-dark" type="button" onClick={() => setAddOpen(true)} disabled={saving}>
-              Add Fabric
-            </button>
-          </div>
+          <p className="tiny muted">{statusText}</p>
         </section>
 
         {addOpen ? (
           <section className="card stack-sm">
-            <h2>Add Fabric</h2>
+            <h2>Add New Cloth</h2>
 
             <div className="row">
               <button
@@ -327,7 +318,7 @@ export function FabricSiloPage() {
             )}
 
             <label className="field">
-              <span>Fabric Code <strong>*</strong></span>
+              <span>Cloth Code <strong>*</strong></span>
               <input
                 type="text"
                 value={draftFabricCode}
@@ -338,7 +329,7 @@ export function FabricSiloPage() {
             </label>
 
             <label className="field">
-              <span>Fabric Color (optional)</span>
+              <span>Colour</span>
               <input
                 type="text"
                 value={draftFabricColor}
@@ -355,7 +346,7 @@ export function FabricSiloPage() {
                 onClick={() => void handleSaveFabric()}
                 disabled={saving || !draftFile || !draftFabricCode.trim()}
               >
-                {saving ? "Saving..." : "Save"}
+                {saving ? "Saving..." : "Save Cloth"}
               </button>
               <button className="btn btn-light flex-1" type="button" onClick={closeAddSheet} disabled={saving}>
                 Cancel
@@ -379,7 +370,7 @@ export function FabricSiloPage() {
             <div className="spinner" />
           </div>
         ) : rows.length === 0 ? (
-          <div className="empty-box">No fabrics saved yet.</div>
+          <div className="empty-box">No cloths saved yet. Tap + to add your first cloth.</div>
         ) : (
           <section className="catalog-grid">
             {rows.map((row) => (
@@ -394,6 +385,21 @@ export function FabricSiloPage() {
             ))}
           </section>
         )}
+
+        <div className="fab-wrap">
+          <button
+            className="fab-btn"
+            type="button"
+            onClick={() => setAddOpen(true)}
+            disabled={saving}
+            aria-label="Add fabric"
+            title="Add fabric"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden focusable="false">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+        </div>
       </section>
     </main>
   );

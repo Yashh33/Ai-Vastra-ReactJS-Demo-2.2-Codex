@@ -385,10 +385,8 @@ export function GeneratePage() {
       <section className="page-shell">
         <header className="page-header">
           <div>
-            <h1>Generate Look</h1>
-            <p className="muted">Choose fabric, garment type, and create a new look.</p>
+            <h1>Sew a New Look</h1>
           </div>
-          <span className="chip">Credits: {creditBalance}</span>
         </header>
 
         <section className="card stack-sm">
@@ -396,7 +394,34 @@ export function GeneratePage() {
         </section>
 
         <section className="card stack-sm">
-          <h2>Fabric</h2>
+          <h2>Choose Cloth</h2>
+
+          <div className="fabric-scroll">
+            <div className="fabric-tile">
+              <button
+                className="fabric-thumb-new"
+                type="button"
+                onClick={() => cameraInputRef.current?.click()}
+                disabled={actionBusy}
+                aria-label="Add new cloth"
+                title="Add new cloth"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden focusable="false">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+              <span className="fabric-label">New</span>
+            </div>
+
+            {fabricPreviewUrl ? (
+              <div className="fabric-tile">
+                <img className="fabric-thumb selected" src={fabricPreviewUrl} alt="Selected cloth" />
+                <span className="fabric-label">
+                  {existingFabricImage?.original_filename?.trim() || fabricFile?.name || "Selected"}
+                </span>
+              </div>
+            ) : null}
+          </div>
 
           <div className="row">
             <button
@@ -425,20 +450,14 @@ export function GeneratePage() {
             </button>
           </div>
 
-          {fabricPreviewUrl ? (
-            <img className="preview-image" src={fabricPreviewUrl} alt="Selected fabric" />
-          ) : (
-            <div className="preview-placeholder">Capture, choose, or pick a fabric image</div>
-          )}
-
-          <label className="switch-row">
+          <label className="silo-toggle-row">
             <input
               type="checkbox"
               checked={saveToSilo}
               onChange={(event) => setSaveToSilo(event.target.checked)}
               disabled={actionBusy}
             />
-            <span>Save to Fabric Silo?</span>
+            <span>Save new cloth to My Fabrics</span>
           </label>
 
           {saveToSilo ? (
@@ -484,36 +503,39 @@ export function GeneratePage() {
         </section>
 
         <section className="card stack-sm">
-          <h2>Garment Type</h2>
+          <h2>Select Style</h2>
 
-          <label className="field">
-            <span>Garment Type</span>
-            <select
-              className="select-input"
-              value={selectedGarmentId}
-              onChange={(event) => {
-                setSelectedGarmentId(event.target.value);
-                setHeroChangeOpen(false);
-                setHeroReplacementFile(null);
-                setHeroReplacementPreviewUrl(null);
-              }}
-              disabled={actionBusy || loadingInitial}
-            >
-              <option value="">{loadingInitial ? "Loading garment types..." : "Select garment type"}</option>
-              {garmentTypes.map((garment) => (
-                <option key={garment.id} value={garment.id}>
-                  {garment.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="pill-row">
+            {garmentTypes.map((garment) => (
+              <button
+                key={garment.id}
+                className={`style-pill ${selectedGarmentId === garment.id ? "active" : ""}`}
+                type="button"
+                onClick={() => {
+                  setSelectedGarmentId(garment.id);
+                  setHeroChangeOpen(false);
+                  setHeroReplacementFile(null);
+                  setHeroReplacementPreviewUrl(null);
+                }}
+                disabled={actionBusy || loadingInitial}
+              >
+                {garment.name}
+              </button>
+            ))}
+          </div>
+
+          {loadingInitial ? <p className="tiny muted">Loading garment types...</p> : null}
 
           {selectedGarment ? (
             <>
-              <div className="between">
-                <p className="tiny muted">Hero preview</p>
+              <div className="model-preview-box">
+                {selectedHeroPreviewUrl ? (
+                  <img className="model-preview-img" src={selectedHeroPreviewUrl} alt={`${selectedGarment.name} hero`} />
+                ) : (
+                  <div className="model-preview-placeholder">No hero preview available</div>
+                )}
                 <button
-                  className="btn btn-light"
+                  className="model-change-btn"
                   type="button"
                   onClick={() => setHeroChangeOpen((prev) => !prev)}
                   disabled={actionBusy}
@@ -521,12 +543,6 @@ export function GeneratePage() {
                   Change
                 </button>
               </div>
-
-              {selectedHeroPreviewUrl ? (
-                <img className="preview-image" src={selectedHeroPreviewUrl} alt={`${selectedGarment.name} hero`} />
-              ) : (
-                <div className="preview-placeholder">No hero preview available</div>
-              )}
 
               {heroChangeOpen ? (
                 <label className="field">
@@ -545,13 +561,23 @@ export function GeneratePage() {
 
         <section className="card stack-sm">
           <button
-            className="btn btn-dark"
+            className="btn-primary"
             type="button"
-            style={{ width: "100%" }}
             disabled={!canGenerate}
             onClick={() => void handleCreateGeneration()}
           >
-            {creatingGeneration ? "Starting..." : "Generate Look"}
+            {creatingGeneration ? (
+              "Sewing..."
+            ) : (
+              <>
+                <svg viewBox="0 0 24 24" aria-hidden focusable="false">
+                  <circle cx="6" cy="6" r="3" />
+                  <circle cx="6" cy="18" r="3" />
+                  <path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12" />
+                </svg>
+                Sew this Look
+              </>
+            )}
           </button>
 
           {visualizingGenerationId ? (

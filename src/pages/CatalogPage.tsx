@@ -66,9 +66,9 @@ function GenerationTile({ row, imageUrl, onOpen, onVisible }: GenerationTileProp
       <button className="catalog-image-btn" onClick={() => onOpen(row)}>
         {imageUrl ? (
           <img
+            className="catalog-image"
             src={imageUrl}
             alt={getFabricSummaryLabel(row)}
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />
         ) : (
           <div className="image-placeholder">
@@ -207,13 +207,9 @@ export function CatalogPage() {
       <section className="catalog-shell">
         <header className="catalog-header">
           <div className="catalog-header-left">
-            <div className="catalog-brand-mark" aria-hidden>
-              AV
-            </div>
-
             <div className="catalog-title-wrap">
-              <h1 className="catalog-title">Catalog</h1>
-              <p className="catalog-subtitle">{selectedGarment ? `${visibleRows.length} items` : "Garment type"}</p>
+              <h1 className="catalog-title">Lookbook</h1>
+              <p className="catalog-subtitle">{selectedGarment ? `${visibleRows.length} looks` : "Style"}</p>
             </div>
           </div>
 
@@ -231,27 +227,26 @@ export function CatalogPage() {
         </header>
 
         <section className="card stack-sm">
-          <label className="field">
-            <span>Garment Type</span>
-            <select
-              className="select-input"
-              value={selectedGarmentId}
-              onChange={(event) => setSelectedGarmentId(event.target.value)}
-              disabled={loadingGarments}
-            >
-              <option value="">{loadingGarments ? "Loading garment types..." : "Select garment type"}</option>
-              {garmentTypes.map((garment) => (
-                <option key={garment.id} value={garment.id}>
-                  {garment.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <h2>Select Style</h2>
+          <div className="pill-row">
+            {garmentTypes.map((garment) => (
+              <button
+                key={garment.id}
+                className={`style-pill ${selectedGarmentId === garment.id ? "active" : ""}`}
+                type="button"
+                onClick={() => setSelectedGarmentId(garment.id)}
+                disabled={loadingGarments}
+              >
+                {garment.name}
+              </button>
+            ))}
+          </div>
+          {loadingGarments ? <p className="tiny muted">Loading garment types...</p> : null}
           <p className="tiny muted">{statusText}</p>
         </section>
 
         {!selectedGarment ? (
-          <div className="empty-box">Select a garment type to view catalog</div>
+          <div className="empty-box">Select a style to view lookbook</div>
         ) : loadingRows ? (
           <div className="loading-box">
             <div className="spinner" />

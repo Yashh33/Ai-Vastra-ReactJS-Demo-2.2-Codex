@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { apiFetch } from "../lib/api";
@@ -9,7 +9,51 @@ import type { ShopContext } from "../lib/types";
 type MeResponse = ShopContext & {
   shop_name?: string | null;
   header_display_text?: string | null;
+  credits_balance?: number | null;
 };
+
+function formatCredits(value: number | null | undefined) {
+  if (value === null || value === undefined) return "?";
+  return String(value);
+}
+
+function ScissorsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden focusable="false">
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12" />
+    </svg>
+  );
+}
+
+function GridIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden focusable="false">
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
+    </svg>
+  );
+}
+
+function StackIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden focusable="false">
+      <path d="m2 17 10 5 10-5M2 12l10 5 10-5M12 2 2 7l10 5 10-5-10-5z" />
+    </svg>
+  );
+}
+
+function PersonIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden focusable="false">
+      <circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M4 21c1.5-4 4.2-6 8-6s6.5 2 8 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 export function AppShell() {
   const { accessToken, signOut } = useAuth();
@@ -17,13 +61,17 @@ export function AppShell() {
   const location = useLocation();
 
   const [shopHeaderText, setShopHeaderText] = useState("Ai Vastra");
+  const [creditBalance, setCreditBalance] = useState("...");
   const [loggingOut, setLoggingOut] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
 
-  const menuRef = useRef<HTMLDivElement | null>(null);
-
-  const backDisabled = location.pathname === "/";
-  const showFabricOption = location.pathname === "/output-history";
+  const activeTab =
+    location.pathname === "/" || location.pathname === "/generate"
+      ? "sew"
+      : location.pathname === "/catalog"
+        ? "lookbook"
+        : location.pathname === "/fabric-silo"
+          ? "fabrics"
+          : "";
 
   useEffect(() => {
     let cancelled = false;
@@ -34,6 +82,8 @@ export function AppShell() {
       try {
         const me = await apiFetch<MeResponse>("/me", accessToken, { method: "GET" });
         if (cancelled) return;
+
+        setCreditBalance(formatCredits(me.credits_balance));
 
         let nextText = (me.shop_name || "").trim();
 
@@ -76,6 +126,7 @@ export function AppShell() {
       } catch {
         if (!cancelled) {
           setShopHeaderText("Ai Vastra");
+          setCreditBalance("?");
         }
       }
     }
@@ -87,61 +138,11 @@ export function AppShell() {
     };
   }, [accessToken]);
 
-  useEffect(() => {
-    setMenuOpen(false);
-  }, [location.pathname, location.search]);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-
-    function handlePointerDown(event: MouseEvent) {
-      if (!menuRef.current) return;
-      if (menuRef.current.contains(event.target as Node)) return;
-      setMenuOpen(false);
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setMenuOpen(false);
-      }
-    }
-
-    window.addEventListener("mousedown", handlePointerDown);
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      window.removeEventListener("mousedown", handlePointerDown);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [menuOpen]);
-
-  function handleBack() {
-    if (backDisabled) return;
-
-    if (window.history.length > 1) {
-      navigate(-1);
-      return;
-    }
-
-    navigate("/", { replace: true });
-  }
-
-  function handleSwitchMode() {
-    setMenuOpen(false);
-    navigate("/");
-  }
-
-  function handleFabricFilters() {
-    setMenuOpen(false);
-    window.dispatchEvent(new CustomEvent("aivastra:toggle-fabric-filters"));
-  }
-
   async function handleLogout() {
-    const confirmed = window.confirm("Logout from this device?");
+    const confirmed = window.confirm("Log out of this device?");
     if (!confirmed) return;
 
     setLoggingOut(true);
-    setMenuOpen(false);
     try {
       await signOut();
       navigate("/login", { replace: true });
@@ -155,50 +156,19 @@ export function AppShell() {
   return (
     <div className="app-shell">
       <header className="app-shell-header">
-        <button
-          className="app-icon-btn"
-          onClick={handleBack}
-          disabled={backDisabled}
-          aria-label="Back"
-          title="Back"
-        >
-          <span aria-hidden>&larr;</span>
-        </button>
-
-        <div className="app-brand" aria-label={shopHeaderText}>
-          <span className="app-brand-text">{shopHeaderText}</span>
-        </div>
-
-        <div className="app-menu-wrap" ref={menuRef}>
+        <span className="app-brand-text">{shopHeaderText}</span>
+        <div className="row" style={{ flexWrap: "nowrap" }}>
+          <span className="credits-chip">{creditBalance} credits</span>
           <button
-            className="app-menu-btn"
-            onClick={() => setMenuOpen((prev) => !prev)}
-            aria-label="Menu"
-            title="Menu"
+            className="catalog-icon-btn"
+            type="button"
+            onClick={() => void handleLogout()}
+            disabled={loggingOut}
+            aria-label="Logout"
+            title="Logout"
           >
-            <span aria-hidden>&#9776;</span>
+            <PersonIcon />
           </button>
-
-          {menuOpen ? (
-            <div className="app-menu-popover" role="menu" aria-label="Header menu">
-              <button className="app-menu-item" onClick={handleSwitchMode} role="menuitem">
-                Home
-              </button>
-              {showFabricOption ? (
-                <button className="app-menu-item" onClick={handleFabricFilters} role="menuitem">
-                  Fabric Filters
-                </button>
-              ) : null}
-              <button
-                className="app-menu-item app-menu-item-danger"
-                onClick={() => void handleLogout()}
-                role="menuitem"
-                disabled={loggingOut}
-              >
-                {loggingOut ? "Logging out..." : "Logout"}
-              </button>
-            </div>
-          ) : null}
         </div>
       </header>
 
@@ -206,9 +176,35 @@ export function AppShell() {
         <Outlet />
       </div>
 
-      <footer className="app-shell-footer">
-        <span>Powered by Ai Vastra</span>
-      </footer>
+      <nav className="app-bottom-nav" aria-label="Primary navigation">
+        <button
+          className={`nav-tab ${activeTab === "sew" ? "active" : ""}`}
+          type="button"
+          onClick={() => navigate("/generate")}
+        >
+          <ScissorsIcon />
+          <span>Sew</span>
+          {activeTab === "sew" ? <span className="nav-dot" /> : null}
+        </button>
+        <button
+          className={`nav-tab ${activeTab === "lookbook" ? "active" : ""}`}
+          type="button"
+          onClick={() => navigate("/catalog")}
+        >
+          <GridIcon />
+          <span>Lookbook</span>
+          {activeTab === "lookbook" ? <span className="nav-dot" /> : null}
+        </button>
+        <button
+          className={`nav-tab ${activeTab === "fabrics" ? "active" : ""}`}
+          type="button"
+          onClick={() => navigate("/fabric-silo")}
+        >
+          <StackIcon />
+          <span>My Fabrics</span>
+          {activeTab === "fabrics" ? <span className="nav-dot" /> : null}
+        </button>
+      </nav>
     </div>
   );
 }
