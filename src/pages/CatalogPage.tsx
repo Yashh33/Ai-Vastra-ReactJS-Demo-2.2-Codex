@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { apiFetch } from "../lib/api";
@@ -34,9 +34,33 @@ function getFabricSummaryLabel(row: GenerationRow) {
   return label || "Garment";
 }
 
-function GenerationTile({ row, imageUrl, onOpen }: GenerationTileProps) {
+function GenerationTile({ row, imageUrl, onOpen, onVisible }: GenerationTileProps & { onVisible: (id: string) => void }) {
+  const tileRef = useRef<HTMLElement | null>(null);
+  const observedRef = useRef(false);
+
+  useEffect(() => {
+    const el = tileRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting && !observedRef.current) {
+            observedRef.current = true;
+            onVisible(row.id);
+            observer.disconnect();
+          }
+        }
+      },
+      { rootMargin: "200px" }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [row.id, onVisible]);
+
   return (
-    <article className="catalog-tile">
+    <article ref={tileRef} className="catalog-tile">
       <button className="catalog-image-btn" onClick={() => onOpen(row)}>
         {imageUrl ? (
           <img
@@ -120,24 +144,8 @@ export function CatalogPage() {
         accessToken,
         { method: "GET" }
       );
-      const thumbnailRows = rows.filter((row) => row.status === "done" && !!row.output_path);
-      const signedEntries = await Promise.all(
-        thumbnailRows.map(async (row) => {
-          try {
-            const url = await getDownloadUrl(row.id);
-            return { id: row.id, url };
-          } catch (err) {
-            console.error("Signed URL failed for", row.output_path || row.id, err);
-            return null;
-          }
-        })
-      );
-      const nextPreviewUrls: PreviewMap = {};
-      for (const item of signedEntries) {
-        if (item) nextPreviewUrls[item.id] = item.url;
-      }
       setGenerationRows(rows);
-      setPreviewUrls(nextPreviewUrls);
+      setPreviewUrls({});
       setStatusText(rows.length ? `Loaded ${rows.length} look(s)` : "No looks generated for this garment yet");
     } catch (err) {
       setGenerationRows([]);
@@ -168,6 +176,16 @@ export function CatalogPage() {
     );
     return withCacheBust(response.download_url);
   }
+
+  const handleTileVisible = useCallback(async (id: string) => {
+    if (!accessToken) return;
+    try {
+      const url = await getDownloadUrl(id);
+      setPreviewUrls((prev) => ({ ...prev, [id]: url }));
+    } catch (err) {
+      console.error("Download URL failed for generation", id, err);
+    }
+  }, [accessToken]);
 
   function openViewer(row: GenerationRow) {
     const params = new URLSearchParams({
@@ -246,6 +264,7 @@ export function CatalogPage() {
                 row={row}
                 imageUrl={previewUrls[row.id]}
                 onOpen={openViewer}
+                onVisible={handleTileVisible}
               />
             ))}
           </section>
