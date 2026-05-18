@@ -284,6 +284,14 @@ export function GeneratePage() {
     };
   }, [accessToken, navigate, visualizingGenerationId]);
 
+  function clearFabricSelection() {
+    setFabricFile(null);
+    setExistingFabricImage(null);
+    setFabricPreviewUrl(null);
+    setHasPattern(false);
+    setFabricScale(null);
+  }
+
   function handleFabricPicked(file: File | null) {
     if (!file) return;
     setFabricFile(file);
@@ -451,10 +459,41 @@ export function GeneratePage() {
 
             {fabricPreviewUrl ? (
               <div className="fabric-tile">
-                <img className="fabric-thumb selected" src={fabricPreviewUrl} alt="Selected cloth" />
-                <span className="fabric-label">
+                <div style={{ position: "relative", display: "inline-block" }}>
+                  <img className="fabric-thumb selected" src={fabricPreviewUrl} alt="selected fabric" />
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      clearFabricSelection();
+                    }}
+                    style={{
+                      position: "absolute",
+                      top: "-6px",
+                      right: "-6px",
+                      width: "20px",
+                      height: "20px",
+                      borderRadius: "50%",
+                      background: "#1B1B2F",
+                      border: "2px solid var(--white)",
+                      color: "#C9A84C",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      lineHeight: 1,
+                      padding: 0
+                    }}
+                    aria-label="Remove fabric selection"
+                  >
+                    &times;
+                  </button>
+                </div>
+                <div className="fabric-label">
                   {existingFabricImage?.original_filename?.trim() || fabricFile?.name || "Selected"}
-                </span>
+                </div>
               </div>
             ) : null}
           </div>
