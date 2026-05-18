@@ -56,7 +56,7 @@ function PersonIcon() {
 }
 
 export function AppShell() {
-  const { accessToken, signOut } = useAuth();
+  const { accessToken } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -138,20 +138,17 @@ export function AppShell() {
     };
   }, [accessToken]);
 
-  async function handleLogout() {
+  const handleLogout = async () => {
     const confirmed = window.confirm("Log out of this device?");
     if (!confirmed) return;
-
-    setLoggingOut(true);
     try {
-      await signOut();
-      navigate("/login", { replace: true });
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Logout failed");
+      await supabase.auth.signOut();
+    } catch {
+      // ignore errors
     } finally {
-      setLoggingOut(false);
+      window.location.href = "/login";
     }
-  }
+  };
 
   return (
     <div className="app-shell">

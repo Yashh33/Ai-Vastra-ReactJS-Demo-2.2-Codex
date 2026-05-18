@@ -1,4 +1,4 @@
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { apiFetch } from "../lib/api";
@@ -142,6 +142,21 @@ export function GeneratePage() {
     (!saveToSilo || !!fabricCode.trim()) &&
     !actionBusy;
 
+  const loadGarmentTypes = useCallback(async () => {
+    if (!accessToken) return;
+
+    setLoadingInitial(true);
+    try {
+      const garmentRows = await apiFetch<GarmentType[]>("/garment-types", accessToken, { method: "GET" });
+      setGarmentTypes(garmentRows);
+      setStatusText(garmentRows.length ? "Ready to generate." : "No garment types found.");
+    } catch (err) {
+      setStatusText(`Load failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setLoadingInitial(false);
+    }
+  }, [accessToken]);
+
   useEffect(() => {
     if (!fabricPreviewUrl?.startsWith("blob:")) return;
     return () => URL.revokeObjectURL(fabricPreviewUrl);
@@ -153,30 +168,26 @@ export function GeneratePage() {
   }, [heroReplacementPreviewUrl]);
 
   useEffect(() => {
+    void loadGarmentTypes();
+  }, [loadGarmentTypes]);
+
+  useEffect(() => {
     if (!accessToken) return;
     let cancelled = false;
 
     async function loadInitialData() {
       if (!accessToken) return;
-      setLoadingInitial(true);
       try {
-        const [me, garmentRows] = await Promise.all([
-          apiFetch<MeResponse>("/me", accessToken, { method: "GET" }),
-          apiFetch<GarmentType[]>("/garment-types", accessToken, { method: "GET" })
-        ]);
+        const me = await apiFetch<MeResponse>("/me", accessToken, { method: "GET" });
 
         if (cancelled) return;
 
         setShopContext(me);
         setCreditBalance(extractCreditBalance(me));
-        setGarmentTypes(garmentRows);
-        setStatusText(garmentRows.length ? "Ready to generate." : "No garment types found.");
       } catch (err) {
         if (!cancelled) {
           setStatusText(`Load failed: ${err instanceof Error ? err.message : "Unknown error"}`);
         }
-      } finally {
-        if (!cancelled) setLoadingInitial(false);
       }
     }
 
@@ -611,7 +622,37 @@ export function GeneratePage() {
         </section>
 
         <section className="card stack-sm">
-          <h2>Select Style</h2>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+            <span className="section-label">Select Style</span>
+            <button
+              onClick={loadGarmentTypes}
+              style={{
+                width: "32px",
+                height: "32px",
+                borderRadius: "50%",
+                border: "0.5px solid var(--border)",
+                background: "var(--white)",
+                cursor: "pointer",
+                display: "grid",
+                placeItems: "center",
+                color: "var(--text-muted)"
+              }}
+              aria-label="Refresh garment types"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              >
+                <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+                <path d="M21 3v5h-5" />
+              </svg>
+            </button>
+          </div>
 
           <div className="pill-row">
             {garmentTypes.map((garment) => (
