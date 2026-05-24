@@ -341,10 +341,8 @@ export function CatalogPage() {
                 fill="none" stroke="currentColor"
                 strokeWidth="2" strokeLinecap="round"
                 strokeLinejoin="round">
-                <rect x="3" y="3" width="7" height="7" rx="1"/>
-                <rect x="14" y="3" width="7" height="7" rx="1"/>
-                <rect x="3" y="14" width="7" height="7" rx="1"/>
-                <path d="M14 17h7M17 14v7"/>
+                <circle cx="12" cy="12" r="9"/>
+                <path d="M8 12l3 3 5-5"/>
               </svg>
             </button>
           </div>
