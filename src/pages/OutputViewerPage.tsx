@@ -348,6 +348,17 @@ export function OutputViewerPage() {
           )}
         </section>
 
+        {catalogMode ? (
+          <button
+            className="btn-primary"
+            onClick={handleDownload}
+            disabled={downloading || !imageUrl}
+            style={{ marginBottom: '12px' }}
+          >
+            {downloading ? 'Preparing...' : '↑ Share / Save'}
+          </button>
+        ) : null}
+
         <footer className="row">
           {catalogMode ? (
             <button className="btn btn-light flex-1" onClick={handleCatalogPrev} disabled={!canNavigateCatalog}>
