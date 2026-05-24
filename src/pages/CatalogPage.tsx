@@ -352,11 +352,20 @@ export function CatalogPage() {
 
         <section className="card stack-sm">
           <h2>Select Style</h2>
-          <div className="pill-row">
+          <div style={{
+            display: "flex",
+            gap: "8px",
+            overflowX: "auto",
+            scrollbarWidth: "none",
+            msOverflowStyle: "none",
+            paddingBottom: "4px",
+            flexWrap: "nowrap",
+          }}>
             {garmentTypes.map((garment) => (
               <button
                 key={garment.id}
                 className={`style-pill ${selectedGarmentId === garment.id ? "active" : ""}`}
+                style={{ flexShrink: 0 }}
                 type="button"
                 onClick={() => setSelectedGarmentId(garment.id)}
                 disabled={loadingGarments}
