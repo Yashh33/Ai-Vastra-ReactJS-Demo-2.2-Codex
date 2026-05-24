@@ -3,7 +3,6 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { buildGenerationDownloadFilename, triggerBrowserDownload } from "../lib/download";
 import type {
   CatalogImageDownloadUrlResponse,
   CatalogImageRow,
@@ -201,27 +200,34 @@ export function OutputViewerPage() {
   }, [catalogMode, accessToken, catalogFolderId, generationMode]);
 
   async function handleDownload() {
-    if (generationMode && generation?.output_path && generationId) {
-      setDownloading(true);
-      try {
-        const fresh = await fetchGenerationDownloadUrl(generationId);
-        setImageUrl(fresh);
-        triggerBrowserDownload(
-          fresh,
-          buildGenerationDownloadFilename(generationId, generation.output_path, fresh)
-        );
-        setStatusText("Download started");
-      } catch (err) {
-        setStatusText(`Download failed: ${err instanceof Error ? err.message : "Unknown error"}`);
-      } finally {
-        setDownloading(false);
-      }
-      return;
-    }
+    if (!imageUrl) return;
+    setDownloading(true);
+    try {
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      const file = new File([blob], "ai-vastra-look.jpg", {
+        type: "image/jpeg",
+      });
 
-    if (catalogImageMode && imageUrl && catalogImageId) {
-      triggerBrowserDownload(imageUrl, `ai-vastra-catalog-${catalogImageId}.jpg`);
-      setStatusText("Download started");
+      if (navigator.share && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: "My AI Vastra Look",
+        });
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "ai-vastra-look.jpg";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    } catch {
+      window.open(imageUrl, "_blank");
+    } finally {
+      setDownloading(false);
     }
   }
 
@@ -357,7 +363,7 @@ export function OutputViewerPage() {
 
           {generationMode && !catalogMode ? (
             <button className="btn btn-light flex-1" onClick={handleDownload} disabled={downloading || !generationReady}>
-              {downloading ? "Preparing..." : "Download"}
+              {downloading ? "Preparing..." : "Share / Save"}
             </button>
           ) : null}
 
