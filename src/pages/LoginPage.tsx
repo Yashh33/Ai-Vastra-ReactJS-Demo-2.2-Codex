@@ -88,6 +88,17 @@ export function LoginPage() {
   return (
     <main className="auth-screen">
       <div className="login-hero">
+        <div
+          style={{
+            fontSize: "12px",
+            color: "rgba(201,168,76,0.5)",
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+            lineHeight: 1
+          }}
+        >
+          Powered by
+        </div>
         <div className="login-wordmark">AI VASTRA</div>
         <div className="login-tagline">Craft Your Collection</div>
         <div className="login-divider" />
