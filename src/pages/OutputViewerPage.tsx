@@ -348,14 +348,36 @@ export function OutputViewerPage() {
         </section>
 
         {catalogMode ? (
-          <button
-            className="btn-primary"
-            onClick={handleDownload}
-            disabled={downloading || !imageUrl}
-            style={{ marginBottom: '12px' }}
-          >
-            {downloading ? 'Preparing...' : '↑ Share / Save'}
-          </button>
+          <div style={{
+            display: 'flex',
+            gap: '10px',
+            marginBottom: '12px',
+          }}>
+            <button
+              className="btn-primary"
+              onClick={handleDownload}
+              disabled={downloading || !imageUrl}
+              style={{ flex: 1 }}
+            >
+              {downloading ? 'Preparing...' : '↑ Share / Save'}
+            </button>
+
+            <button
+              className="btn-primary"
+              onClick={() => navigate(
+                `/match-color?generationId=${generationId}`
+              )}
+              disabled={!imageUrl}
+              style={{
+                flex: 1,
+                background: 'var(--white)',
+                color: '#1B1B2F',
+                border: '1px solid var(--border)',
+              }}
+            >
+              Match Color
+            </button>
+          </div>
         ) : null}
 
         <footer className="row">
