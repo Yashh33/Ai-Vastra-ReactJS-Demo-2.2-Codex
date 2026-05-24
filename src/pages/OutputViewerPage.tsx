@@ -212,7 +212,6 @@ export function OutputViewerPage() {
       if (navigator.share && navigator.canShare({ files: [file] })) {
         await navigator.share({
           files: [file],
-          title: "My AI Vastra Look",
         });
       } else {
         const url = URL.createObjectURL(blob);
