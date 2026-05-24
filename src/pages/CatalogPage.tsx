@@ -12,6 +12,9 @@ type GenerationTileProps = {
   row: GenerationRow;
   imageUrl?: string;
   onOpen: (row: GenerationRow) => void;
+  selectMode: boolean;
+  isSelected: boolean;
+  onSelectToggle: (id: string) => void;
 };
 
 function RefreshIcon() {
@@ -36,7 +39,15 @@ function getFabricSummaryLabel(row: GenerationRow) {
   return label.replace(/:\s*unknown$/i, "").trim() || "Garment";
 }
 
-function GenerationTile({ row, imageUrl, onOpen, onVisible }: GenerationTileProps & { onVisible: (id: string) => void }) {
+function GenerationTile({
+  row,
+  imageUrl,
+  onOpen,
+  selectMode,
+  isSelected,
+  onSelectToggle,
+  onVisible,
+}: GenerationTileProps & { onVisible: (id: string) => void }) {
   const tileRef = useRef<HTMLElement | null>(null);
   const observedRef = useRef(false);
 
@@ -62,8 +73,38 @@ function GenerationTile({ row, imageUrl, onOpen, onVisible }: GenerationTileProp
   }, [row.id, onVisible]);
 
   return (
-    <article ref={tileRef} className="catalog-tile">
-      <button className="catalog-image-btn" onClick={() => onOpen(row)}>
+    <article
+      ref={tileRef}
+      className="catalog-tile"
+      style={{
+        outline: isSelected ? "2.5px solid #C9A84C" : "none",
+        outlineOffset: "-2px",
+        position: "relative",
+      }}
+    >
+      {isSelected && (
+        <div style={{
+          position: "absolute",
+          top: "8px",
+          right: "8px",
+          width: "22px",
+          height: "22px",
+          borderRadius: "50%",
+          background: "#C9A84C",
+          border: "2px solid white",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 2,
+          fontSize: "12px",
+          color: "#1B1B2F",
+          fontWeight: 700,
+        }}>✓</div>
+      )}
+      <button className="catalog-image-btn" onClick={() => {
+        if (selectMode) onSelectToggle(row.id);
+        else onOpen(row);
+      }}>
         {imageUrl ? (
           <img
             className="catalog-image"
@@ -95,6 +136,9 @@ export function CatalogPage() {
   const [loadingGarments, setLoadingGarments] = useState(false);
   const [loadingRows, setLoadingRows] = useState(false);
   const [statusText, setStatusText] = useState("Select a garment type to view catalog");
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [sharing, setSharing] = useState(false);
 
   const selectedGarment = useMemo(
     () => garmentTypes.find((garment) => garment.id === selectedGarmentId) ?? null,
@@ -179,6 +223,58 @@ export function CatalogPage() {
     return withCacheBust(response.download_url);
   }
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  };
+
+  const handleBulkShare = async () => {
+    if (!accessToken || selectedIds.size === 0) return;
+    setSharing(true);
+    try {
+      const files: File[] = [];
+      let index = 1;
+      for (const id of selectedIds) {
+        try {
+          const url = await getDownloadUrl(id);
+          const response = await fetch(url);
+          const blob = await response.blob();
+          files.push(new File(
+            [blob],
+            `ai-vastra-look-${index}.jpg`,
+            { type: "image/jpeg" }
+          ));
+          index++;
+        } catch {
+          // skip failed
+        }
+      }
+      if (files.length === 0) return;
+      if (navigator.share && navigator.canShare({ files })) {
+        await navigator.share({ files });
+      } else {
+        for (const file of files) {
+          const url = URL.createObjectURL(file);
+          window.open(url, "_blank");
+        }
+      }
+      exitSelectMode();
+    } catch {
+      // cancelled or error
+    } finally {
+      setSharing(false);
+    }
+  };
+
   const handleTileVisible = useCallback(async (id: string) => {
     if (!accessToken) return;
     try {
@@ -223,6 +319,34 @@ export function CatalogPage() {
             >
               <RefreshIcon />
             </button>
+            <button
+              onClick={() => {
+                if (selectMode) exitSelectMode();
+                else setSelectMode(true);
+              }}
+              style={{
+                width: "34px",
+                height: "34px",
+                borderRadius: "50%",
+                border: "0.5px solid var(--border)",
+                background: selectMode ? "#1B1B2F" : "var(--white)",
+                cursor: "pointer",
+                display: "grid",
+                placeItems: "center",
+                color: selectMode ? "#C9A84C" : "var(--text-muted)",
+              }}
+              aria-label="Select images"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16"
+                fill="none" stroke="currentColor"
+                strokeWidth="2" strokeLinecap="round"
+                strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" rx="1"/>
+                <rect x="14" y="3" width="7" height="7" rx="1"/>
+                <rect x="3" y="14" width="7" height="7" rx="1"/>
+                <path d="M14 17h7M17 14v7"/>
+              </svg>
+            </button>
           </div>
         </header>
 
@@ -261,10 +385,74 @@ export function CatalogPage() {
                 row={row}
                 imageUrl={previewUrls[row.id]}
                 onOpen={openViewer}
+                selectMode={selectMode}
+                isSelected={selectedIds.has(row.id)}
+                onSelectToggle={toggleSelect}
                 onVisible={handleTileVisible}
               />
             ))}
           </section>
+        )}
+
+        {selectMode && (
+          <div style={{
+            position: "fixed",
+            bottom: "65px",
+            left: 0,
+            right: 0,
+            background: "#1B1B2F",
+            padding: "12px 16px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "12px",
+            zIndex: 40,
+          }}>
+            <button
+              onClick={exitSelectMode}
+              style={{
+                background: "transparent",
+                border: "0.5px solid rgba(201,168,76,0.4)",
+                borderRadius: "10px",
+                color: "#C9A84C",
+                padding: "8px 16px",
+                fontSize: "13px",
+                fontWeight: 600,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              Cancel
+            </button>
+            <span style={{
+              color: "rgba(201,168,76,0.7)",
+              fontSize: "13px",
+              fontWeight: 600,
+            }}>
+              {selectedIds.size} selected
+            </span>
+            <button
+              onClick={handleBulkShare}
+              disabled={sharing || selectedIds.size === 0}
+              style={{
+                background: "#C9A84C",
+                border: "none",
+                borderRadius: "10px",
+                color: "#1B1B2F",
+                padding: "8px 16px",
+                fontSize: "13px",
+                fontWeight: 700,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                opacity: sharing ? 0.6 : 1,
+              }}
+            >
+              {sharing
+                ? "Preparing..."
+                : `Share ${selectedIds.size} look${selectedIds.size > 1 ? "s" : ""}`
+              }
+            </button>
+          </div>
         )}
       </section>
     </main>
