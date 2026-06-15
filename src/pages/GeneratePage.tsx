@@ -1,6 +1,8 @@
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
+import { CustomerConsentModal } from "../components/CustomerConsentModal";
+import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { createSignedUrl, uploadToStorage } from "../lib/storage";
@@ -123,12 +125,15 @@ export function GeneratePage() {
   const [creatingGeneration, setCreatingGeneration] = useState(false);
   const [visualizingGenerationId, setVisualizingGenerationId] = useState<string | null>(null);
   const [statusText, setStatusText] = useState("Preparing Generate screen...");
+  const [showConsentModal, setShowConsentModal] = useState(false);
+  const [showTryOnFlow, setShowTryOnFlow] = useState(false);
 
   const selectedGarment = useMemo(
     () => garmentTypes.find((garment) => garment.id === selectedGarmentId) ?? null,
     [garmentTypes, selectedGarmentId]
   );
 
+  const selectedFabricImageId = existingFabricImage?.id ?? "";
   const selectedHeroPreviewUrl =
     heroReplacementPreviewUrl || selectedGarment?.hero_image_signed_url || null;
 
@@ -422,6 +427,97 @@ export function GeneratePage() {
     } finally {
       setCreatingGeneration(false);
     }
+  }
+
+  async function handleQuickTryOnSubmit(customerPhotoFile: File): Promise<string> {
+    if (!accessToken) throw new Error("Not authenticated");
+    if (!selectedFabricImageId && !fabricFile) {
+      throw new Error("Please select a fabric first");
+    }
+    if (!selectedGarmentId) {
+      throw new Error("Please select a garment type first");
+    }
+    if (!shopContext) {
+      throw new Error("Shop context is still loading.");
+    }
+
+    let fabricImageId = selectedFabricImageId;
+
+    if (!fabricImageId && fabricFile) {
+      const ext = guessFileExtension(fabricFile.name, fabricFile.type);
+      const path = `${shopContext.shop_id}/${Date.now()}-${makeRandomSuffix()}.${ext}`;
+      const storagePath = await uploadToStorage(
+        "fabric-images",
+        path,
+        fabricFile
+      );
+      const uploaded = await apiFetch<{ id: string }>(
+        "/fabric-images",
+        accessToken,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            storage_path: storagePath,
+            original_filename: fabricFile.name,
+            mime_type: fabricFile.type,
+            file_size_bytes: fabricFile.size,
+          }),
+        }
+      );
+      fabricImageId = uploaded.id;
+    }
+
+    if (!fabricImageId) {
+      throw new Error("Could not resolve fabric image");
+    }
+
+    const reader = new FileReader();
+    const photoB64 = await new Promise<string>((resolve, reject) => {
+      reader.onload = () => {
+        const result = reader.result as string;
+        const b64 = result.split(",")[1];
+        if (!b64) {
+          reject(new Error("Failed to read customer photo"));
+          return;
+        }
+        resolve(b64);
+      };
+      reader.onerror = () => reject(reader.error ?? new Error("Failed to read customer photo"));
+      reader.readAsDataURL(customerPhotoFile);
+    });
+
+    const response = await apiFetch<{
+      result_b64: string;
+      result_mime: string;
+    }>(
+      "/tryon/quick",
+      accessToken,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          fabric_image_id: fabricImageId,
+          folder_id: selectedGarmentId,
+          customer_photo_b64: photoB64,
+          customer_photo_mime:
+            customerPhotoFile.type || "image/jpeg",
+        }),
+      }
+    );
+
+    function base64ToBlob(b64: string, mime: string): Blob {
+      const bytes = atob(b64);
+      const arr = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) {
+        arr[i] = bytes.charCodeAt(i);
+      }
+      return new Blob([arr], { type: mime });
+    }
+
+    const blob = base64ToBlob(
+      response.result_b64,
+      response.result_mime
+    );
+    return URL.createObjectURL(blob);
   }
 
   return (
@@ -768,6 +864,39 @@ export function GeneratePage() {
             )}
           </button>
 
+          <button
+            onClick={() => {
+              if (!selectedFabricImageId && !fabricFile) {
+                alert("Please select a fabric first");
+                return;
+              }
+              if (!selectedGarmentId) {
+                alert("Please select a garment type first");
+                return;
+              }
+              setShowConsentModal(true);
+            }}
+            style={{
+              width: "100%",
+              minHeight: "48px",
+              background: "transparent",
+              color: "#1B1B2F",
+              border: "1.5px solid #1B1B2F",
+              borderRadius: "14px",
+              fontSize: "14px",
+              fontWeight: 700,
+              cursor: "pointer",
+              fontFamily: "inherit",
+              marginTop: "8px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "8px",
+            }}
+          >
+            👤 Try On Customer
+          </button>
+
           {visualizingGenerationId ? (
             <div className="loading-box">
               <div className="spinner" />
@@ -776,6 +905,23 @@ export function GeneratePage() {
           ) : null}
         </section>
       </section>
+
+      {showConsentModal && (
+        <CustomerConsentModal
+          onConsent={() => {
+            setShowConsentModal(false);
+            setShowTryOnFlow(true);
+          }}
+          onCancel={() => setShowConsentModal(false)}
+        />
+      )}
+
+      {showTryOnFlow && (
+        <TryOnFlow
+          onClose={() => setShowTryOnFlow(false)}
+          onSubmit={handleQuickTryOnSubmit}
+        />
+      )}
     </main>
   );
 }

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type TouchEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
+import { CustomerConsentModal } from "../components/CustomerConsentModal";
+import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import type {
@@ -32,6 +34,8 @@ export function OutputViewerPage() {
   const [statusText, setStatusText] = useState("Loading image...");
   const [catalogGenerationRows, setCatalogGenerationRows] = useState<GenerationRow[]>([]);
   const [catalogImageRows, setCatalogImageRows] = useState<CatalogImageRow[]>([]);
+  const [showConsentModal, setShowConsentModal] = useState(false);
+  const [showTryOnFlow, setShowTryOnFlow] = useState(false);
 
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -230,6 +234,50 @@ export function OutputViewerPage() {
     }
   }
 
+  async function handleTryOnSubmit(customerPhotoFile: File): Promise<string> {
+    if (!accessToken) throw new Error("Not authenticated");
+    if (!generationId) throw new Error("No generation selected");
+
+    const reader = new FileReader();
+    const photoB64 = await new Promise<string>((resolve, reject) => {
+      reader.onload = () => {
+        const result = reader.result as string;
+        const b64 = result.split(",")[1];
+        if (!b64) {
+          reject(new Error("Failed to read customer photo"));
+          return;
+        }
+        resolve(b64);
+      };
+      reader.onerror = () => reject(reader.error ?? new Error("Failed to read customer photo"));
+      reader.readAsDataURL(customerPhotoFile);
+    });
+
+    const response = await apiFetch<{
+      result_b64: string;
+      result_mime: string;
+    }>("/tryon/", accessToken, {
+      method: "POST",
+      body: JSON.stringify({
+        generation_id: generationId,
+        customer_photo_b64: photoB64,
+        customer_photo_mime: customerPhotoFile.type || "image/jpeg",
+      }),
+    });
+
+    const blob = base64ToBlob(response.result_b64, response.result_mime);
+    return URL.createObjectURL(blob);
+  }
+
+  function base64ToBlob(b64: string, mime: string): Blob {
+    const bytes = atob(b64);
+    const arr = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) {
+      arr[i] = bytes.charCodeAt(i);
+    }
+    return new Blob([arr], { type: mime });
+  }
+
   function handleMatchColor() {
     if (!generationId) return;
     navigate(`/match-color?generationId=${encodeURIComponent(generationId)}`);
@@ -349,33 +397,110 @@ export function OutputViewerPage() {
 
         {catalogMode ? (
           <div style={{
-            display: 'flex',
+            display: 'grid',
             gap: '10px',
             marginBottom: '12px',
           }}>
-            <button
-              className="btn-primary"
-              onClick={handleDownload}
-              disabled={downloading || !imageUrl}
-              style={{ flex: 1 }}
-            >
-              {downloading ? 'Preparing...' : '↑ Share / Save'}
-            </button>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                className="btn-primary"
+                onClick={handleDownload}
+                disabled={downloading || !imageUrl}
+                style={{ flex: 1 }}
+              >
+                {downloading ? 'Preparing...' : '↑ Share / Save'}
+              </button>
 
+              <button
+                className="btn-primary"
+                onClick={() => navigate(
+                  `/match-color?generationId=${generationId}`
+                )}
+                disabled={!imageUrl}
+                style={{
+                  flex: 1,
+                  background: 'var(--white)',
+                  color: '#1B1B2F',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                Match Color
+              </button>
+            </div>
+
+            {generationMode && !catalogImageMode ? (
+              <button
+                onClick={() => setShowConsentModal(true)}
+                disabled={!imageUrl}
+                style={{
+                  width: "100%",
+                  minHeight: "48px",
+                  background: "transparent",
+                  color: "#1B1B2F",
+                  border: "1.5px solid #1B1B2F",
+                  borderRadius: "14px",
+                  fontSize: "14px",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px",
+                }}
+              >
+                👤 Try On Customer
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {generationMode && generationReady && !catalogMode ? (
+          <div style={{ display: 'grid', gap: '10px', marginBottom: '12px' }}>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                className="btn-primary"
+                onClick={handleDownload}
+                disabled={downloading || !imageUrl}
+                style={{ flex: 1 }}
+              >
+                {downloading ? "Preparing..." : "↑ Share / Save"}
+              </button>
+              <button
+                className="btn-primary"
+                onClick={handleMatchColor}
+                disabled={!imageUrl}
+                style={{
+                  flex: 1,
+                  background: "var(--white)",
+                  color: "#1B1B2F",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                Match Color
+              </button>
+            </div>
             <button
-              className="btn-primary"
-              onClick={() => navigate(
-                `/match-color?generationId=${generationId}`
-              )}
+              onClick={() => setShowConsentModal(true)}
               disabled={!imageUrl}
               style={{
-                flex: 1,
-                background: 'var(--white)',
-                color: '#1B1B2F',
-                border: '1px solid var(--border)',
+                width: "100%",
+                minHeight: "48px",
+                background: "transparent",
+                color: "#1B1B2F",
+                border: "1.5px solid #1B1B2F",
+                borderRadius: "14px",
+                fontSize: "14px",
+                fontWeight: 700,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
               }}
             >
-              Match Color
+              👤 Try On Customer
             </button>
           </div>
         ) : null}
@@ -390,18 +515,6 @@ export function OutputViewerPage() {
           {generationMode && !generationReady ? (
             <button className="btn btn-light flex-1" onClick={loadGenerationView} disabled={loading || downloading}>
               {loading ? "Refreshing..." : "Refresh"}
-            </button>
-          ) : null}
-
-          {generationMode && !catalogMode ? (
-            <button className="btn btn-light flex-1" onClick={handleDownload} disabled={downloading || !generationReady}>
-              {downloading ? "Preparing..." : "Share / Save"}
-            </button>
-          ) : null}
-
-          {generationMode && generationReady && !catalogMode ? (
-            <button className="btn btn-dark flex-1" onClick={handleMatchColor} disabled={downloading || loading}>
-              Match Color
             </button>
           ) : null}
 
@@ -432,6 +545,20 @@ export function OutputViewerPage() {
           </p>
         ) : null}
       </section>
+
+      {showConsentModal && (
+        <CustomerConsentModal
+          onConsent={() => {
+            setShowConsentModal(false);
+            setShowTryOnFlow(true);
+          }}
+          onCancel={() => setShowConsentModal(false)}
+        />
+      )}
+
+      {showTryOnFlow && (
+        <TryOnFlow onClose={() => setShowTryOnFlow(false)} onSubmit={handleTryOnSubmit} />
+      )}
     </main>
   );
 }
