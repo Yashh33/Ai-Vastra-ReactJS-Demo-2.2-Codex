@@ -446,7 +446,7 @@ export function GeneratePage() {
     if (!fabricImageId && fabricFile) {
       const ext = guessFileExtension(fabricFile.name, fabricFile.type);
       const path = `${shopContext.shop_id}/${Date.now()}-${makeRandomSuffix()}.${ext}`;
-      const storagePath = await uploadToStorage(
+      await uploadToStorage(
         "fabric-images",
         path,
         fabricFile
@@ -457,7 +457,7 @@ export function GeneratePage() {
         {
           method: "POST",
           body: JSON.stringify({
-            storage_path: storagePath,
+            storage_path: path,
             original_filename: fabricFile.name,
             mime_type: fabricFile.type,
             file_size_bytes: fabricFile.size,
