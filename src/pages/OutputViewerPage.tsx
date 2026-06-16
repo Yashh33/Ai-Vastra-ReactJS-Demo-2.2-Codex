@@ -262,6 +262,7 @@ export function OutputViewerPage() {
         generation_id: generationId,
         customer_photo_b64: photoB64,
         customer_photo_mime: customerPhotoFile.type || "image/jpeg",
+        consent_confirmed: true,
       }),
     });
 
