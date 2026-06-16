@@ -1,92 +1,579 @@
 import {
-  FormEvent,
   useEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
-  type PointerEvent as ReactPointerEvent
+  type TouchEvent as ReactTouchEvent
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import {
-  applyLivePreviewAdjustment,
-  emptySwatchAdjustment,
-  extractProminentSwatches,
-  hexToHsl01,
-  isZeroAdjustment,
-  resizeImageToCanvas,
-  type SwatchAdjustment
-} from "../lib/matchColor";
-import type { DownloadUrlResponse, GenerationRow, MatchColorEditPayload, MatchColorSaveResponse } from "../lib/types";
-import { MatchColorWebGLRenderer, type MatchColorDrawOptions } from "../lib/webglMatchColor";
+import { hexToHsl01 } from "../lib/matchColor";
+import { createSignedUrl } from "../lib/storage";
+import type { FabricImageRow, GenerationRow, MatchColorEditPayload, MatchColorSaveResponse } from "../lib/types";
 import { withCacheBust } from "../lib/utils";
 
-type PreviewMode = "webgl" | "cpu";
+const NAVY = "#1B1B2F";
+const GOLD = "#C9A84C";
+const MAX_CORRECTIONS = 6;
 
-function loadImageElement(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Image load failed"));
-    image.src = src;
-  });
-}
+type SamplerPanelKind = "output" | "fabric";
 
-async function fetchImageAsObjectUrl(url: string) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch preview image (HTTP ${response.status})`);
-  }
-  const blob = await response.blob();
-  return URL.createObjectURL(blob);
-}
+type CorrectionPair = {
+  id: string;
+  from_hex: string;
+  to_hex: string;
+};
 
-function clamp01(value: number) {
-  return Math.min(1, Math.max(0, value));
-}
+type LocalGenerationFabric = {
+  fabric_image_id?: string | null;
+};
 
-function clampRange(value: number, min: number, max: number) {
+type MatchColorGenerationRow = Omit<GenerationRow, "generation_fabrics"> & {
+  generation_fabrics?: LocalGenerationFabric[];
+};
+
+type TransformState = {
+  scale: number;
+  panX: number;
+  panY: number;
+};
+
+type Point = {
+  x: number;
+  y: number;
+};
+
+type TouchPoint = {
+  clientX: number;
+  clientY: number;
+};
+
+type CrosshairState = {
+  visible: boolean;
+  x: number;
+  y: number;
+  hex: string;
+};
+
+type NaturalSize = {
+  width: number;
+  height: number;
+};
+
+type GestureState =
+  | {
+      mode: "drag";
+      startClient: Point;
+      startPan: Point;
+    }
+  | {
+      mode: "pinch";
+      startDistance: number;
+      startScale: number;
+      contentCenter: Point;
+    };
+
+type ImageSamplerPanelProps = {
+  kind: SamplerPanelKind;
+  label: string;
+  imageUrl: string;
+  highlighted?: boolean;
+  onColorLocked: (kind: SamplerPanelKind, hex: string) => void;
+};
+
+function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-function wrapHue01(value: number) {
-  const wrapped = value % 1;
-  return wrapped < 0 ? wrapped + 1 : wrapped;
+function touchDistance(a: TouchPoint, b: TouchPoint) {
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
 }
 
-function hsl01ToCss(h: number, s: number, l: number) {
-  const hue = Math.round(wrapHue01(h) * 360);
-  const sat = Math.round(clamp01(s) * 100);
-  const light = Math.round(clamp01(l) * 100);
-  return `hsl(${hue}, ${sat}%, ${light}%)`;
+function hexFromRgb(r: number, g: number, b: number) {
+  const toHex = (value: number) => clamp(value, 0, 255).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
 }
 
-function buildHueTrackGradient(centerHue: number) {
-  const stops: string[] = [];
-  const steps = 12;
-  for (let i = 0; i <= steps; i += 1) {
-    const pct = (i / steps) * 100;
-    const offset = -0.5 + i / steps; // -180..+180 degrees around center
-    const hue = wrapHue01(centerHue + offset);
-    stops.push(`${hsl01ToCss(hue, 1, 0.5)} ${pct.toFixed(2)}%`);
+function makeCorrectionId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function loadImageFromUrl(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Image fetch failed (HTTP ${response.status})`);
   }
-  return `linear-gradient(90deg, ${stops.join(", ")})`;
+
+  const objectUrl = URL.createObjectURL(await response.blob());
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const element = new Image();
+    element.onload = () => resolve(element);
+    element.onerror = () => reject(new Error("Image load failed"));
+    element.src = objectUrl;
+  });
+
+  return { image, objectUrl };
 }
 
-function buildSaturationTrackGradient(baseHue: number, baseSat: number, baseLight: number) {
-  return `linear-gradient(90deg, ${hsl01ToCss(baseHue, 0, baseLight)} 0%, ${hsl01ToCss(
-    baseHue,
-    baseSat,
-    baseLight
-  )} 50%, ${hsl01ToCss(baseHue, 1, baseLight)} 100%)`;
+async function findFabricImageById(accessToken: string, fabricImageId: string) {
+  const pageSize = 100;
+
+  for (let offset = 0; offset <= 1000; offset += pageSize) {
+    const rows = await apiFetch<FabricImageRow[]>(
+      `/fabric-images?limit=${pageSize}&offset=${offset}`,
+      accessToken,
+      { method: "GET" }
+    );
+
+    const match = rows.find((row) => row.id === fabricImageId);
+    if (match) return match;
+    if (rows.length < pageSize) return null;
+  }
+
+  return null;
 }
 
-type RangeTrackStyle = CSSProperties & {
-  "--track-gradient"?: string;
-};
+function buildHslEdit(pair: CorrectionPair): MatchColorEditPayload {
+  const fromHsl = hexToHsl01(pair.from_hex);
+  const toHsl = hexToHsl01(pair.to_hex);
+
+  if (!fromHsl || !toHsl) {
+    return {
+      selected_hex: pair.from_hex,
+      hue_shift_degrees: 0,
+      saturation_delta_percent: 0,
+      lightness_delta_percent: 0
+    };
+  }
+
+  return {
+    selected_hex: pair.from_hex,
+    hue_shift_degrees: (toHsl.h - fromHsl.h) * 360,
+    saturation_delta_percent: (toHsl.s - fromHsl.s) * 100,
+    lightness_delta_percent: (toHsl.l - fromHsl.l) * 100
+  };
+}
+
+function ImageSamplerPanel({
+  kind,
+  label,
+  imageUrl,
+  highlighted = false,
+  onColorLocked
+}: ImageSamplerPanelProps) {
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const transformRef = useRef<TransformState>({ scale: 1, panX: 0, panY: 0 });
+  const gestureRef = useRef<GestureState | null>(null);
+  const lastSampleRef = useRef<string | null>(null);
+
+  const [transform, setTransform] = useState<TransformState>({ scale: 1, panX: 0, panY: 0 });
+  const [naturalSize, setNaturalSize] = useState<NaturalSize | null>(null);
+  const [sampledHex, setSampledHex] = useState<string | null>(null);
+  const [canvasReady, setCanvasReady] = useState(false);
+  const [panelError, setPanelError] = useState<string | null>(null);
+  const [crosshair, setCrosshair] = useState<CrosshairState>({
+    visible: false,
+    x: 0,
+    y: 0,
+    hex: "#FFFFFF"
+  });
+
+  function commitTransform(next: TransformState) {
+    transformRef.current = next;
+    setTransform(next);
+  }
+
+  function clampPan(panX: number, panY: number, scale: number) {
+    const stage = stageRef.current;
+    if (!stage || scale <= 1) return { panX: 0, panY: 0 };
+
+    const width = stage.clientWidth || 1;
+    const height = stage.clientHeight || 1;
+    const minX = Math.min(0, width - width * scale);
+    const minY = Math.min(0, height - height * scale);
+
+    return {
+      panX: clamp(panX, minX, 0),
+      panY: clamp(panY, minY, 0)
+    };
+  }
+
+  function getLocalPoint(clientX: number, clientY: number) {
+    const stage = stageRef.current;
+    if (!stage) return null;
+    const rect = stage.getBoundingClientRect();
+    return {
+      x: clientX - rect.left,
+      y: clientY - rect.top
+    };
+  }
+
+  function getPinchCenter(first: TouchPoint, second: TouchPoint) {
+    return getLocalPoint(
+      (first.clientX + second.clientX) / 2,
+      (first.clientY + second.clientY) / 2
+    );
+  }
+
+  function sampleAtTouch(touch: TouchPoint, activeTransform = transformRef.current) {
+    const stage = stageRef.current;
+    const canvas = canvasRef.current;
+    const local = getLocalPoint(touch.clientX, touch.clientY);
+
+    if (!stage || !canvas || !local || !naturalSize || !canvasReady) {
+      return null;
+    }
+
+    const stageWidth = stage.clientWidth || 1;
+    const stageHeight = stage.clientHeight || 1;
+    const fitScale = Math.min(
+      stageWidth / Math.max(naturalSize.width, 1),
+      stageHeight / Math.max(naturalSize.height, 1)
+    );
+    const displayedWidth = naturalSize.width * fitScale;
+    const displayedHeight = naturalSize.height * fitScale;
+    const displayedLeft = (stageWidth - displayedWidth) / 2;
+    const displayedTop = (stageHeight - displayedHeight) / 2;
+
+    const untransformedX = (local.x - activeTransform.panX) / activeTransform.scale;
+    const untransformedY = (local.y - activeTransform.panY) / activeTransform.scale;
+    const canvasX = clamp(
+      Math.floor(((untransformedX - displayedLeft) / displayedWidth) * canvas.width),
+      0,
+      Math.max(0, canvas.width - 1)
+    );
+    const canvasY = clamp(
+      Math.floor(((untransformedY - displayedTop) / displayedHeight) * canvas.height),
+      0,
+      Math.max(0, canvas.height - 1)
+    );
+
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return null;
+
+    const pixel = context.getImageData(canvasX, canvasY, 1, 1).data;
+    const hex = hexFromRgb(pixel[0] ?? 0, pixel[1] ?? 0, pixel[2] ?? 0);
+    lastSampleRef.current = hex;
+    setSampledHex(hex);
+    setCrosshair({
+      visible: true,
+      x: local.x,
+      y: local.y - 60,
+      hex
+    });
+    return hex;
+  }
+
+  function startPinch(first: TouchPoint, second: TouchPoint) {
+    const center = getPinchCenter(first, second);
+    if (!center) return;
+
+    const active = transformRef.current;
+    gestureRef.current = {
+      mode: "pinch",
+      startDistance: Math.max(1, touchDistance(first, second)),
+      startScale: active.scale,
+      contentCenter: {
+        x: (center.x - active.panX) / active.scale,
+        y: (center.y - active.panY) / active.scale
+      }
+    };
+    setCrosshair((current) => ({ ...current, visible: false }));
+  }
+
+  function updatePinch(first: TouchPoint, second: TouchPoint) {
+    const gesture = gestureRef.current;
+    const center = getPinchCenter(first, second);
+    if (!gesture || gesture.mode !== "pinch" || !center) return;
+
+    const nextScale = clamp(
+      gesture.startScale * (touchDistance(first, second) / gesture.startDistance),
+      1,
+      4
+    );
+    const unclampedPanX = center.x - gesture.contentCenter.x * nextScale;
+    const unclampedPanY = center.y - gesture.contentCenter.y * nextScale;
+    const clampedPan = clampPan(unclampedPanX, unclampedPanY, nextScale);
+
+    commitTransform({
+      scale: nextScale,
+      panX: clampedPan.panX,
+      panY: clampedPan.panY
+    });
+  }
+
+  function handleTouchStart(event: ReactTouchEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setPanelError(null);
+
+    const first = event.touches[0];
+    const second = event.touches[1];
+
+    if (first && second) {
+      startPinch(first, second);
+      return;
+    }
+
+    if (!first) return;
+
+    const active = transformRef.current;
+    gestureRef.current = {
+      mode: "drag",
+      startClient: { x: first.clientX, y: first.clientY },
+      startPan: { x: active.panX, y: active.panY }
+    };
+    sampleAtTouch(first, active);
+  }
+
+  function handleTouchMove(event: ReactTouchEvent<HTMLDivElement>) {
+    event.preventDefault();
+
+    const first = event.touches[0];
+    const second = event.touches[1];
+
+    if (first && second) {
+      updatePinch(first, second);
+      return;
+    }
+
+    if (!first) return;
+
+    const gesture = gestureRef.current;
+    let active = transformRef.current;
+
+    if (gesture?.mode === "drag" && active.scale > 1) {
+      const clampedPan = clampPan(
+        gesture.startPan.x + first.clientX - gesture.startClient.x,
+        gesture.startPan.y + first.clientY - gesture.startClient.y,
+        active.scale
+      );
+      active = {
+        ...active,
+        panX: clampedPan.panX,
+        panY: clampedPan.panY
+      };
+      commitTransform(active);
+    }
+
+    sampleAtTouch(first, active);
+  }
+
+  function handleTouchEnd(event: ReactTouchEvent<HTMLDivElement>) {
+    event.preventDefault();
+
+    if (event.touches.length > 0) {
+      return;
+    }
+
+    const gesture = gestureRef.current;
+    gestureRef.current = null;
+    setCrosshair((current) => ({ ...current, visible: false }));
+
+    if (gesture?.mode === "drag" && lastSampleRef.current) {
+      onColorLocked(kind, lastSampleRef.current);
+    }
+  }
+
+  function handleTouchCancel() {
+    gestureRef.current = null;
+    setCrosshair((current) => ({ ...current, visible: false }));
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    setCanvasReady(false);
+    setPanelError(null);
+    setNaturalSize(null);
+    setSampledHex(null);
+    lastSampleRef.current = null;
+    commitTransform({ scale: 1, panX: 0, panY: 0 });
+
+    async function prepareCanvas() {
+      try {
+        const loaded = await loadImageFromUrl(imageUrl);
+        objectUrl = loaded.objectUrl;
+
+        if (cancelled) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+
+        const canvas = canvasRef.current;
+        const context = canvas?.getContext("2d", { willReadFrequently: true });
+        if (!canvas || !context) {
+          throw new Error("Canvas context unavailable");
+        }
+
+        const width = Math.max(1, loaded.image.naturalWidth);
+        const height = Math.max(1, loaded.image.naturalHeight);
+        canvas.width = width;
+        canvas.height = height;
+        context.clearRect(0, 0, width, height);
+        context.drawImage(loaded.image, 0, 0, width, height);
+        setNaturalSize({ width, height });
+        setCanvasReady(true);
+      } catch (err) {
+        if (!cancelled) {
+          setPanelError(err instanceof Error ? err.message : "Sampler image failed to load");
+        }
+      }
+    }
+
+    void prepareCanvas();
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [imageUrl]);
+
+  const imageTransform = `translate3d(${transform.panX}px, ${transform.panY}px, 0) scale(${transform.scale})`;
+  const panelHeight = kind === "output" ? "min(64svh, 620px)" : "min(48svh, 440px)";
+  const crosshairId = `match-color-crosshair-shadow-${kind}`;
+
+  const stageStyle: CSSProperties = {
+    height: panelHeight,
+    minHeight: kind === "output" ? 320 : 260
+  };
+
+  const transformStyle: CSSProperties = {
+    transform: imageTransform,
+    transformOrigin: "top left"
+  };
+
+  return (
+    <section
+      className="card stack-sm"
+      style={{
+        borderColor: highlighted ? GOLD : "var(--border)",
+        animation: highlighted ? "match-color-pulse 1.2s ease-in-out infinite" : "none"
+      }}
+    >
+      <div className="between">
+        <h2>{label}</h2>
+        <span className="chip">{transform.scale.toFixed(1)}x</span>
+      </div>
+
+      <div style={{ position: "relative" }}>
+        <div
+          ref={stageRef}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          onTouchCancel={handleTouchCancel}
+          style={{
+            ...stageStyle,
+            position: "relative",
+            overflow: "hidden",
+            borderRadius: 14,
+            border: "1px solid #334155",
+            background: "#111827",
+            touchAction: "none",
+            userSelect: "none"
+          }}
+        >
+          <canvas
+            ref={canvasRef}
+            aria-hidden
+            style={{
+              ...transformStyle,
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: "contain",
+              opacity: 0,
+              pointerEvents: "none"
+            }}
+          />
+          <img
+            src={imageUrl}
+            alt={kind === "output" ? "Generated output" : "Fabric swatch"}
+            draggable={false}
+            style={{
+              ...transformStyle,
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: "contain",
+              pointerEvents: "none",
+              display: "block"
+            }}
+          />
+          {!canvasReady ? (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                display: "grid",
+                placeItems: "center",
+                background: "rgba(17, 24, 39, 0.72)"
+              }}
+            >
+              <div className="spinner" />
+            </div>
+          ) : null}
+        </div>
+
+        {crosshair.visible ? (
+          <svg
+            width="96"
+            height="96"
+            viewBox="-48 -48 96 96"
+            aria-hidden
+            style={{
+              position: "absolute",
+              left: crosshair.x,
+              top: crosshair.y,
+              transform: "translate(-50%, -50%)",
+              pointerEvents: "none",
+              overflow: "visible"
+            }}
+          >
+            <defs>
+              <filter id={crosshairId} x="-80%" y="-80%" width="260%" height="260%">
+                <feDropShadow dx="0" dy="1" stdDeviation="2.5" floodColor="#020617" floodOpacity="0.9" />
+              </filter>
+            </defs>
+            <g filter={`url(#${crosshairId})`}>
+              <line x1="-40" y1="0" x2="40" y2="0" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" />
+              <line x1="0" y1="-40" x2="0" y2="40" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" />
+              <circle cx="0" cy="0" r="5" fill={crosshair.hex} stroke="#FFFFFF" strokeWidth="2" />
+            </g>
+          </svg>
+        ) : null}
+      </div>
+
+      <div className="between">
+        <p className="tiny muted">Sampled color</p>
+        <div className="row" style={{ gap: 6 }}>
+          <span
+            aria-hidden
+            style={{
+              width: 18,
+              height: 18,
+              borderRadius: 5,
+              border: "1px solid var(--border)",
+              background: sampledHex ?? "#FFFFFF"
+            }}
+          />
+          <strong className="tiny" style={{ color: NAVY }}>
+            {sampledHex ?? "Tap image"}
+          </strong>
+        </div>
+      </div>
+
+      {panelError ? <p className="error-text">{panelError}</p> : null}
+    </section>
+  );
+}
 
 export function MatchColorPage() {
   const { accessToken } = useAuth();
@@ -95,682 +582,412 @@ export function MatchColorPage() {
 
   const generationId = searchParams.get("generationId") ?? "";
 
-  const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const objectUrlsRef = useRef<string[]>([]);
-  const fullResCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const sourceCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const inspectCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const inspectScratchCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const webglRendererRef = useRef<MatchColorWebGLRenderer | null>(null);
-  const drawRafRef = useRef<number | null>(null);
-  const inspectDrawRafRef = useRef<number | null>(null);
-  const fastPreviewTimerRef = useRef<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [applying, setApplying] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [outputPath, setOutputPath] = useState<string | null>(null);
+  const [outputImageUrl, setOutputImageUrl] = useState<string | null>(null);
+  const [fabricImageUrl, setFabricImageUrl] = useState<string | null>(null);
+  const [pendingFromHex, setPendingFromHex] = useState<string | null>(null);
+  const [corrections, setCorrections] = useState<CorrectionPair[]>([]);
+  const [statusText, setStatusText] = useState("Loading images...");
+  const [errorText, setErrorText] = useState<string | null>(null);
+  const [hasApplied, setHasApplied] = useState(false);
 
-  const [previewMode, setPreviewMode] = useState<PreviewMode>("webgl");
-  const [fastPreview, setFastPreview] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [statusText, setStatusText] = useState("Loading output image...");
-  const [displayImageUrl, setDisplayImageUrl] = useState<string | null>(null);
-  const [sourceImageData, setSourceImageData] = useState<ImageData | null>(null);
-  const [fullResReady, setFullResReady] = useState(false);
-  const [inspectOpen, setInspectOpen] = useState(false);
-  const [inspectZoom, setInspectZoom] = useState(2.2);
-  const [inspectCenter, setInspectCenter] = useState({ x: 0.5, y: 0.5 });
-  const [swatches, setSwatches] = useState<string[]>([]);
-  const [selectedSwatch, setSelectedSwatch] = useState<string | null>(null);
-  const [adjustmentsBySwatch, setAdjustmentsBySwatch] = useState<Record<string, SwatchAdjustment>>(
-    {}
+  const canApply = corrections.length > 0 && !applying;
+  const canAddMore = corrections.length < MAX_CORRECTIONS;
+
+  const edits = useMemo(
+    () => corrections.map((pair) => buildHslEdit(pair)),
+    [corrections]
   );
-
-  const currentAdjustment = useMemo(() => {
-    if (!selectedSwatch) return emptySwatchAdjustment();
-    return adjustmentsBySwatch[selectedSwatch] ?? emptySwatchAdjustment();
-  }, [selectedSwatch, adjustmentsBySwatch]);
-
-  const editedSwatchCount = useMemo(
-    () => swatches.filter((hex) => !isZeroAdjustment(adjustmentsBySwatch[hex])).length,
-    [swatches, adjustmentsBySwatch]
-  );
-
-  const actionBusy = loading || saving;
-  const selectedHsl = useMemo(() => {
-    return selectedSwatch ? hexToHsl01(selectedSwatch) : null;
-  }, [selectedSwatch]);
-
-  const hueTrackGradient = useMemo(() => {
-    const centerHue = selectedHsl?.h ?? 0;
-    return buildHueTrackGradient(centerHue);
-  }, [selectedHsl?.h]);
-
-  const saturationTrackGradient = useMemo(() => {
-    const hue = selectedHsl?.h ?? 0;
-    const sat = selectedHsl?.s ?? 0.5;
-    // Keep saturation track readable for very dark/very light colors.
-    const light = selectedHsl ? Math.min(0.72, Math.max(0.28, selectedHsl.l)) : 0.5;
-    return buildSaturationTrackGradient(hue, sat, light);
-  }, [selectedHsl]);
-
-  const lightnessTrackGradient = "linear-gradient(90deg, rgb(0 0 0) 0%, rgb(128 128 128) 50%, rgb(255 255 255) 100%)";
-
-  const hueRangeStyle: RangeTrackStyle = useMemo(
-    () => ({
-      "--track-gradient": hueTrackGradient
-    }),
-    [hueTrackGradient]
-  );
-
-  const saturationRangeStyle: RangeTrackStyle = useMemo(
-    () => ({
-      "--track-gradient": saturationTrackGradient
-    }),
-    [saturationTrackGradient]
-  );
-
-  const lightnessRangeStyle: RangeTrackStyle = useMemo(
-    () => ({
-      "--track-gradient": lightnessTrackGradient
-    }),
-    []
-  );
-
-  function buildWebGLDrawOptions(): MatchColorDrawOptions {
-    const targetHsl = selectedSwatch ? hexToHsl01(selectedSwatch) : null;
-    const adjustment = currentAdjustment;
-    return {
-      targetHsl: targetHsl ?? { h: 0, s: 0, l: 0 },
-      hueShift: adjustment.hueShiftDeg / 360,
-      satDelta: adjustment.satDeltaPct / 100,
-      lightDelta: adjustment.lightDeltaPct / 100
-    };
-  }
-
-  function scheduleWebGLDraw() {
-    if (previewMode !== "webgl") return;
-    if (drawRafRef.current !== null) return;
-
-    drawRafRef.current = window.requestAnimationFrame(() => {
-      drawRafRef.current = null;
-      try {
-        webglRendererRef.current?.draw(buildWebGLDrawOptions());
-      } catch {
-        // If GPU draw fails at runtime, fall back to CPU path.
-        setPreviewMode("cpu");
-      }
-    });
-  }
-
-  function initOrRefreshWebGLRenderer() {
-    if (previewMode !== "webgl") return;
-    if (!previewCanvasRef.current || !sourceCanvasRef.current) return;
-
-    try {
-      if (!webglRendererRef.current) {
-        webglRendererRef.current = new MatchColorWebGLRenderer(previewCanvasRef.current);
-      }
-
-      const sourceCanvas = sourceCanvasRef.current;
-      webglRendererRef.current.setSource(sourceCanvas, sourceCanvas.width, sourceCanvas.height);
-      webglRendererRef.current.setOutputScale(fastPreview ? 0.9 : 1);
-      scheduleWebGLDraw();
-    } catch {
-      webglRendererRef.current?.dispose();
-      webglRendererRef.current = null;
-      setPreviewMode("cpu");
-      setStatusText((prev) =>
-        prev.includes("CPU fallback") ? prev : `${prev} (CPU fallback active)`
-      );
-    }
-  }
-
-  function drawInspectCanvas() {
-    if (!inspectOpen) return;
-    const fullResCanvas = fullResCanvasRef.current;
-    const inspectCanvas = inspectCanvasRef.current;
-    if (!fullResCanvas || !inspectCanvas) return;
-
-    const outCtx = inspectCanvas.getContext("2d");
-    if (!outCtx) return;
-
-    const zoom = clampRange(inspectZoom, 1.2, 6);
-    const cropWidth = Math.max(48, Math.round(fullResCanvas.width / zoom));
-    const cropHeight = Math.max(48, Math.round(fullResCanvas.height / zoom));
-    const maxLeft = Math.max(0, fullResCanvas.width - cropWidth);
-    const maxTop = Math.max(0, fullResCanvas.height - cropHeight);
-
-    const centerX = inspectCenter.x * fullResCanvas.width;
-    const centerY = inspectCenter.y * fullResCanvas.height;
-    const cropLeft = Math.round(clampRange(centerX - cropWidth / 2, 0, maxLeft));
-    const cropTop = Math.round(clampRange(centerY - cropHeight / 2, 0, maxTop));
-
-    const dpr = window.devicePixelRatio || 1;
-    const cssWidth = Math.max(1, Math.round(inspectCanvas.clientWidth || 240));
-    const cssHeight = Math.max(1, Math.round(inspectCanvas.clientHeight || 240));
-    const outputWidth = Math.max(1, Math.round(cssWidth * dpr));
-    const outputHeight = Math.max(1, Math.round(cssHeight * dpr));
-
-    if (inspectCanvas.width !== outputWidth || inspectCanvas.height !== outputHeight) {
-      inspectCanvas.width = outputWidth;
-      inspectCanvas.height = outputHeight;
-    }
-
-    const scratch = inspectScratchCanvasRef.current ?? document.createElement("canvas");
-    inspectScratchCanvasRef.current = scratch;
-    const processMaxSide = 384;
-    const processWidth = Math.max(1, Math.min(outputWidth, processMaxSide));
-    const processHeight = Math.max(1, Math.min(outputHeight, processMaxSide));
-    scratch.width = processWidth;
-    scratch.height = processHeight;
-    const scratchCtx = scratch.getContext("2d", { willReadFrequently: true });
-    if (!scratchCtx) return;
-
-    scratchCtx.clearRect(0, 0, processWidth, processHeight);
-    scratchCtx.imageSmoothingEnabled = true;
-    scratchCtx.imageSmoothingQuality = "high";
-    scratchCtx.drawImage(
-      fullResCanvas,
-      cropLeft,
-      cropTop,
-      cropWidth,
-      cropHeight,
-      0,
-      0,
-      processWidth,
-      processHeight
-    );
-
-    const roiImageData = scratchCtx.getImageData(0, 0, processWidth, processHeight);
-    const rendered = applyLivePreviewAdjustment(roiImageData, selectedSwatch, currentAdjustment);
-    scratchCtx.putImageData(rendered, 0, 0);
-
-    outCtx.clearRect(0, 0, outputWidth, outputHeight);
-    outCtx.imageSmoothingEnabled = true;
-    outCtx.imageSmoothingQuality = "high";
-    outCtx.drawImage(scratch, 0, 0, outputWidth, outputHeight);
-
-    const crossX = outputWidth / 2;
-    const crossY = outputHeight / 2;
-    outCtx.strokeStyle = "rgb(248 250 252 / 88%)";
-    outCtx.lineWidth = Math.max(1.5, Math.round(dpr));
-    outCtx.beginPath();
-    outCtx.moveTo(crossX - 16 * dpr, crossY);
-    outCtx.lineTo(crossX + 16 * dpr, crossY);
-    outCtx.moveTo(crossX, crossY - 16 * dpr);
-    outCtx.lineTo(crossX, crossY + 16 * dpr);
-    outCtx.stroke();
-  }
-
-  function scheduleInspectDraw() {
-    if (!inspectOpen) return;
-    if (inspectDrawRafRef.current !== null) return;
-
-    inspectDrawRafRef.current = window.requestAnimationFrame(() => {
-      inspectDrawRafRef.current = null;
-      drawInspectCanvas();
-    });
-  }
-
-  useEffect(() => {
-    return () => {
-      for (const url of objectUrlsRef.current) URL.revokeObjectURL(url);
-      objectUrlsRef.current = [];
-
-      if (drawRafRef.current !== null) {
-        window.cancelAnimationFrame(drawRafRef.current);
-        drawRafRef.current = null;
-      }
-
-      if (inspectDrawRafRef.current !== null) {
-        window.cancelAnimationFrame(inspectDrawRafRef.current);
-        inspectDrawRafRef.current = null;
-      }
-
-      if (fastPreviewTimerRef.current !== null) {
-        window.clearTimeout(fastPreviewTimerRef.current);
-        fastPreviewTimerRef.current = null;
-      }
-
-      webglRendererRef.current?.dispose();
-      webglRendererRef.current = null;
-      fullResCanvasRef.current = null;
-      inspectScratchCanvasRef.current = null;
-    };
-  }, []);
-
-  useEffect(() => {
-    initOrRefreshWebGLRenderer();
-  }, [previewMode, sourceImageData]);
-
-  useEffect(() => {
-    if (!webglRendererRef.current || previewMode !== "webgl") return;
-    webglRendererRef.current.setOutputScale(fastPreview ? 0.9 : 1);
-    scheduleWebGLDraw();
-  }, [fastPreview, previewMode]);
-
-  useEffect(() => {
-    if (!sourceImageData || !previewCanvasRef.current || previewMode !== "cpu") return;
-    const ctx = previewCanvasRef.current.getContext("2d");
-    if (!ctx) return;
-
-    const rendered = applyLivePreviewAdjustment(sourceImageData, selectedSwatch, currentAdjustment);
-    previewCanvasRef.current.width = rendered.width;
-    previewCanvasRef.current.height = rendered.height;
-    ctx.putImageData(rendered, 0, 0);
-  }, [sourceImageData, selectedSwatch, currentAdjustment, previewMode]);
-
-  useEffect(() => {
-    if (previewMode !== "webgl") return;
-    scheduleWebGLDraw();
-  }, [selectedSwatch, currentAdjustment, previewMode]);
-
-  useEffect(() => {
-    if (!inspectOpen) return;
-    scheduleInspectDraw();
-  }, [inspectOpen, inspectCenter, inspectZoom, selectedSwatch, currentAdjustment, sourceImageData]);
-
-  useEffect(() => {
-    if (!inspectOpen) return;
-    const handleResize = () => scheduleInspectDraw();
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, [inspectOpen]);
-
-  async function fetchDownloadUrl(id: string) {
-    if (!accessToken) throw new Error("Missing access token");
-    const response = await apiFetch<DownloadUrlResponse>(`/generations/${id}/download-url`, accessToken, {
-      method: "GET"
-    });
-    return response.download_url;
-  }
 
   async function loadMatchColorData() {
-    if (!accessToken || !generationId) return;
+    if (!generationId) {
+      setLoading(false);
+      setStatusText("Missing generation id");
+      setErrorText("Missing generation id");
+      return;
+    }
+
+    if (!accessToken) return;
+
     setLoading(true);
-    setInspectOpen(false);
-    setInspectCenter({ x: 0.5, y: 0.5 });
-    setInspectZoom(2.2);
-    setFullResReady(false);
+    setErrorText(null);
+    setStatusText("Loading generation...");
+
     try {
-      setStatusText("Loading generation...");
-      const generation = await apiFetch<GenerationRow>(`/generations/${generationId}`, accessToken, {
-        method: "GET"
-      });
-
-      if (generation.status !== "done" || !generation.output_path) {
-        throw new Error(generation.error || "Output image is not ready yet");
-      }
-
-      setStatusText("Downloading editable preview...");
-      const signedUrl = await fetchDownloadUrl(generationId);
-      setDisplayImageUrl(withCacheBust(signedUrl));
-
-      const objectUrl = await fetchImageAsObjectUrl(signedUrl);
-      objectUrlsRef.current.push(objectUrl);
-
-      const image = await loadImageElement(objectUrl);
-      const fullResCanvas = document.createElement("canvas");
-      fullResCanvas.width = image.naturalWidth;
-      fullResCanvas.height = image.naturalHeight;
-      const fullCtx = fullResCanvas.getContext("2d", { willReadFrequently: true });
-      if (!fullCtx) {
-        throw new Error("Canvas context unavailable");
-      }
-      fullCtx.drawImage(image, 0, 0, fullResCanvas.width, fullResCanvas.height);
-      fullResCanvasRef.current = fullResCanvas;
-      setFullResReady(true);
-
-      const canvas = resizeImageToCanvas(image, 680);
-      sourceCanvasRef.current = canvas;
-
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        throw new Error("Canvas context unavailable");
-      }
-
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      setSourceImageData(imageData);
-
-      const nextSwatches = extractProminentSwatches(imageData, 8);
-      if (!nextSwatches.length) {
-        throw new Error("No prominent colors found in the output image");
-      }
-
-      setSwatches(nextSwatches);
-      setAdjustmentsBySwatch((prev) => {
-        const next: Record<string, SwatchAdjustment> = {};
-        for (const hex of nextSwatches) {
-          next[hex] = prev[hex] ?? emptySwatchAdjustment();
-        }
-        return next;
-      });
-      setSelectedSwatch((prev) => (prev && nextSwatches.includes(prev) ? prev : (nextSwatches[0] ?? null)));
-      setStatusText(
-        previewMode === "webgl"
-          ? "Select a swatch and adjust H/S/L sliders (GPU preview active)."
-          : "Select a swatch and adjust H/S/L sliders (CPU fallback active)."
+      const generation = await apiFetch<MatchColorGenerationRow>(
+        `/generations/${generationId}`,
+        accessToken,
+        { method: "GET" }
       );
+
+      if (!generation.output_path) {
+        throw new Error(generation.error || "Generated output is not ready yet");
+      }
+
+      const fabricImageId =
+        generation.generation_fabrics?.[0]?.fabric_image_id ?? generation.fabric_image_id;
+      if (!fabricImageId) {
+        throw new Error("No fabric image was found for this generation");
+      }
+
+      setStatusText("Loading fabric swatch...");
+      const fabricImage = await findFabricImageById(accessToken, fabricImageId);
+      if (!fabricImage?.storage_path) {
+        throw new Error("Fabric image record was not found");
+      }
+
+      setStatusText("Creating signed image URLs...");
+      const [outputSignedUrl, fabricSignedUrl] = await Promise.all([
+        createSignedUrl("generated-outputs", generation.output_path),
+        createSignedUrl("fabric-images", fabricImage.storage_path)
+      ]);
+
+      setOutputPath(generation.output_path);
+      setOutputImageUrl(withCacheBust(outputSignedUrl));
+      setFabricImageUrl(withCacheBust(fabricSignedUrl));
+      setPendingFromHex(null);
+      setStatusText("Tap the output color, then tap the correct fabric color.");
     } catch (err) {
-      setStatusText(`Match Color failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+      setOutputImageUrl(null);
+      setFabricImageUrl(null);
+      setErrorText(err instanceof Error ? err.message : "Unknown error");
+      setStatusText("Match Color failed");
     } finally {
       setLoading(false);
     }
   }
 
-  function handlePreviewInspectTap(
-    event: ReactPointerEvent<HTMLCanvasElement | HTMLImageElement>
-  ) {
-    if (!fullResReady) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-    const nextX = clamp01((event.clientX - rect.left) / rect.width);
-    const nextY = clamp01((event.clientY - rect.top) / rect.height);
-    setInspectCenter({ x: nextX, y: nextY });
-    setInspectOpen(true);
-  }
-
   useEffect(() => {
-    if (!generationId) {
-      setStatusText("Missing generation id");
-      return;
-    }
     void loadMatchColorData();
-  }, [generationId, accessToken]);
+  }, [accessToken, generationId]);
 
-  function updateSelectedSwatch(
-    updater: (current: SwatchAdjustment) => SwatchAdjustment
-  ) {
-    if (!selectedSwatch) return;
-    setAdjustmentsBySwatch((prev) => {
-      const current = prev[selectedSwatch] ?? emptySwatchAdjustment();
-      return {
-        ...prev,
-        [selectedSwatch]: updater(current)
-      };
-    });
-  }
+  function handleLockedColor(kind: SamplerPanelKind, hex: string) {
+    setErrorText(null);
 
-  function resetSelectedSwatch() {
-    if (!selectedSwatch) return;
-    setAdjustmentsBySwatch((prev) => ({
-      ...prev,
-      [selectedSwatch]: emptySwatchAdjustment()
-    }));
-    setStatusText(`Reset ${selectedSwatch}`);
-  }
+    if (kind === "output") {
+      if (!canAddMore) {
+        setErrorText(`Maximum ${MAX_CORRECTIONS} corrections allowed.`);
+        return;
+      }
 
-  async function handleSave() {
-    if (!accessToken || !generationId) return;
-    const edits: MatchColorEditPayload[] = swatches
-      .map((hex) => ({
-        hex,
-        adjustment: adjustmentsBySwatch[hex] ?? emptySwatchAdjustment()
-      }))
-      .filter((row) => !isZeroAdjustment(row.adjustment))
-      .map((row) => ({
-        selected_hex: row.hex,
-        hue_shift_degrees: row.adjustment.hueShiftDeg,
-        saturation_delta_percent: row.adjustment.satDeltaPct,
-        lightness_delta_percent: row.adjustment.lightDeltaPct
-      }));
-
-    if (!edits.length) {
-      setStatusText("Make at least one swatch edit before saving.");
+      setPendingFromHex(hex);
+      setStatusText("Now tap the correct color on the fabric swatch.");
       return;
     }
 
-    setSaving(true);
+    if (!pendingFromHex) {
+      setStatusText("Tap the output image first, then tap the fabric swatch.");
+      return;
+    }
+
+    if (!canAddMore) {
+      setPendingFromHex(null);
+      setErrorText(`Maximum ${MAX_CORRECTIONS} corrections allowed.`);
+      return;
+    }
+
+    setCorrections((current) => [
+      ...current,
+      {
+        id: makeCorrectionId(),
+        from_hex: pendingFromHex,
+        to_hex: hex
+      }
+    ]);
+    setPendingFromHex(null);
+    setStatusText("Correction added. Tap output image to add another correction.");
+  }
+
+  function handleDeleteCorrection(id: string) {
+    setCorrections((current) => current.filter((pair) => pair.id !== id));
+    setStatusText("Correction removed.");
+  }
+
+  async function refreshOutputImage(path: string) {
+    const signedUrl = await createSignedUrl("generated-outputs", path);
+    setOutputImageUrl(withCacheBust(signedUrl));
+    setOutputPath(path);
+  }
+
+  async function handleApplyAll() {
+    if (!accessToken || !generationId || !edits.length) return;
+
+    setApplying(true);
+    setErrorText(null);
+
     try {
-      setStatusText(`Saving ${edits.length} swatch edit(s)...`);
-      await apiFetch<MatchColorSaveResponse>(`/generations/${generationId}/match-color`, accessToken, {
-        method: "POST",
-        body: JSON.stringify({ edits })
-      });
-      setStatusText("Saved. Returning to output viewer.");
-      navigate(
-        `/output-viewer?generationId=${encodeURIComponent(generationId)}&refreshNonce=${Date.now()}`,
+      const response = await apiFetch<MatchColorSaveResponse>(
+        `/generations/${generationId}/match-color`,
+        accessToken,
         {
-          replace: true
+          method: "POST",
+          body: JSON.stringify({ edits })
         }
       );
+
+      await refreshOutputImage(response.output_path || outputPath || "");
+      setHasApplied(true);
+      setPendingFromHex(null);
+      setStatusText("Color corrections applied.");
     } catch (err) {
-      setStatusText(`Save failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+      setErrorText(err instanceof Error ? err.message : "Unknown error");
+      setStatusText("Correction failed. Original image preserved.");
     } finally {
-      setSaving(false);
+      setApplying(false);
     }
   }
 
-  function handleSliderInput(
-    event: FormEvent<HTMLInputElement>,
-    key: "hueShiftDeg" | "satDeltaPct" | "lightDeltaPct"
-  ) {
-    const value = Number((event.currentTarget as HTMLInputElement).value);
-    updateSelectedSwatch((current) => ({
-      ...current,
-      [key]: value
-    }));
-  }
+  async function handleShareSave() {
+    if (!outputImageUrl) return;
 
-  function beginSliderInteraction() {
-    if (previewMode !== "webgl") return;
-    if (fastPreviewTimerRef.current !== null) {
-      window.clearTimeout(fastPreviewTimerRef.current);
-      fastPreviewTimerRef.current = null;
+    setSharing(true);
+    try {
+      const response = await fetch(outputImageUrl);
+      const blob = await response.blob();
+      const file = new File([blob], "ai-vastra-look.jpg", {
+        type: blob.type || "image/jpeg"
+      });
+
+      if (navigator.share && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file] });
+      } else {
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = "ai-vastra-look.jpg";
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+        URL.revokeObjectURL(url);
+      }
+    } catch {
+      window.open(outputImageUrl, "_blank");
+    } finally {
+      setSharing(false);
     }
-    setFastPreview(false);
-
-    // Keep sharp image for quick micro-adjustments, degrade slightly only on longer drag.
-    fastPreviewTimerRef.current = window.setTimeout(() => {
-      fastPreviewTimerRef.current = null;
-      setFastPreview(true);
-    }, 220);
   }
 
-  function endSliderInteraction() {
-    if (fastPreviewTimerRef.current !== null) {
-      window.clearTimeout(fastPreviewTimerRef.current);
-      fastPreviewTimerRef.current = null;
-    }
-    setFastPreview(false);
+  function handleBack() {
+    navigate(`/output-viewer?generationId=${encodeURIComponent(generationId)}`);
   }
 
-  const sliderInteractionHandlers = {
-    onPointerDown: beginSliderInteraction,
-    onPointerUp: endSliderInteraction,
-    onPointerCancel: endSliderInteraction,
-    onPointerLeave: endSliderInteraction,
-    onBlur: endSliderInteraction
-  };
+  const ready = !!outputImageUrl && !!fabricImageUrl;
 
   return (
-    <main className="screen">
+    <main className="screen" style={{ background: "var(--surface)" }}>
+      <style>
+        {`
+          @keyframes match-color-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(201, 168, 76, 0.18); }
+            50% { box-shadow: 0 0 0 5px rgba(201, 168, 76, 0.42); }
+          }
+        `}
+      </style>
+
       <section className="page-shell">
         <header className="page-header">
-          <div>
-            <h1>Match Color</h1>
-            <p className="muted">Pick a prominent swatch and tune H/S/L with live preview.</p>
+          <div className="row" style={{ flexWrap: "nowrap" }}>
+            <button
+              className="btn btn-light"
+              onClick={handleBack}
+              aria-label="Back to output viewer"
+              style={{ width: 44, padding: 0, fontSize: 20, color: NAVY }}
+            >
+              &larr;
+            </button>
+            <div>
+              <h1 style={{ color: NAVY }}>Match Color</h1>
+              <p className="tiny muted">{statusText}</p>
+            </div>
           </div>
         </header>
 
-        <section className="card stack-sm">
-          <p className="tiny">{statusText}</p>
-        </section>
-
-        <section className="card stack-sm">
-          <div className="between">
-            <h2>Preview</h2>
-            <div className="row">
-              <button className="btn btn-light" onClick={loadMatchColorData} disabled={actionBusy}>
-                {loading ? "Refreshing..." : "Refresh Colors"}
-              </button>
-              <button
-                className="btn btn-light"
-                onClick={() => setInspectOpen((prev) => !prev)}
-                disabled={!fullResReady}
-              >
-                {inspectOpen ? "Hide Inspect" : "Inspect"}
-              </button>
+        {loading ? (
+          <section className="card" style={{ minHeight: 240, display: "grid", placeItems: "center" }}>
+            <div className="stack-sm" style={{ placeItems: "center" }}>
+              <div className="spinner" />
+              <p className="tiny muted">Loading images...</p>
             </div>
-          </div>
-          <div className="match-preview-wrap">
-            {sourceImageData ? (
-              <canvas
-                ref={previewCanvasRef}
-                className="match-preview-canvas"
-                onPointerUp={handlePreviewInspectTap}
-              />
-            ) : displayImageUrl ? (
-              <img
-                className="preview-image"
-                src={displayImageUrl}
-                alt="Output preview"
-                onPointerUp={handlePreviewInspectTap}
-              />
-            ) : (
-              <div className="preview-placeholder">No preview available</div>
-            )}
-            {fullResReady ? (
-              <span
-                className="inspect-focus-dot"
-                style={{
-                  left: `${inspectCenter.x * 100}%`,
-                  top: `${inspectCenter.y * 100}%`
-                }}
-                aria-hidden
-              />
-            ) : null}
-          </div>
-          <p className="tiny muted inspect-help-text">Tap image to set inspect focus.</p>
-        </section>
-
-        {inspectOpen ? (
-          <section className="card stack-sm">
-            <div className="between">
-              <h2>Inspect (High Quality)</h2>
-              <span className="chip">{inspectZoom.toFixed(1)}x</span>
-            </div>
-            <p className="tiny muted">
-              Zoomed crop from original image. Center crosshair shows current inspect point.
-            </p>
-            <div className="inspect-canvas-wrap">
-              <canvas ref={inspectCanvasRef} className="inspect-canvas" />
-            </div>
-            <label className="range-field">
-              <span>Inspect Zoom: {inspectZoom.toFixed(1)}x</span>
-              <input
-                className="range-input"
-                type="range"
-                min={1.2}
-                max={6}
-                step={0.1}
-                value={inspectZoom}
-                onInput={(event) => setInspectZoom(Number((event.currentTarget as HTMLInputElement).value))}
-              />
-            </label>
           </section>
         ) : null}
 
-        <section className="card stack-sm">
-          <h2>Adjust Colors</h2>
-          {swatches.length ? (
-            <>
-              <div className="swatch-row">
-                {swatches.map((hex) => {
-                  const selected = selectedSwatch === hex;
-                  const edited = !isZeroAdjustment(adjustmentsBySwatch[hex]);
-                  return (
-                    <button
-                      key={hex}
-                      className={`swatch-btn ${selected ? "swatch-selected" : ""} ${
-                        edited ? "swatch-edited" : ""
-                      }`}
-                      onClick={() => setSelectedSwatch(hex)}
-                      disabled={actionBusy}
-                      title={hex}
-                    >
-                      <span style={{ backgroundColor: hex }} />
-                    </button>
-                  );
-                })}
-              </div>
+        {!loading && errorText && !ready ? (
+          <section className="card stack-sm">
+            <p className="error-text">{errorText}</p>
+            <button className="btn btn-dark" onClick={loadMatchColorData} disabled={!accessToken}>
+              Retry
+            </button>
+          </section>
+        ) : null}
+
+        {!loading && ready ? (
+          <>
+            <ImageSamplerPanel
+              kind="output"
+              label="Tap the color to fix (pinch to zoom)"
+              imageUrl={outputImageUrl}
+              onColorLocked={handleLockedColor}
+            />
+
+            <ImageSamplerPanel
+              kind="fabric"
+              label="Tap the correct color (pinch to zoom)"
+              imageUrl={fabricImageUrl}
+              highlighted={!!pendingFromHex}
+              onColorLocked={handleLockedColor}
+            />
+
+            <section className="card stack-sm">
               <div className="between">
-                <p className="tiny muted">
-                  Selected: {selectedSwatch ?? "None"} (same-color areas may also change)
-                </p>
-                <span className="chip">{editedSwatchCount}/{swatches.length} edited</span>
+                <h2>Corrections</h2>
+                <span className="chip">
+                  {corrections.length}/{MAX_CORRECTIONS}
+                </span>
               </div>
-            </>
-          ) : (
-            <div className="empty-box">No swatches found yet.</div>
-          )}
 
-          <label className="range-field">
-            <span>Hue: {currentAdjustment.hueShiftDeg} deg</span>
-            <input
-              className="range-input"
-              type="range"
-              min={-180}
-              max={180}
-              step={1}
-              value={currentAdjustment.hueShiftDeg}
-              onInput={(event) => handleSliderInput(event, "hueShiftDeg")}
-              disabled={!selectedSwatch || actionBusy}
-              style={hueRangeStyle}
-              {...sliderInteractionHandlers}
-            />
-          </label>
+              {pendingFromHex ? (
+                <div
+                  className="row"
+                  style={{
+                    padding: 10,
+                    borderRadius: 12,
+                    border: "1px solid var(--gold-border)",
+                    background: "var(--gold-light)"
+                  }}
+                >
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: 6,
+                      border: "1px solid var(--border)",
+                      background: pendingFromHex
+                    }}
+                  />
+                  <p className="tiny" style={{ color: NAVY }}>
+                    Waiting for fabric color
+                  </p>
+                </div>
+              ) : null}
 
-          <label className="range-field">
-            <span>Saturation: {currentAdjustment.satDeltaPct}%</span>
-            <input
-              className="range-input"
-              type="range"
-              min={-100}
-              max={100}
-              step={1}
-              value={currentAdjustment.satDeltaPct}
-              onInput={(event) => handleSliderInput(event, "satDeltaPct")}
-              disabled={!selectedSwatch || actionBusy}
-              style={saturationRangeStyle}
-              {...sliderInteractionHandlers}
-            />
-          </label>
+              {corrections.length ? (
+                <div className="stack-sm">
+                  {corrections.map((pair) => (
+                    <div
+                      key={pair.id}
+                      className="between"
+                      style={{
+                        padding: 10,
+                        borderRadius: 12,
+                        border: "1px solid var(--border)",
+                        background: "var(--white)"
+                      }}
+                    >
+                      <div className="row" style={{ gap: 10 }}>
+                        <span
+                          aria-label={`From ${pair.from_hex}`}
+                          style={{
+                            width: 28,
+                            height: 28,
+                            borderRadius: 7,
+                            border: "1px solid var(--border)",
+                            background: pair.from_hex
+                          }}
+                        />
+                        <span className="tiny muted" aria-hidden>
+                          &rarr;
+                        </span>
+                        <span
+                          aria-label={`To ${pair.to_hex}`}
+                          style={{
+                            width: 28,
+                            height: 28,
+                            borderRadius: 7,
+                            border: "1px solid var(--border)",
+                            background: pair.to_hex
+                          }}
+                        />
+                        <span className="tiny muted">
+                          {pair.from_hex} to {pair.to_hex}
+                        </span>
+                      </div>
+                      <button
+                        className="btn btn-light"
+                        onClick={() => handleDeleteCorrection(pair.id)}
+                        aria-label="Delete correction"
+                        style={{ width: 38, minHeight: 38, padding: 0, color: NAVY }}
+                      >
+                        &times;
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-box" style={{ minHeight: 92 }}>
+                  No corrections added yet.
+                </div>
+              )}
 
-          <label className="range-field">
-            <span>Lightness: {currentAdjustment.lightDeltaPct}%</span>
-            <input
-              className="range-input"
-              type="range"
-              min={-100}
-              max={100}
-              step={1}
-              value={currentAdjustment.lightDeltaPct}
-              onInput={(event) => handleSliderInput(event, "lightDeltaPct")}
-              disabled={!selectedSwatch || actionBusy}
-              style={lightnessRangeStyle}
-              {...sliderInteractionHandlers}
-            />
-          </label>
-        </section>
+              <p className="tiny muted">Tap output image to add another correction</p>
 
-        <footer className="row">
-          <button
-            className="btn btn-light flex-1"
-            onClick={resetSelectedSwatch}
-            disabled={!selectedSwatch || actionBusy}
-          >
-            Reset Selected
-          </button>
-          <button
-            className="btn btn-dark flex-1"
-            onClick={handleSave}
-            disabled={actionBusy || editedSwatchCount === 0}
-          >
-            {saving ? "Saving..." : "Save"}
-          </button>
-        </footer>
+              {errorText ? <p className="error-text">{errorText}</p> : null}
+
+              <button className="btn-primary" onClick={handleApplyAll} disabled={!canApply}>
+                Apply All
+              </button>
+
+              {hasApplied ? (
+                <button
+                  className="btn-primary"
+                  onClick={handleShareSave}
+                  disabled={sharing || !outputImageUrl}
+                  style={{
+                    background: "var(--white)",
+                    color: NAVY,
+                    border: "1px solid var(--border)"
+                  }}
+                >
+                  {sharing ? "Preparing..." : "Share / Save"}
+                </button>
+              ) : null}
+            </section>
+          </>
+        ) : null}
       </section>
+
+      {applying ? (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            display: "grid",
+            placeItems: "center",
+            background: "rgba(27, 27, 47, 0.82)",
+            color: GOLD,
+            padding: 24
+          }}
+        >
+          <div
+            className="stack-sm"
+            style={{
+              placeItems: "center",
+              padding: 22,
+              borderRadius: 16,
+              background: "var(--white)",
+              color: NAVY,
+              minWidth: 220
+            }}
+          >
+            <div className="spinner" />
+            <strong>Correcting colors...</strong>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
-
-
