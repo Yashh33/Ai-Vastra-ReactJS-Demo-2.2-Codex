@@ -1,105 +1,25 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type TouchEvent as ReactTouchEvent
-} from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { hexToHsl01 } from "../lib/matchColor";
+import {
+  applyLivePreviewAdjustment,
+  emptySwatchAdjustment,
+  extractProminentSwatches,
+  isZeroAdjustment,
+  resizeImageToCanvas,
+  type SwatchAdjustment
+} from "../lib/matchColor";
 import { createSignedUrl } from "../lib/storage";
-import type { FabricImageRow, GenerationRow, MatchColorEditPayload, MatchColorSaveResponse } from "../lib/types";
+import type { GenerationRow, MatchColorSaveResponse } from "../lib/types";
 import { withCacheBust } from "../lib/utils";
 
 const NAVY = "#1B1B2F";
 const GOLD = "#C9A84C";
-const MAX_CORRECTIONS = 6;
+const MAX_SWATCHES = 8;
 
-type SamplerPanelKind = "output" | "fabric";
-
-type CorrectionPair = {
-  id: string;
-  from_hex: string;
-  to_hex: string;
-};
-
-type LocalGenerationFabric = {
-  fabric_image_id?: string | null;
-};
-
-type MatchColorGenerationRow = Omit<GenerationRow, "generation_fabrics"> & {
-  generation_fabrics?: LocalGenerationFabric[];
-};
-
-type TransformState = {
-  scale: number;
-  panX: number;
-  panY: number;
-};
-
-type Point = {
-  x: number;
-  y: number;
-};
-
-type TouchPoint = {
-  clientX: number;
-  clientY: number;
-};
-
-type CrosshairState = {
-  visible: boolean;
-  x: number;
-  y: number;
-  hex: string;
-};
-
-type NaturalSize = {
-  width: number;
-  height: number;
-};
-
-type GestureState =
-  | {
-      mode: "drag";
-      startClient: Point;
-      startPan: Point;
-    }
-  | {
-      mode: "pinch";
-      startDistance: number;
-      startScale: number;
-      contentCenter: Point;
-    };
-
-type ImageSamplerPanelProps = {
-  kind: SamplerPanelKind;
-  label: string;
-  imageUrl: string;
-  highlighted?: boolean;
-  onColorLocked: (kind: SamplerPanelKind, hex: string) => void;
-};
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function touchDistance(a: TouchPoint, b: TouchPoint) {
-  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
-}
-
-function hexFromRgb(r: number, g: number, b: number) {
-  const toHex = (value: number) => clamp(value, 0, 255).toString(16).padStart(2, "0");
-  return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
-}
-
-function makeCorrectionId() {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
+type AdjustmentKey = keyof SwatchAdjustment;
 
 async function loadImageFromUrl(url: string) {
   const response = await fetch(url);
@@ -118,463 +38,6 @@ async function loadImageFromUrl(url: string) {
   return { image, objectUrl };
 }
 
-async function findFabricImageById(accessToken: string, fabricImageId: string) {
-  const pageSize = 100;
-
-  for (let offset = 0; offset <= 1000; offset += pageSize) {
-    const rows = await apiFetch<FabricImageRow[]>(
-      `/fabric-images?limit=${pageSize}&offset=${offset}`,
-      accessToken,
-      { method: "GET" }
-    );
-
-    const match = rows.find((row) => row.id === fabricImageId);
-    if (match) return match;
-    if (rows.length < pageSize) return null;
-  }
-
-  return null;
-}
-
-function buildHslEdit(pair: CorrectionPair): MatchColorEditPayload {
-  const fromHsl = hexToHsl01(pair.from_hex);
-  const toHsl = hexToHsl01(pair.to_hex);
-
-  if (!fromHsl || !toHsl) {
-    return {
-      selected_hex: pair.from_hex,
-      hue_shift_degrees: 0,
-      saturation_delta_percent: 0,
-      lightness_delta_percent: 0
-    };
-  }
-
-  return {
-    selected_hex: pair.from_hex,
-    hue_shift_degrees: (toHsl.h - fromHsl.h) * 360,
-    saturation_delta_percent: (toHsl.s - fromHsl.s) * 100,
-    lightness_delta_percent: (toHsl.l - fromHsl.l) * 100
-  };
-}
-
-function ImageSamplerPanel({
-  kind,
-  label,
-  imageUrl,
-  highlighted = false,
-  onColorLocked
-}: ImageSamplerPanelProps) {
-  const stageRef = useRef<HTMLDivElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const transformRef = useRef<TransformState>({ scale: 1, panX: 0, panY: 0 });
-  const gestureRef = useRef<GestureState | null>(null);
-  const lastSampleRef = useRef<string | null>(null);
-
-  const [transform, setTransform] = useState<TransformState>({ scale: 1, panX: 0, panY: 0 });
-  const [naturalSize, setNaturalSize] = useState<NaturalSize | null>(null);
-  const [sampledHex, setSampledHex] = useState<string | null>(null);
-  const [canvasReady, setCanvasReady] = useState(false);
-  const [panelError, setPanelError] = useState<string | null>(null);
-  const [crosshair, setCrosshair] = useState<CrosshairState>({
-    visible: false,
-    x: 0,
-    y: 0,
-    hex: "#FFFFFF"
-  });
-
-  function commitTransform(next: TransformState) {
-    transformRef.current = next;
-    setTransform(next);
-  }
-
-  function clampPan(panX: number, panY: number, scale: number) {
-    const stage = stageRef.current;
-    if (!stage || scale <= 1) return { panX: 0, panY: 0 };
-
-    const width = stage.clientWidth || 1;
-    const height = stage.clientHeight || 1;
-    const minX = Math.min(0, width - width * scale);
-    const minY = Math.min(0, height - height * scale);
-
-    return {
-      panX: clamp(panX, minX, 0),
-      panY: clamp(panY, minY, 0)
-    };
-  }
-
-  function getLocalPoint(clientX: number, clientY: number) {
-    const stage = stageRef.current;
-    if (!stage) return null;
-    const rect = stage.getBoundingClientRect();
-    return {
-      x: clientX - rect.left,
-      y: clientY - rect.top
-    };
-  }
-
-  function getPinchCenter(first: TouchPoint, second: TouchPoint) {
-    return getLocalPoint(
-      (first.clientX + second.clientX) / 2,
-      (first.clientY + second.clientY) / 2
-    );
-  }
-
-  function sampleAtTouch(touch: TouchPoint, activeTransform = transformRef.current) {
-    const stage = stageRef.current;
-    const canvas = canvasRef.current;
-    const local = getLocalPoint(touch.clientX, touch.clientY);
-
-    if (!stage || !canvas || !local || !naturalSize || !canvasReady) {
-      return null;
-    }
-
-    const stageWidth = stage.clientWidth || 1;
-    const stageHeight = stage.clientHeight || 1;
-    const fitScale = Math.min(
-      stageWidth / Math.max(naturalSize.width, 1),
-      stageHeight / Math.max(naturalSize.height, 1)
-    );
-    const displayedWidth = naturalSize.width * fitScale;
-    const displayedHeight = naturalSize.height * fitScale;
-    const displayedLeft = (stageWidth - displayedWidth) / 2;
-    const displayedTop = (stageHeight - displayedHeight) / 2;
-
-    const untransformedX = (local.x - activeTransform.panX) / activeTransform.scale;
-    const untransformedY = (local.y - activeTransform.panY) / activeTransform.scale;
-    const canvasX = clamp(
-      Math.floor(((untransformedX - displayedLeft) / displayedWidth) * canvas.width),
-      0,
-      Math.max(0, canvas.width - 1)
-    );
-    const canvasY = clamp(
-      Math.floor(((untransformedY - displayedTop) / displayedHeight) * canvas.height),
-      0,
-      Math.max(0, canvas.height - 1)
-    );
-
-    const context = canvas.getContext("2d", { willReadFrequently: true });
-    if (!context) return null;
-
-    const pixel = context.getImageData(canvasX, canvasY, 1, 1).data;
-    const hex = hexFromRgb(pixel[0] ?? 0, pixel[1] ?? 0, pixel[2] ?? 0);
-    lastSampleRef.current = hex;
-    setSampledHex(hex);
-    setCrosshair({
-      visible: true,
-      x: local.x,
-      y: local.y - 60,
-      hex
-    });
-    return hex;
-  }
-
-  function startPinch(first: TouchPoint, second: TouchPoint) {
-    const center = getPinchCenter(first, second);
-    if (!center) return;
-
-    const active = transformRef.current;
-    gestureRef.current = {
-      mode: "pinch",
-      startDistance: Math.max(1, touchDistance(first, second)),
-      startScale: active.scale,
-      contentCenter: {
-        x: (center.x - active.panX) / active.scale,
-        y: (center.y - active.panY) / active.scale
-      }
-    };
-    setCrosshair((current) => ({ ...current, visible: false }));
-  }
-
-  function updatePinch(first: TouchPoint, second: TouchPoint) {
-    const gesture = gestureRef.current;
-    const center = getPinchCenter(first, second);
-    if (!gesture || gesture.mode !== "pinch" || !center) return;
-
-    const nextScale = clamp(
-      gesture.startScale * (touchDistance(first, second) / gesture.startDistance),
-      1,
-      4
-    );
-    const unclampedPanX = center.x - gesture.contentCenter.x * nextScale;
-    const unclampedPanY = center.y - gesture.contentCenter.y * nextScale;
-    const clampedPan = clampPan(unclampedPanX, unclampedPanY, nextScale);
-
-    commitTransform({
-      scale: nextScale,
-      panX: clampedPan.panX,
-      panY: clampedPan.panY
-    });
-  }
-
-  function handleTouchStart(event: ReactTouchEvent<HTMLDivElement>) {
-    event.preventDefault();
-    setPanelError(null);
-
-    const first = event.touches[0];
-    const second = event.touches[1];
-
-    if (first && second) {
-      startPinch(first, second);
-      return;
-    }
-
-    if (!first) return;
-
-    const active = transformRef.current;
-    gestureRef.current = {
-      mode: "drag",
-      startClient: { x: first.clientX, y: first.clientY },
-      startPan: { x: active.panX, y: active.panY }
-    };
-    sampleAtTouch(first, active);
-  }
-
-  function handleTouchMove(event: ReactTouchEvent<HTMLDivElement>) {
-    event.preventDefault();
-
-    const first = event.touches[0];
-    const second = event.touches[1];
-
-    if (first && second) {
-      updatePinch(first, second);
-      return;
-    }
-
-    if (!first) return;
-
-    const gesture = gestureRef.current;
-    let active = transformRef.current;
-
-    if (gesture?.mode === "drag" && active.scale > 1) {
-      const clampedPan = clampPan(
-        gesture.startPan.x + first.clientX - gesture.startClient.x,
-        gesture.startPan.y + first.clientY - gesture.startClient.y,
-        active.scale
-      );
-      active = {
-        ...active,
-        panX: clampedPan.panX,
-        panY: clampedPan.panY
-      };
-      commitTransform(active);
-    }
-
-    sampleAtTouch(first, active);
-  }
-
-  function handleTouchEnd(event: ReactTouchEvent<HTMLDivElement>) {
-    event.preventDefault();
-
-    if (event.touches.length > 0) {
-      return;
-    }
-
-    const gesture = gestureRef.current;
-    gestureRef.current = null;
-    setCrosshair((current) => ({ ...current, visible: false }));
-
-    if (gesture?.mode === "drag" && lastSampleRef.current) {
-      onColorLocked(kind, lastSampleRef.current);
-    }
-  }
-
-  function handleTouchCancel() {
-    gestureRef.current = null;
-    setCrosshair((current) => ({ ...current, visible: false }));
-  }
-
-  useEffect(() => {
-    let cancelled = false;
-    let objectUrl: string | null = null;
-
-    setCanvasReady(false);
-    setPanelError(null);
-    setNaturalSize(null);
-    setSampledHex(null);
-    lastSampleRef.current = null;
-    commitTransform({ scale: 1, panX: 0, panY: 0 });
-
-    async function prepareCanvas() {
-      try {
-        const loaded = await loadImageFromUrl(imageUrl);
-        objectUrl = loaded.objectUrl;
-
-        if (cancelled) {
-          URL.revokeObjectURL(objectUrl);
-          return;
-        }
-
-        const canvas = canvasRef.current;
-        const context = canvas?.getContext("2d", { willReadFrequently: true });
-        if (!canvas || !context) {
-          throw new Error("Canvas context unavailable");
-        }
-
-        const width = Math.max(1, loaded.image.naturalWidth);
-        const height = Math.max(1, loaded.image.naturalHeight);
-        canvas.width = width;
-        canvas.height = height;
-        context.clearRect(0, 0, width, height);
-        context.drawImage(loaded.image, 0, 0, width, height);
-        setNaturalSize({ width, height });
-        setCanvasReady(true);
-      } catch (err) {
-        if (!cancelled) {
-          setPanelError(err instanceof Error ? err.message : "Sampler image failed to load");
-        }
-      }
-    }
-
-    void prepareCanvas();
-
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [imageUrl]);
-
-  const imageTransform = `translate3d(${transform.panX}px, ${transform.panY}px, 0) scale(${transform.scale})`;
-  const panelHeight = kind === "output" ? "min(64svh, 620px)" : "min(48svh, 440px)";
-  const crosshairId = `match-color-crosshair-shadow-${kind}`;
-
-  const stageStyle: CSSProperties = {
-    height: panelHeight,
-    minHeight: kind === "output" ? 320 : 260
-  };
-
-  const transformStyle: CSSProperties = {
-    transform: imageTransform,
-    transformOrigin: "top left"
-  };
-
-  return (
-    <section
-      className="card stack-sm"
-      style={{
-        borderColor: highlighted ? GOLD : "var(--border)",
-        animation: highlighted ? "match-color-pulse 1.2s ease-in-out infinite" : "none"
-      }}
-    >
-      <div className="between">
-        <h2>{label}</h2>
-        <span className="chip">{transform.scale.toFixed(1)}x</span>
-      </div>
-
-      <div style={{ position: "relative" }}>
-        <div
-          ref={stageRef}
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
-          onTouchCancel={handleTouchCancel}
-          style={{
-            ...stageStyle,
-            position: "relative",
-            overflow: "hidden",
-            borderRadius: 14,
-            border: "1px solid #334155",
-            background: "#111827",
-            touchAction: "none",
-            userSelect: "none"
-          }}
-        >
-          <canvas
-            ref={canvasRef}
-            aria-hidden
-            style={{
-              ...transformStyle,
-              position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              objectFit: "contain",
-              opacity: 0,
-              pointerEvents: "none"
-            }}
-          />
-          <img
-            src={imageUrl}
-            alt={kind === "output" ? "Generated output" : "Fabric swatch"}
-            draggable={false}
-            style={{
-              ...transformStyle,
-              position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              objectFit: "contain",
-              pointerEvents: "none",
-              display: "block"
-            }}
-          />
-          {!canvasReady ? (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                display: "grid",
-                placeItems: "center",
-                background: "rgba(17, 24, 39, 0.72)"
-              }}
-            >
-              <div className="spinner" />
-            </div>
-          ) : null}
-        </div>
-
-        {crosshair.visible ? (
-          <svg
-            width="96"
-            height="96"
-            viewBox="-48 -48 96 96"
-            aria-hidden
-            style={{
-              position: "absolute",
-              left: crosshair.x,
-              top: crosshair.y,
-              transform: "translate(-50%, -50%)",
-              pointerEvents: "none",
-              overflow: "visible"
-            }}
-          >
-            <defs>
-              <filter id={crosshairId} x="-80%" y="-80%" width="260%" height="260%">
-                <feDropShadow dx="0" dy="1" stdDeviation="2.5" floodColor="#020617" floodOpacity="0.9" />
-              </filter>
-            </defs>
-            <g filter={`url(#${crosshairId})`}>
-              <line x1="-40" y1="0" x2="40" y2="0" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" />
-              <line x1="0" y1="-40" x2="0" y2="40" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" />
-              <circle cx="0" cy="0" r="5" fill={crosshair.hex} stroke="#FFFFFF" strokeWidth="2" />
-            </g>
-          </svg>
-        ) : null}
-      </div>
-
-      <div className="between">
-        <p className="tiny muted">Sampled color</p>
-        <div className="row" style={{ gap: 6 }}>
-          <span
-            aria-hidden
-            style={{
-              width: 18,
-              height: 18,
-              borderRadius: 5,
-              border: "1px solid var(--border)",
-              background: sampledHex ?? "#FFFFFF"
-            }}
-          />
-          <strong className="tiny" style={{ color: NAVY }}>
-            {sampledHex ?? "Tap image"}
-          </strong>
-        </div>
-      </div>
-
-      {panelError ? <p className="error-text">{panelError}</p> : null}
-    </section>
-  );
-}
-
 export function MatchColorPage() {
   const { accessToken } = useAuth();
   const navigate = useNavigate();
@@ -582,80 +45,65 @@ export function MatchColorPage() {
 
   const generationId = searchParams.get("generationId") ?? "";
 
+  const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
   const [loading, setLoading] = useState(true);
-  const [applying, setApplying] = useState(false);
-  const [sharing, setSharing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [errorText, setErrorText] = useState<string | null>(null);
   const [outputPath, setOutputPath] = useState<string | null>(null);
   const [outputImageUrl, setOutputImageUrl] = useState<string | null>(null);
-  const [fabricImageUrl, setFabricImageUrl] = useState<string | null>(null);
-  const [pendingFromHex, setPendingFromHex] = useState<string | null>(null);
-  const [corrections, setCorrections] = useState<CorrectionPair[]>([]);
-  const [statusText, setStatusText] = useState("Loading images...");
-  const [errorText, setErrorText] = useState<string | null>(null);
-  const [hasApplied, setHasApplied] = useState(false);
+  const [sourceImageData, setSourceImageData] = useState<ImageData | null>(null);
+  const [swatches, setSwatches] = useState<string[]>([]);
+  const [selectedHex, setSelectedHex] = useState<string | null>(null);
+  const [adjustmentsByHex, setAdjustmentsByHex] = useState<Record<string, SwatchAdjustment>>({});
+  const [savedHexes, setSavedHexes] = useState<Set<string>>(new Set());
 
-  const canApply = corrections.length > 0 && !applying;
-  const canAddMore = corrections.length < MAX_CORRECTIONS;
-
-  const edits = useMemo(
-    () => corrections.map((pair) => buildHslEdit(pair)),
-    [corrections]
+  const currentAdjustment = useMemo(
+    () => (selectedHex ? adjustmentsByHex[selectedHex] ?? emptySwatchAdjustment() : emptySwatchAdjustment()),
+    [selectedHex, adjustmentsByHex]
   );
 
   async function loadMatchColorData() {
-    if (!generationId) {
-      setLoading(false);
-      setStatusText("Missing generation id");
-      setErrorText("Missing generation id");
-      return;
-    }
-
-    if (!accessToken) return;
+    if (!generationId || !accessToken) return;
 
     setLoading(true);
     setErrorText(null);
-    setStatusText("Loading generation...");
 
+    let objectUrl: string | null = null;
     try {
-      const generation = await apiFetch<MatchColorGenerationRow>(
-        `/generations/${generationId}`,
-        accessToken,
-        { method: "GET" }
-      );
+      const generation = await apiFetch<GenerationRow>(`/generations/${generationId}`, accessToken, {
+        method: "GET"
+      });
 
       if (!generation.output_path) {
-        throw new Error(generation.error || "Generated output is not ready yet");
+        throw new Error(generation.error || "Output image is not ready yet");
       }
 
-      const fabricImageId =
-        generation.generation_fabrics?.[0]?.fabric_image_id ?? generation.fabric_image_id;
-      if (!fabricImageId) {
-        throw new Error("No fabric image was found for this generation");
-      }
-
-      setStatusText("Loading fabric swatch...");
-      const fabricImage = await findFabricImageById(accessToken, fabricImageId);
-      if (!fabricImage?.storage_path) {
-        throw new Error("Fabric image record was not found");
-      }
-
-      setStatusText("Creating signed image URLs...");
-      const [outputSignedUrl, fabricSignedUrl] = await Promise.all([
-        createSignedUrl("generated-outputs", generation.output_path),
-        createSignedUrl("fabric-images", fabricImage.storage_path)
-      ]);
-
+      const signedUrl = await createSignedUrl("generated-outputs", generation.output_path);
       setOutputPath(generation.output_path);
-      setOutputImageUrl(withCacheBust(outputSignedUrl));
-      setFabricImageUrl(withCacheBust(fabricSignedUrl));
-      setPendingFromHex(null);
-      setStatusText("Tap the output color, then tap the correct fabric color.");
+      setOutputImageUrl(withCacheBust(signedUrl));
+
+      const loaded = await loadImageFromUrl(signedUrl);
+      objectUrl = loaded.objectUrl;
+
+      const canvas = resizeImageToCanvas(loaded.image, 680);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        throw new Error("Canvas context unavailable");
+      }
+
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      setSourceImageData(imageData);
+
+      const nextSwatches = extractProminentSwatches(imageData, MAX_SWATCHES);
+      setSwatches(nextSwatches);
+      setAdjustmentsByHex({});
+      setSavedHexes(new Set());
+      setSelectedHex(nextSwatches[0] ?? null);
     } catch (err) {
-      setOutputImageUrl(null);
-      setFabricImageUrl(null);
       setErrorText(err instanceof Error ? err.message : "Unknown error");
-      setStatusText("Match Color failed");
     } finally {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
       setLoading(false);
     }
   }
@@ -664,109 +112,82 @@ export function MatchColorPage() {
     void loadMatchColorData();
   }, [accessToken, generationId]);
 
-  function handleLockedColor(kind: SamplerPanelKind, hex: string) {
-    setErrorText(null);
+  useEffect(() => {
+    const canvas = previewCanvasRef.current;
+    if (!canvas || !sourceImageData) return;
 
-    if (kind === "output") {
-      if (!canAddMore) {
-        setErrorText(`Maximum ${MAX_CORRECTIONS} corrections allowed.`);
-        return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const rendered = applyLivePreviewAdjustment(sourceImageData, selectedHex, currentAdjustment);
+    canvas.width = rendered.width;
+    canvas.height = rendered.height;
+    ctx.putImageData(rendered, 0, 0);
+  }, [sourceImageData, selectedHex, currentAdjustment]);
+
+  function handleSliderInput(event: FormEvent<HTMLInputElement>, key: AdjustmentKey) {
+    if (!selectedHex) return;
+    const value = Number((event.currentTarget as HTMLInputElement).value);
+
+    setAdjustmentsByHex((prev) => ({
+      ...prev,
+      [selectedHex]: {
+        ...(prev[selectedHex] ?? emptySwatchAdjustment()),
+        [key]: value
       }
-
-      setPendingFromHex(hex);
-      setStatusText("Now tap the correct color on the fabric swatch.");
-      return;
-    }
-
-    if (!pendingFromHex) {
-      setStatusText("Tap the output image first, then tap the fabric swatch.");
-      return;
-    }
-
-    if (!canAddMore) {
-      setPendingFromHex(null);
-      setErrorText(`Maximum ${MAX_CORRECTIONS} corrections allowed.`);
-      return;
-    }
-
-    setCorrections((current) => [
-      ...current,
-      {
-        id: makeCorrectionId(),
-        from_hex: pendingFromHex,
-        to_hex: hex
-      }
-    ]);
-    setPendingFromHex(null);
-    setStatusText("Correction added. Tap output image to add another correction.");
+    }));
   }
 
-  function handleDeleteCorrection(id: string) {
-    setCorrections((current) => current.filter((pair) => pair.id !== id));
-    setStatusText("Correction removed.");
+  function handleResetSelected() {
+    if (!selectedHex) return;
+    setAdjustmentsByHex((prev) => ({
+      ...prev,
+      [selectedHex]: emptySwatchAdjustment()
+    }));
   }
 
-  async function refreshOutputImage(path: string) {
-    const signedUrl = await createSignedUrl("generated-outputs", path);
-    setOutputImageUrl(withCacheBust(signedUrl));
-    setOutputPath(path);
-  }
+  async function handleSave() {
+    if (!accessToken || !generationId || !selectedHex) return;
 
-  async function handleApplyAll() {
-    if (!accessToken || !generationId || !edits.length) return;
-
-    setApplying(true);
+    setSaving(true);
     setErrorText(null);
 
     try {
+      const adjustment = adjustmentsByHex[selectedHex] ?? emptySwatchAdjustment();
       const response = await apiFetch<MatchColorSaveResponse>(
         `/generations/${generationId}/match-color`,
         accessToken,
         {
           method: "POST",
-          body: JSON.stringify({ edits })
+          body: JSON.stringify({
+            edits: [
+              {
+                selected_hex: selectedHex,
+                hue_shift_degrees: adjustment.hueShiftDeg,
+                saturation_delta_percent: adjustment.satDeltaPct,
+                lightness_delta_percent: adjustment.lightDeltaPct
+              }
+            ]
+          })
         }
       );
 
-      await refreshOutputImage(response.output_path || outputPath || "");
-      setHasApplied(true);
-      setPendingFromHex(null);
-      setStatusText("Color corrections applied.");
+      const nextPath = response.output_path || outputPath;
+      if (nextPath) {
+        const signedUrl = await createSignedUrl("generated-outputs", nextPath);
+        setOutputPath(nextPath);
+        setOutputImageUrl(withCacheBust(signedUrl));
+      }
+
+      setSavedHexes((prev) => {
+        const next = new Set(prev);
+        next.add(selectedHex);
+        return next;
+      });
     } catch (err) {
       setErrorText(err instanceof Error ? err.message : "Unknown error");
-      setStatusText("Correction failed. Original image preserved.");
     } finally {
-      setApplying(false);
-    }
-  }
-
-  async function handleShareSave() {
-    if (!outputImageUrl) return;
-
-    setSharing(true);
-    try {
-      const response = await fetch(outputImageUrl);
-      const blob = await response.blob();
-      const file = new File([blob], "ai-vastra-look.jpg", {
-        type: blob.type || "image/jpeg"
-      });
-
-      if (navigator.share && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file] });
-      } else {
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement("a");
-        anchor.href = url;
-        anchor.download = "ai-vastra-look.jpg";
-        document.body.appendChild(anchor);
-        anchor.click();
-        document.body.removeChild(anchor);
-        URL.revokeObjectURL(url);
-      }
-    } catch {
-      window.open(outputImageUrl, "_blank");
-    } finally {
-      setSharing(false);
+      setSaving(false);
     }
   }
 
@@ -774,19 +195,10 @@ export function MatchColorPage() {
     navigate(`/output-viewer?generationId=${encodeURIComponent(generationId)}`);
   }
 
-  const ready = !!outputImageUrl && !!fabricImageUrl;
+  const ready = !loading && !!outputImageUrl && swatches.length > 0;
 
   return (
     <main className="screen" style={{ background: "var(--surface)" }}>
-      <style>
-        {`
-          @keyframes match-color-pulse {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(201, 168, 76, 0.18); }
-            50% { box-shadow: 0 0 0 5px rgba(201, 168, 76, 0.42); }
-          }
-        `}
-      </style>
-
       <section className="page-shell">
         <header className="page-header">
           <div className="row" style={{ flexWrap: "nowrap" }}>
@@ -798,10 +210,7 @@ export function MatchColorPage() {
             >
               &larr;
             </button>
-            <div>
-              <h1 style={{ color: NAVY }}>Match Color</h1>
-              <p className="tiny muted">{statusText}</p>
-            </div>
+            <h1 style={{ color: NAVY }}>Match Color</h1>
           </div>
         </header>
 
@@ -809,7 +218,7 @@ export function MatchColorPage() {
           <section className="card" style={{ minHeight: 240, display: "grid", placeItems: "center" }}>
             <div className="stack-sm" style={{ placeItems: "center" }}>
               <div className="spinner" />
-              <p className="tiny muted">Loading images...</p>
+              <p className="tiny muted">Loading image and colors...</p>
             </div>
           </section>
         ) : null}
@@ -823,171 +232,146 @@ export function MatchColorPage() {
           </section>
         ) : null}
 
-        {!loading && ready ? (
+        {ready ? (
           <>
-            <ImageSamplerPanel
-              kind="output"
-              label="Tap the color to fix (pinch to zoom)"
-              imageUrl={outputImageUrl}
-              onColorLocked={handleLockedColor}
-            />
+            {outputImageUrl ? (
+              <img src={outputImageUrl} alt="Generated output" style={{ width: "100%", borderRadius: 14 }} />
+            ) : null}
 
-            <ImageSamplerPanel
-              kind="fabric"
-              label="Tap the correct color (pinch to zoom)"
-              imageUrl={fabricImageUrl}
-              highlighted={!!pendingFromHex}
-              onColorLocked={handleLockedColor}
-            />
+            <p className="tiny muted">Tap image to set inspect focus.</p>
 
             <section className="card stack-sm">
               <div className="between">
-                <h2>Corrections</h2>
-                <span className="chip">
-                  {corrections.length}/{MAX_CORRECTIONS}
-                </span>
+                <h2>Adjust Colors</h2>
+                <span className="chip">{savedHexes.size}/{MAX_SWATCHES} edited</span>
               </div>
 
-              {pendingFromHex ? (
-                <div
-                  className="row"
-                  style={{
-                    padding: 10,
-                    borderRadius: 12,
-                    border: "1px solid var(--gold-border)",
-                    background: "var(--gold-light)"
-                  }}
-                >
-                  <span
-                    aria-hidden
-                    style={{
-                      width: 22,
-                      height: 22,
-                      borderRadius: 6,
-                      border: "1px solid var(--border)",
-                      background: pendingFromHex
-                    }}
-                  />
-                  <p className="tiny" style={{ color: NAVY }}>
-                    Waiting for fabric color
-                  </p>
-                </div>
-              ) : null}
+              <div className="swatch-row" style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                {swatches.map((hex) => {
+                  const isSelected = hex === selectedHex;
+                  const isSaved = savedHexes.has(hex);
 
-              {corrections.length ? (
-                <div className="stack-sm">
-                  {corrections.map((pair) => (
-                    <div
-                      key={pair.id}
-                      className="between"
+                  return (
+                    <button
+                      key={hex}
+                      type="button"
+                      onClick={() => setSelectedHex(hex)}
+                      title={hex}
                       style={{
-                        padding: 10,
-                        borderRadius: 12,
-                        border: "1px solid var(--border)",
-                        background: "var(--white)"
+                        position: "relative",
+                        width: 44,
+                        height: 44,
+                        borderRadius: "50%",
+                        padding: 0,
+                        cursor: "pointer",
+                        background: hex,
+                        border: isSelected ? "3px solid #FFFFFF" : "2px solid var(--border)",
+                        boxShadow: isSelected
+                          ? `0 0 0 2px ${NAVY}`
+                          : isSaved
+                          ? `0 0 0 2px ${GOLD}`
+                          : "none"
                       }}
                     >
-                      <div className="row" style={{ gap: 10 }}>
+                      {isSaved ? (
                         <span
-                          aria-label={`From ${pair.from_hex}`}
+                          aria-hidden
                           style={{
-                            width: 28,
-                            height: 28,
-                            borderRadius: 7,
-                            border: "1px solid var(--border)",
-                            background: pair.from_hex
+                            position: "absolute",
+                            top: -4,
+                            right: -4,
+                            width: 16,
+                            height: 16,
+                            borderRadius: "50%",
+                            background: GOLD,
+                            color: NAVY,
+                            fontSize: 10,
+                            lineHeight: "16px",
+                            fontWeight: 700
                           }}
-                        />
-                        <span className="tiny muted" aria-hidden>
-                          &rarr;
+                        >
+                          &#10003;
                         </span>
-                        <span
-                          aria-label={`To ${pair.to_hex}`}
-                          style={{
-                            width: 28,
-                            height: 28,
-                            borderRadius: 7,
-                            border: "1px solid var(--border)",
-                            background: pair.to_hex
-                          }}
-                        />
-                        <span className="tiny muted">
-                          {pair.from_hex} to {pair.to_hex}
-                        </span>
-                      </div>
-                      <button
-                        className="btn btn-light"
-                        onClick={() => handleDeleteCorrection(pair.id)}
-                        aria-label="Delete correction"
-                        style={{ width: 38, minHeight: 38, padding: 0, color: NAVY }}
-                      >
-                        &times;
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="empty-box" style={{ minHeight: 92 }}>
-                  No corrections added yet.
-                </div>
-              )}
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
 
-              <p className="tiny muted">Tap output image to add another correction</p>
+              {selectedHex ? (
+                <p className="tiny muted">
+                  Selected: {selectedHex} (same-color areas may also change)
+                </p>
+              ) : null}
+
+              <div className="match-preview-wrap">
+                <canvas ref={previewCanvasRef} className="match-preview-canvas" />
+              </div>
+
+              <label className="range-field">
+                <span>Hue: {currentAdjustment.hueShiftDeg} deg</span>
+                <input
+                  className="range-input"
+                  type="range"
+                  min={-180}
+                  max={180}
+                  step={1}
+                  value={currentAdjustment.hueShiftDeg}
+                  onInput={(event) => handleSliderInput(event, "hueShiftDeg")}
+                  disabled={!selectedHex}
+                />
+              </label>
+
+              <label className="range-field">
+                <span>Saturation: {currentAdjustment.satDeltaPct}%</span>
+                <input
+                  className="range-input"
+                  type="range"
+                  min={-100}
+                  max={100}
+                  step={1}
+                  value={currentAdjustment.satDeltaPct}
+                  onInput={(event) => handleSliderInput(event, "satDeltaPct")}
+                  disabled={!selectedHex}
+                />
+              </label>
+
+              <label className="range-field">
+                <span>Lightness: {currentAdjustment.lightDeltaPct}%</span>
+                <input
+                  className="range-input"
+                  type="range"
+                  min={-100}
+                  max={100}
+                  step={1}
+                  value={currentAdjustment.lightDeltaPct}
+                  onInput={(event) => handleSliderInput(event, "lightDeltaPct")}
+                  disabled={!selectedHex}
+                />
+              </label>
 
               {errorText ? <p className="error-text">{errorText}</p> : null}
 
-              <button className="btn-primary" onClick={handleApplyAll} disabled={!canApply}>
-                Apply All
-              </button>
-
-              {hasApplied ? (
+              <footer className="row">
                 <button
-                  className="btn-primary"
-                  onClick={handleShareSave}
-                  disabled={sharing || !outputImageUrl}
-                  style={{
-                    background: "var(--white)",
-                    color: NAVY,
-                    border: "1px solid var(--border)"
-                  }}
+                  className="btn btn-light flex-1"
+                  onClick={handleResetSelected}
+                  disabled={!selectedHex || saving}
                 >
-                  {sharing ? "Preparing..." : "Share / Save"}
+                  Reset Selected
                 </button>
-              ) : null}
+                <button
+                  className="btn btn-dark flex-1"
+                  onClick={handleSave}
+                  disabled={!selectedHex || saving || isZeroAdjustment(currentAdjustment)}
+                >
+                  {saving ? "Saving..." : "Save"}
+                </button>
+              </footer>
             </section>
           </>
         ) : null}
       </section>
-
-      {applying ? (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 1000,
-            display: "grid",
-            placeItems: "center",
-            background: "rgba(27, 27, 47, 0.82)",
-            color: GOLD,
-            padding: 24
-          }}
-        >
-          <div
-            className="stack-sm"
-            style={{
-              placeItems: "center",
-              padding: 22,
-              borderRadius: 16,
-              background: "var(--white)",
-              color: NAVY,
-              minWidth: 220
-            }}
-          >
-            <div className="spinner" />
-            <strong>Correcting colors...</strong>
-          </div>
-        </div>
-      ) : null}
     </main>
   );
 }
