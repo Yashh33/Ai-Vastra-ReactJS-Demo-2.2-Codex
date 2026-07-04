@@ -13,7 +13,6 @@ import {
 } from "../lib/matchColor";
 import { createSignedUrl } from "../lib/storage";
 import type { GenerationRow, MatchColorSaveResponse } from "../lib/types";
-import { withCacheBust } from "../lib/utils";
 
 const NAVY = "#1B1B2F";
 const GOLD = "#C9A84C";
@@ -69,7 +68,6 @@ export function MatchColorPage() {
     setLoading(true);
     setErrorText(null);
 
-    let objectUrl: string | null = null;
     try {
       const generation = await apiFetch<GenerationRow>(`/generations/${generationId}`, accessToken, {
         method: "GET"
@@ -81,10 +79,9 @@ export function MatchColorPage() {
 
       const signedUrl = await createSignedUrl("generated-outputs", generation.output_path);
       setOutputPath(generation.output_path);
-      setOutputImageUrl(withCacheBust(signedUrl));
 
       const loaded = await loadImageFromUrl(signedUrl);
-      objectUrl = loaded.objectUrl;
+      setOutputImageUrl(loaded.objectUrl);
 
       const canvas = resizeImageToCanvas(loaded.image, 680);
       const ctx = canvas.getContext("2d");
@@ -103,7 +100,6 @@ export function MatchColorPage() {
     } catch (err) {
       setErrorText(err instanceof Error ? err.message : "Unknown error");
     } finally {
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
       setLoading(false);
     }
   }
@@ -111,6 +107,11 @@ export function MatchColorPage() {
   useEffect(() => {
     void loadMatchColorData();
   }, [accessToken, generationId]);
+
+  useEffect(() => {
+    if (!outputImageUrl?.startsWith("blob:")) return;
+    return () => URL.revokeObjectURL(outputImageUrl);
+  }, [outputImageUrl]);
 
   useEffect(() => {
     const canvas = previewCanvasRef.current;
@@ -176,7 +177,7 @@ export function MatchColorPage() {
       if (nextPath) {
         const signedUrl = await createSignedUrl("generated-outputs", nextPath);
         setOutputPath(nextPath);
-        setOutputImageUrl(withCacheBust(signedUrl));
+        setOutputImageUrl(signedUrl);
       }
 
       setSavedHexes((prev) => {

@@ -4,7 +4,6 @@ import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import type { DownloadUrlResponse, GarmentType, GenerationRow } from "../lib/types";
-import { withCacheBust } from "../lib/utils";
 
 type PreviewMap = Record<string, string>;
 
@@ -220,7 +219,7 @@ export function CatalogPage() {
       accessToken,
       { method: "GET" }
     );
-    return withCacheBust(response.download_url);
+    return response.download_url;
   }
 
   const toggleSelect = (id: string) => {

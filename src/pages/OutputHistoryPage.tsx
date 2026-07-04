@@ -5,7 +5,6 @@ import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { buildGenerationDownloadFilename, triggerBrowserDownload } from "../lib/download";
 import type { DownloadUrlResponse, GenerationRow } from "../lib/types";
-import { withCacheBust } from "../lib/utils";
 
 type PreviewMap = Record<string, string>;
 
@@ -140,7 +139,7 @@ export function OutputHistoryPage() {
       accessToken,
       { method: "GET" }
     );
-    return withCacheBust(response.download_url);
+    return response.download_url;
   }
 
   async function loadHistory(filters: HistoryFilters) {

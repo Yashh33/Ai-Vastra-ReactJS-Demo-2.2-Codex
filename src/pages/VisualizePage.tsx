@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { compressImage } from "../lib/compressImage";
 import { createSignedUrl, uploadToStorage } from "../lib/storage";
 import type {
   ApplyToTarget,
@@ -198,20 +199,21 @@ export function VisualizePage() {
     if (!file || !accessToken || !shopContext || !draftId) return;
     setUploadingFabric(true);
     try {
-      const ext = guessFileExtension(file.name, file.type);
+      const compressedFile = await compressImage(file, 1600);
+      const ext = guessFileExtension(compressedFile.name, compressedFile.type);
       const filename = `${Date.now()}-${makeRandomSuffix()}.${ext}`;
       const storagePath = `${shopContext.shop_id}/${filename}`;
 
       setStatusText("Uploading fabric image...");
-      await uploadToStorage("fabric-images", storagePath, file);
+      await uploadToStorage("fabric-images", storagePath, compressedFile);
 
       const row = await apiFetch<FabricImageRow>("/fabric-images", accessToken, {
         method: "POST",
         body: JSON.stringify({
           storage_path: storagePath,
-          original_filename: file.name || filename,
-          mime_type: file.type || "image/jpeg",
-          file_size_bytes: file.size,
+          original_filename: compressedFile.name || filename,
+          mime_type: compressedFile.type || "image/jpeg",
+          file_size_bytes: compressedFile.size,
           width: null,
           height: null
         })

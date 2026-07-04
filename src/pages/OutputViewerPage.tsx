@@ -11,7 +11,7 @@ import type {
   DownloadUrlResponse,
   GenerationRow,
 } from "../lib/types";
-import { isPendingStatus, withCacheBust } from "../lib/utils";
+import { isPendingStatus } from "../lib/utils";
 
 export function OutputViewerPage() {
   const { accessToken } = useAuth();
@@ -90,7 +90,7 @@ export function OutputViewerPage() {
     const response = await apiFetch<DownloadUrlResponse>(`/generations/${id}/download-url`, accessToken, {
       method: "GET",
     });
-    return withCacheBust(response.download_url);
+    return response.download_url;
   }
 
   async function fetchCatalogImageDownloadUrl(id: string) {
@@ -98,7 +98,7 @@ export function OutputViewerPage() {
     const response = await apiFetch<CatalogImageDownloadUrlResponse>(`/catalog-images/${id}/download-url`, accessToken, {
       method: "GET",
     });
-    return withCacheBust(response.download_url);
+    return response.download_url;
   }
 
   async function loadGenerationView() {

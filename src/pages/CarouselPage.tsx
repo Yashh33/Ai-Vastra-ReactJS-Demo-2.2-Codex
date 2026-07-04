@@ -4,7 +4,6 @@ import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import type { DownloadUrlResponse, GenerationRow } from "../lib/types";
-import { withCacheBust } from "../lib/utils";
 
 const AUTO_ADVANCE_MS = 3500;
 
@@ -34,7 +33,7 @@ export function CarouselPage() {
       accessToken,
       { method: "GET" }
     );
-    return withCacheBust(response.download_url);
+    return response.download_url;
   }
 
   async function loadOutputs() {

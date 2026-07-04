@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { compressImage } from "../lib/compressImage";
 import { createSignedUrl, uploadToStorage } from "../lib/storage";
 import type { FabricImageRow, ShopContext } from "../lib/types";
 import { guessFileExtension, makeRandomSuffix } from "../lib/utils";
@@ -179,20 +180,21 @@ export function FabricSiloPage() {
     resetDraft();
   }
 
-  function handleDraftFilePicked(file: File | null) {
+  async function handleDraftFilePicked(file: File | null) {
     if (!file) return;
-    setDraftFile(file);
-    setDraftPreviewUrl(URL.createObjectURL(file));
+    const compressed = await compressImage(file, 1600);
+    setDraftFile(compressed);
+    setDraftPreviewUrl(URL.createObjectURL(compressed));
     setStatusText("Fabric image selected.");
   }
 
   function onCameraChange(event: ChangeEvent<HTMLInputElement>) {
-    handleDraftFilePicked(event.target.files?.[0] ?? null);
+    void handleDraftFilePicked(event.target.files?.[0] ?? null);
     event.target.value = "";
   }
 
   function onGalleryChange(event: ChangeEvent<HTMLInputElement>) {
-    handleDraftFilePicked(event.target.files?.[0] ?? null);
+    void handleDraftFilePicked(event.target.files?.[0] ?? null);
     event.target.value = "";
   }
 

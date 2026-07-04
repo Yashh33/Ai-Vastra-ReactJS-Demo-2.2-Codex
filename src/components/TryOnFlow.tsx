@@ -1,5 +1,7 @@
 import { useRef, useState } from "react";
 
+import { compressImage } from "../lib/compressImage";
+
 type Props = {
   onClose: () => void;
   onSubmit: (customerPhotoFile: File) => Promise<string>;
@@ -15,9 +17,10 @@ export function TryOnFlow({ onClose, onSubmit }: Props) {
   const captureRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
 
-  function handleFileSelect(file: File) {
-    setCustomerPhoto(file);
-    setPreviewUrl(URL.createObjectURL(file));
+  async function handleFileSelect(file: File) {
+    const compressed = await compressImage(file, 1280);
+    setCustomerPhoto(compressed);
+    setPreviewUrl(URL.createObjectURL(compressed));
     setResultUrl(null);
     setError(null);
   }
@@ -240,7 +243,7 @@ export function TryOnFlow({ onClose, onSubmit }: Props) {
                   style={{ display: "none" }}
                   onChange={(e) => {
                     const f = e.target.files?.[0];
-                    if (f) handleFileSelect(f);
+                    if (f) void handleFileSelect(f);
                   }}
                 />
                 <input
@@ -250,7 +253,7 @@ export function TryOnFlow({ onClose, onSubmit }: Props) {
                   style={{ display: "none" }}
                   onChange={(e) => {
                     const f = e.target.files?.[0];
-                    if (f) handleFileSelect(f);
+                    if (f) void handleFileSelect(f);
                   }}
                 />
               </div>

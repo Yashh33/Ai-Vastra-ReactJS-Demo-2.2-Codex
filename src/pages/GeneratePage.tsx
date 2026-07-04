@@ -16,6 +16,7 @@ import type {
   HeroImageRow,
   ShopContext
 } from "../lib/types";
+import { compressImage } from "../lib/compressImage";
 import { guessFileExtension, isPendingStatus, makeRandomSuffix } from "../lib/utils";
 
 type MeResponse = ShopContext & {
@@ -53,24 +54,6 @@ function mapGarmentToApplyTo(garment: GarmentType): ApplyToTarget {
   if (context.includes("upper")) return "suit_upper";
 
   return "suit_full_body";
-}
-
-async function findFabricImageById(accessToken: string, fabricImageId: string) {
-  const pageSize = 100;
-
-  for (let offset = 0; offset <= 1000; offset += pageSize) {
-    const rows = await apiFetch<FabricImageRow[]>(
-      `/fabric-images?limit=${pageSize}&offset=${offset}`,
-      accessToken,
-      { method: "GET" }
-    );
-
-    const match = rows.find((row) => row.id === fabricImageId);
-    if (match) return match;
-    if (rows.length < pageSize) return null;
-  }
-
-  return null;
 }
 
 const FINE_CHECKS_SVG = `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
@@ -212,7 +195,11 @@ export function GeneratePage() {
       setLoadingPickedFabric(true);
       try {
         setStatusText("Loading selected fabric...");
-        const row = await findFabricImageById(accessToken, pickedFabricImageId);
+        const row = await apiFetch<FabricImageRow>(
+          `/fabric-images/${encodeURIComponent(pickedFabricImageId)}`,
+          accessToken,
+          { method: "GET" }
+        ).catch(() => null);
         if (cancelled) return;
 
         if (!row) {
@@ -297,32 +284,34 @@ export function GeneratePage() {
     setFabricScale(null);
   }
 
-  function handleFabricPicked(file: File | null) {
+  async function handleFabricPicked(file: File | null) {
     if (!file) return;
-    setFabricFile(file);
+    const compressed = await compressImage(file, 1600);
+    setFabricFile(compressed);
     setExistingFabricImage(null);
-    setFabricPreviewUrl(URL.createObjectURL(file));
+    setFabricPreviewUrl(URL.createObjectURL(compressed));
     setHasPattern(false);
     setFabricScale(null);
     setStatusText("Fabric image selected.");
   }
 
   function onFabricCameraChange(event: ChangeEvent<HTMLInputElement>) {
-    handleFabricPicked(event.target.files?.[0] ?? null);
+    void handleFabricPicked(event.target.files?.[0] ?? null);
     event.target.value = "";
   }
 
   function onFabricGalleryChange(event: ChangeEvent<HTMLInputElement>) {
-    handleFabricPicked(event.target.files?.[0] ?? null);
+    void handleFabricPicked(event.target.files?.[0] ?? null);
     event.target.value = "";
   }
 
-  function onHeroReplacementChange(event: ChangeEvent<HTMLInputElement>) {
+  async function onHeroReplacementChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
     if (!file) return;
 
-    setHeroReplacementFile(file);
-    setHeroReplacementPreviewUrl(URL.createObjectURL(file));
+    const compressed = await compressImage(file, 1600);
+    setHeroReplacementFile(compressed);
+    setHeroReplacementPreviewUrl(URL.createObjectURL(compressed));
     setStatusText("Replacement hero selected for this generation.");
   }
 
@@ -471,6 +460,8 @@ export function GeneratePage() {
       throw new Error("Could not resolve fabric image");
     }
 
+    const compressedPhoto = await compressImage(customerPhotoFile, 1280);
+
     const reader = new FileReader();
     const photoB64 = await new Promise<string>((resolve, reject) => {
       reader.onload = () => {
@@ -483,7 +474,7 @@ export function GeneratePage() {
         resolve(b64);
       };
       reader.onerror = () => reject(reader.error ?? new Error("Failed to read customer photo"));
-      reader.readAsDataURL(customerPhotoFile);
+      reader.readAsDataURL(compressedPhoto);
     });
 
     const response = await apiFetch<{
@@ -499,7 +490,7 @@ export function GeneratePage() {
           folder_id: selectedGarmentId,
           customer_photo_b64: photoB64,
           customer_photo_mime:
-            customerPhotoFile.type || "image/jpeg",
+            compressedPhoto.type || "image/jpeg",
           consent_confirmed: true,
         }),
       }
