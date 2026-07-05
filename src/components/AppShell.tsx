@@ -1,16 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
-import { apiFetch } from "../lib/api";
-import { useAuth } from "../lib/auth";
+import { useMe } from "../lib/queries";
 import { supabase } from "../lib/supabase";
-import type { ShopContext } from "../lib/types";
-
-type MeResponse = ShopContext & {
-  shop_name?: string | null;
-  header_display_text?: string | null;
-  credits_balance?: number | null;
-};
 
 function formatCredits(value: number | null | undefined) {
   if (value === null || value === undefined) return "?";
@@ -56,13 +48,17 @@ function PersonIcon() {
 }
 
 export function AppShell() {
-  const { accessToken } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [shopHeaderText, setShopHeaderText] = useState("Ai Vastra");
-  const [creditBalance, setCreditBalance] = useState("...");
   const [loggingOut, setLoggingOut] = useState(false);
+
+  const { data: me, isError: meError } = useMe();
+
+  const shopHeaderText = meError
+    ? "Ai Vastra"
+    : (me?.header_display_text || me?.shop_name || me?.email || "Ai Vastra").trim() || "Ai Vastra";
+  const creditBalance = meError ? "?" : formatCredits(me?.credits_balance);
 
   const activeTab =
     location.pathname === "/" || location.pathname === "/generate"
@@ -72,71 +68,6 @@ export function AppShell() {
         : location.pathname === "/fabric-silo"
           ? "fabrics"
           : "";
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadShopHeaderText() {
-      if (!accessToken) return;
-
-      try {
-        const me = await apiFetch<MeResponse>("/me", accessToken, { method: "GET" });
-        if (cancelled) return;
-
-        setCreditBalance(formatCredits(me.credits_balance));
-
-        let nextText = (me.shop_name || "").trim();
-
-        const withHeader = await supabase
-          .from("shops")
-          .select("name, header_display_text")
-          .eq("id", me.shop_id)
-          .limit(1)
-          .maybeSingle();
-
-        if (withHeader.error && withHeader.error.message.toLowerCase().includes("header_display_text")) {
-          const fallback = await supabase
-            .from("shops")
-            .select("name")
-            .eq("id", me.shop_id)
-            .limit(1)
-            .maybeSingle();
-
-          const fallbackName = String(fallback.data?.name || "").trim();
-          if (fallbackName) {
-            nextText = fallbackName;
-          }
-        } else if (withHeader.data) {
-          const headerText = String((withHeader.data as { header_display_text?: string | null }).header_display_text || "").trim();
-          const shopName = String((withHeader.data as { name?: string | null }).name || "").trim();
-          if (headerText) {
-            nextText = headerText;
-          } else if (shopName) {
-            nextText = shopName;
-          }
-        }
-
-        if (!nextText) {
-          nextText = (me.email || "Ai Vastra").trim() || "Ai Vastra";
-        }
-
-        if (!cancelled) {
-          setShopHeaderText(nextText);
-        }
-      } catch {
-        if (!cancelled) {
-          setShopHeaderText("Ai Vastra");
-          setCreditBalance("?");
-        }
-      }
-    }
-
-    void loadShopHeaderText();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [accessToken]);
 
   const handleLogout = async () => {
     const confirmed = window.confirm("Log out of this device?");

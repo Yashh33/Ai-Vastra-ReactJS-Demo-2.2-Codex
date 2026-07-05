@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { compressImage } from "../lib/compressImage";
+import { subscribeToGeneration } from "../lib/realtime";
 import { createSignedUrl, uploadToStorage } from "../lib/storage";
 import type {
   ApplyToTarget,
@@ -156,30 +157,33 @@ export function VisualizePage() {
     if (!accessToken || !visualizingGenerationId) return;
     let cancelled = false;
 
+    const handleStatusRow = (row: { id: string; status: string; error: string | null }) => {
+      if (cancelled) return;
+
+      if (row.status === "done") {
+        setVisualizingGenerationId(null);
+        setStatusText("Visualization ready.");
+        navigate(`/output-viewer?generationId=${encodeURIComponent(row.id)}`);
+        return;
+      }
+
+      if (row.status === "failed") {
+        setVisualizingGenerationId(null);
+        setStatusText(row.error || "Generation failed.");
+        return;
+      }
+
+      if (isPendingStatus(row.status)) {
+        setStatusText("Visualizing...");
+      }
+    };
+
     const poll = async () => {
       try {
         const row = await apiFetch<GenerationRow>(`/generations/${visualizingGenerationId}`, accessToken, {
           method: "GET"
         });
-
-        if (cancelled) return;
-
-        if (row.status === "done") {
-          setVisualizingGenerationId(null);
-          setStatusText("Visualization ready.");
-          navigate(`/output-viewer?generationId=${encodeURIComponent(row.id)}`);
-          return;
-        }
-
-        if (row.status === "failed") {
-          setVisualizingGenerationId(null);
-          setStatusText(row.error || "Generation failed.");
-          return;
-        }
-
-        if (isPendingStatus(row.status)) {
-          setStatusText("Visualizing...");
-        }
+        handleStatusRow(row);
       } catch (err) {
         if (cancelled) return;
         setStatusText(`Generation status failed: ${err instanceof Error ? err.message : "Unknown error"}`);
@@ -187,10 +191,12 @@ export function VisualizePage() {
     };
 
     void poll();
-    const timer = window.setInterval(poll, 3000);
+    const unsubscribe = subscribeToGeneration(visualizingGenerationId, handleStatusRow);
+    const timer = window.setInterval(poll, 10000);
 
     return () => {
       cancelled = true;
+      unsubscribe();
       window.clearInterval(timer);
     };
   }, [visualizingGenerationId, accessToken, navigate]);

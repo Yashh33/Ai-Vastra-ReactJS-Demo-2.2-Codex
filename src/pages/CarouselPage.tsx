@@ -1,23 +1,27 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { apiFetch } from "../lib/api";
-import { useAuth } from "../lib/auth";
-import type { GenerationRow } from "../lib/types";
+import { useGenerations } from "../lib/queries";
 
 const AUTO_ADVANCE_MS = 3500;
 const URL_REFRESH_THRESHOLD_MS = 50 * 60 * 1000;
 
 export function CarouselPage() {
-  const { accessToken } = useAuth();
   const navigate = useNavigate();
 
-  const [rows, setRows] = useState<GenerationRow[]>([]);
   const [index, setIndex] = useState(0);
-  const [loading, setLoading] = useState(false);
   const [autoAdvance, setAutoAdvance] = useState(true);
   const [statusText, setStatusText] = useState("Loading outputs...");
-  const [loadedAt, setLoadedAt] = useState<number | null>(null);
+  const pendingCurrentIdRef = useRef<string | null>(null);
+
+  const {
+    data: rowsData,
+    isFetching: loading,
+    error: loadError,
+    dataUpdatedAt,
+    refetch
+  } = useGenerations({ status: "done", limit: 100, include_urls: true });
+  const rows = rowsData ?? [];
 
   const visibleRows = useMemo(
     () => rows.filter((row) => row.status === "done" && !!row.output_path),
@@ -27,45 +31,40 @@ export function CarouselPage() {
   const currentRow = visibleRows[index] ?? null;
   const currentUrl = currentRow?.download_url ?? null;
 
-  async function loadOutputs() {
-    if (!accessToken) return;
-    setLoading(true);
-    try {
-      const currentId = visibleRows[index]?.id ?? null;
-      const fetchedRows = await apiFetch<GenerationRow[]>(
-        "/generations?status=done&limit=100&include_urls=true",
-        accessToken,
-        { method: "GET" }
-      );
-      setRows(fetchedRows);
-
-      const nextVisibleRows = fetchedRows.filter((row) => row.status === "done" && !!row.output_path);
-      const preservedIndex = currentId ? nextVisibleRows.findIndex((row) => row.id === currentId) : -1;
-      setIndex(preservedIndex >= 0 ? preservedIndex : 0);
-      setLoadedAt(Date.now());
-      setStatusText(fetchedRows.length ? "Carousel ready" : "No outputs available.");
-    } catch (err) {
-      setStatusText(`Failed to load outputs: ${err instanceof Error ? err.message : "Unknown error"}`);
-    } finally {
-      setLoading(false);
-    }
+  function loadOutputs() {
+    pendingCurrentIdRef.current = visibleRows[index]?.id ?? null;
+    return refetch();
   }
 
   useEffect(() => {
-    loadOutputs();
-  }, [accessToken]);
+    if (!rowsData) return;
+    const lastId = pendingCurrentIdRef.current;
+    pendingCurrentIdRef.current = null;
+
+    const preservedIndex = lastId ? visibleRows.findIndex((row) => row.id === lastId) : -1;
+    setIndex(preservedIndex >= 0 ? preservedIndex : 0);
+  }, [rowsData]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (loadError) {
+      setStatusText(`Failed to load outputs: ${loadError instanceof Error ? loadError.message : "Unknown error"}`);
+      return;
+    }
+    setStatusText(rows.length ? "Carousel ready" : "No outputs available.");
+  }, [loading, loadError, rows.length]);
 
   useEffect(() => {
     if (!autoAdvance || visibleRows.length <= 1) return;
     const timer = window.setInterval(() => {
-      if (loadedAt && Date.now() - loadedAt > URL_REFRESH_THRESHOLD_MS) {
+      if (dataUpdatedAt && Date.now() - dataUpdatedAt > URL_REFRESH_THRESHOLD_MS) {
         void loadOutputs();
         return;
       }
       setIndex((prev) => (prev + 1) % visibleRows.length);
     }, AUTO_ADVANCE_MS);
     return () => window.clearInterval(timer);
-  }, [autoAdvance, visibleRows.length, loadedAt]);
+  }, [autoAdvance, visibleRows.length, dataUpdatedAt]);
 
   function goPrev() {
     if (!visibleRows.length) return;

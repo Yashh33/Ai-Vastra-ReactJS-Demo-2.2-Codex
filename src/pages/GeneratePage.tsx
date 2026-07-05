@@ -1,10 +1,13 @@
-import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { CustomerConsentModal } from "../components/CustomerConsentModal";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { useGarmentTypes, useMe } from "../lib/queries";
+import { subscribeToGeneration } from "../lib/realtime";
 import { createSignedUrl, uploadToStorage } from "../lib/storage";
 import type {
   ApplyToTarget,
@@ -13,37 +16,10 @@ import type {
   GenerationCreateResponse,
   GenerationFabricAssignmentPayload,
   GenerationRow,
-  HeroImageRow,
-  ShopContext
+  HeroImageRow
 } from "../lib/types";
 import { compressImage } from "../lib/compressImage";
 import { guessFileExtension, isPendingStatus, makeRandomSuffix } from "../lib/utils";
-
-type MeResponse = ShopContext & {
-  credits?: number | string | null;
-  credit_balance?: number | string | null;
-  balance?: number | string | null;
-  creditBalance?: number | string | null;
-  current_balance?: number | string | null;
-};
-
-function extractCreditBalance(me: MeResponse) {
-  const candidates = [
-    me.credits,
-    me.credit_balance,
-    me.balance,
-    me.creditBalance,
-    me.current_balance
-  ];
-
-  for (const value of candidates) {
-    if (value === null || value === undefined || value === "") continue;
-    const numeric = Number(value);
-    if (Number.isFinite(numeric)) return String(numeric);
-  }
-
-  return "-";
-}
 
 function mapGarmentToApplyTo(garment: GarmentType): ApplyToTarget {
   const context = `${garment.name} ${garment.prompt_template}`.toLowerCase();
@@ -78,6 +54,7 @@ export function GeneratePage() {
   const { accessToken } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const queryClient = useQueryClient();
 
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
@@ -85,9 +62,16 @@ export function GeneratePage() {
   const pickedFabricImageId =
     searchParams.get("fabric_image_id") ?? searchParams.get("selectedFabricImageId") ?? "";
 
-  const [shopContext, setShopContext] = useState<ShopContext | null>(null);
-  const [creditBalance, setCreditBalance] = useState("-");
-  const [garmentTypes, setGarmentTypes] = useState<GarmentType[]>([]);
+  const { data: me } = useMe();
+  const {
+    data: garmentTypesData,
+    isLoading: loadingGarmentTypes,
+    error: garmentTypesError,
+    refetch: refetchGarmentTypes
+  } = useGarmentTypes();
+  const garmentTypes = garmentTypesData ?? [];
+  const shopContext = me ?? null;
+  const creditBalance = me?.credits_balance !== null && me?.credits_balance !== undefined ? String(me.credits_balance) : "-";
   const [selectedGarmentId, setSelectedGarmentId] = useState("");
 
   const [fabricFile, setFabricFile] = useState<File | null>(null);
@@ -103,7 +87,6 @@ export function GeneratePage() {
   const [heroReplacementFile, setHeroReplacementFile] = useState<File | null>(null);
   const [heroReplacementPreviewUrl, setHeroReplacementPreviewUrl] = useState<string | null>(null);
 
-  const [loadingInitial, setLoadingInitial] = useState(false);
   const [loadingPickedFabric, setLoadingPickedFabric] = useState(false);
   const [creatingGeneration, setCreatingGeneration] = useState(false);
   const [visualizingGenerationId, setVisualizingGenerationId] = useState<string | null>(null);
@@ -122,28 +105,13 @@ export function GeneratePage() {
 
   const fabricReady = !!fabricFile || !!existingFabricImage?.id;
   const heroReady = !!heroReplacementFile || !!selectedGarment?.default_hero_image_id;
-  const actionBusy = loadingInitial || loadingPickedFabric || creatingGeneration || !!visualizingGenerationId;
+  const actionBusy = loadingGarmentTypes || loadingPickedFabric || creatingGeneration || !!visualizingGenerationId;
   const canGenerate =
     fabricReady &&
     !!selectedGarment &&
     heroReady &&
     (!saveToSilo || !!fabricCode.trim()) &&
     !actionBusy;
-
-  const loadGarmentTypes = useCallback(async () => {
-    if (!accessToken) return;
-
-    setLoadingInitial(true);
-    try {
-      const garmentRows = await apiFetch<GarmentType[]>("/garment-types", accessToken, { method: "GET" });
-      setGarmentTypes(garmentRows);
-      setStatusText(garmentRows.length ? "Ready to generate." : "No garment types found.");
-    } catch (err) {
-      setStatusText(`Load failed: ${err instanceof Error ? err.message : "Unknown error"}`);
-    } finally {
-      setLoadingInitial(false);
-    }
-  }, [accessToken]);
 
   useEffect(() => {
     if (!fabricPreviewUrl?.startsWith("blob:")) return;
@@ -156,35 +124,13 @@ export function GeneratePage() {
   }, [heroReplacementPreviewUrl]);
 
   useEffect(() => {
-    void loadGarmentTypes();
-  }, [loadGarmentTypes]);
-
-  useEffect(() => {
-    if (!accessToken) return;
-    let cancelled = false;
-
-    async function loadInitialData() {
-      if (!accessToken) return;
-      try {
-        const me = await apiFetch<MeResponse>("/me", accessToken, { method: "GET" });
-
-        if (cancelled) return;
-
-        setShopContext(me);
-        setCreditBalance(extractCreditBalance(me));
-      } catch (err) {
-        if (!cancelled) {
-          setStatusText(`Load failed: ${err instanceof Error ? err.message : "Unknown error"}`);
-        }
-      }
+    if (loadingGarmentTypes) return;
+    if (garmentTypesError) {
+      setStatusText(`Load failed: ${garmentTypesError instanceof Error ? garmentTypesError.message : "Unknown error"}`);
+      return;
     }
-
-    void loadInitialData();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [accessToken]);
+    setStatusText(garmentTypes.length ? "Ready to generate." : "No garment types found.");
+  }, [loadingGarmentTypes, garmentTypesError, garmentTypes.length]);
 
   useEffect(() => {
     if (!accessToken || !pickedFabricImageId) return;
@@ -236,30 +182,33 @@ export function GeneratePage() {
     if (!accessToken || !visualizingGenerationId) return;
     let cancelled = false;
 
+    const handleStatusRow = (row: { id: string; status: string; error: string | null }) => {
+      if (cancelled) return;
+
+      if (row.status === "done") {
+        setVisualizingGenerationId(null);
+        setStatusText("Generation ready.");
+        navigate(`/output-viewer?generationId=${encodeURIComponent(row.id)}`);
+        return;
+      }
+
+      if (row.status === "failed") {
+        setVisualizingGenerationId(null);
+        setStatusText(row.error || "Generation failed.");
+        return;
+      }
+
+      if (isPendingStatus(row.status)) {
+        setStatusText("Generating look...");
+      }
+    };
+
     const poll = async () => {
       try {
         const row = await apiFetch<GenerationRow>(`/generations/${visualizingGenerationId}`, accessToken, {
           method: "GET"
         });
-
-        if (cancelled) return;
-
-        if (row.status === "done") {
-          setVisualizingGenerationId(null);
-          setStatusText("Generation ready.");
-          navigate(`/output-viewer?generationId=${encodeURIComponent(row.id)}`);
-          return;
-        }
-
-        if (row.status === "failed") {
-          setVisualizingGenerationId(null);
-          setStatusText(row.error || "Generation failed.");
-          return;
-        }
-
-        if (isPendingStatus(row.status)) {
-          setStatusText("Generating look...");
-        }
+        handleStatusRow(row);
       } catch (err) {
         if (!cancelled) {
           setStatusText(`Generation status failed: ${err instanceof Error ? err.message : "Unknown error"}`);
@@ -268,10 +217,12 @@ export function GeneratePage() {
     };
 
     void poll();
-    const timer = window.setInterval(poll, 3000);
+    const unsubscribe = subscribeToGeneration(visualizingGenerationId, handleStatusRow);
+    const timer = window.setInterval(poll, 10000);
 
     return () => {
       cancelled = true;
+      unsubscribe();
       window.clearInterval(timer);
     };
   }, [accessToken, navigate, visualizingGenerationId]);
@@ -405,9 +356,14 @@ export function GeneratePage() {
         })
       });
 
+      void queryClient.invalidateQueries({ queryKey: ["generations"] });
+
       if (Number.isFinite(response.balance_after)) {
-        setCreditBalance(String(response.balance_after));
+        queryClient.setQueryData(["me"], (prev: typeof me) =>
+          prev ? { ...prev, credits_balance: response.balance_after } : prev
+        );
       }
+      void queryClient.invalidateQueries({ queryKey: ["me"] });
 
       setVisualizingGenerationId(response.id);
       setStatusText("Generating look...");
@@ -716,7 +672,7 @@ export function GeneratePage() {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
             <span className="section-label">Select Style</span>
             <button
-              onClick={loadGarmentTypes}
+              onClick={() => void refetchGarmentTypes()}
               style={{
                 width: "32px",
                 height: "32px",
@@ -757,14 +713,14 @@ export function GeneratePage() {
                   setHeroReplacementFile(null);
                   setHeroReplacementPreviewUrl(null);
                 }}
-                disabled={actionBusy || loadingInitial}
+                disabled={actionBusy || loadingGarmentTypes}
               >
                 {garment.name}
               </button>
             ))}
           </div>
 
-          {loadingInitial ? <p className="tiny muted">Loading garment types...</p> : null}
+          {loadingGarmentTypes ? <p className="tiny muted">Loading garment types...</p> : null}
 
           {selectedGarment ? (
             <>

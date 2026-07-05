@@ -413,7 +413,9 @@ export function ProtectedRoute() {
 }
 
 === D:\AiVastraReactJSDemo 2.2 Codex\src\components\TryOnFlow.tsx ===
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+import { compressImage } from "../lib/compressImage";
 
 type Props = {
   onClose: () => void;
@@ -430,9 +432,20 @@ export function TryOnFlow({ onClose, onSubmit }: Props) {
   const captureRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
 
-  function handleFileSelect(file: File) {
-    setCustomerPhoto(file);
-    setPreviewUrl(URL.createObjectURL(file));
+  useEffect(() => {
+    if (!previewUrl?.startsWith("blob:")) return;
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
+
+  useEffect(() => {
+    if (!resultUrl?.startsWith("blob:")) return;
+    return () => URL.revokeObjectURL(resultUrl);
+  }, [resultUrl]);
+
+  async function handleFileSelect(file: File) {
+    const compressed = await compressImage(file, 1280);
+    setCustomerPhoto(compressed);
+    setPreviewUrl(URL.createObjectURL(compressed));
     setResultUrl(null);
     setError(null);
   }
@@ -655,7 +668,7 @@ export function TryOnFlow({ onClose, onSubmit }: Props) {
                   style={{ display: "none" }}
                   onChange={(e) => {
                     const f = e.target.files?.[0];
-                    if (f) handleFileSelect(f);
+                    if (f) void handleFileSelect(f);
                   }}
                 />
                 <input
@@ -665,7 +678,7 @@ export function TryOnFlow({ onClose, onSubmit }: Props) {
                   style={{ display: "none" }}
                   onChange={(e) => {
                     const f = e.target.files?.[0];
-                    if (f) handleFileSelect(f);
+                    if (f) void handleFileSelect(f);
                   }}
                 />
               </div>
@@ -769,7 +782,7 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const headers = new Headers(init.headers ?? {});
   headers.set("Authorization", `Bearer ${accessToken}`);
-  if (init.body && !headers.has("Content-Type")) {
+  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
@@ -800,6 +813,46 @@ export async function apiFetch<T>(
   }
 
   return payload as T;
+}
+
+export async function apiFetchBinary(
+  path: string,
+  accessToken: string,
+  init: RequestInit = {}
+): Promise<Blob> {
+  const headers = new Headers(init.headers ?? {});
+  headers.set("Authorization", `Bearer ${accessToken}`);
+  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const response = await fetch(`${APP_ENV.apiBaseUrl}${path}`, {
+    ...init,
+    headers
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    let payload: unknown = null;
+    if (text) {
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        payload = text;
+      }
+    }
+
+    const detail =
+      typeof payload === "object" &&
+      payload !== null &&
+      "detail" in (payload as ErrorPayload)
+        ? String((payload as ErrorPayload).detail)
+        : `HTTP ${response.status}`;
+
+    throw new Error(detail);
+  }
+
+  return response.blob();
 }
 
 === D:\AiVastraReactJSDemo 2.2 Codex\src\lib\auth.tsx ===
@@ -875,6 +928,77 @@ export function useAuth() {
     throw new Error("useAuth must be used inside AuthProvider");
   }
   return ctx;
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\lib\compressImage.ts ===
+async function loadBitmapSource(file: File): Promise<{ source: CanvasImageSource; width: number; height: number; cleanup: () => void }> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    return {
+      source: bitmap,
+      width: bitmap.width,
+      height: bitmap.height,
+      cleanup: () => bitmap.close()
+    };
+  } catch {
+    const objectUrl = URL.createObjectURL(file);
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error("Image load failed"));
+      element.src = objectUrl;
+    });
+
+    return {
+      source: image,
+      width: image.naturalWidth,
+      height: image.naturalHeight,
+      cleanup: () => URL.revokeObjectURL(objectUrl)
+    };
+  }
+}
+
+function replaceExtensionWithJpg(filename: string) {
+  const withoutExt = filename.includes(".") ? filename.slice(0, filename.lastIndexOf(".")) : filename;
+  return `${withoutExt || "image"}.jpg`;
+}
+
+export async function compressImage(file: File, maxDimension: number, quality = 0.8): Promise<File> {
+  if (!file.type.startsWith("image/")) return file;
+
+  let cleanup: (() => void) | null = null;
+  try {
+    const { source, width, height, cleanup: cleanupSource } = await loadBitmapSource(file);
+    cleanup = cleanupSource;
+
+    if (width <= maxDimension && height <= maxDimension && file.size < 500_000) {
+      return file;
+    }
+
+    const scale = maxDimension / Math.max(width, height);
+    const targetWidth = Math.max(1, Math.round(width * scale));
+    const targetHeight = Math.max(1, Math.round(height * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas context unavailable");
+
+    ctx.drawImage(source, 0, 0, targetWidth, targetHeight);
+
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((result) => resolve(result), "image/jpeg", quality);
+    });
+    if (!blob) throw new Error("Canvas toBlob failed");
+
+    return new File([blob], replaceExtensionWithJpg(file.name || "image.jpg"), { type: "image/jpeg" });
+  } catch (err) {
+    console.warn("compressImage failed, using original file", err);
+    return file;
+  } finally {
+    cleanup?.();
+  }
 }
 
 === D:\AiVastraReactJSDemo 2.2 Codex\src\lib\download.ts ===
@@ -1348,6 +1472,8 @@ export type GenerationRow = {
   completed_at: string | null;
   fabric_summary_label?: string;
   generation_fabrics?: GenerationFabricSnapshot[];
+  download_url?: string | null;
+  thumb_url?: string | null;
 };
 
 export type GenerationCreateResponse = {
@@ -1425,12 +1551,6 @@ export function formatDateLabel(value?: string | null) {
 
 export function isPendingStatus(status?: string | null) {
   return status === "queued" || status === "processing";
-}
-
-export function withCacheBust(url: string) {
-  if (!url) return url;
-  const join = url.includes("?") ? "&" : "?";
-  return `${url}${join}cb=${Date.now()}`;
 }
 
 export function truncateText(value: string | null | undefined, max = 220) {
@@ -1806,21 +1926,21 @@ import { useNavigate } from "react-router-dom";
 
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import type { DownloadUrlResponse, GenerationRow } from "../lib/types";
-import { withCacheBust } from "../lib/utils";
+import type { GenerationRow } from "../lib/types";
 
 const AUTO_ADVANCE_MS = 3500;
+const URL_REFRESH_THRESHOLD_MS = 50 * 60 * 1000;
 
 export function CarouselPage() {
   const { accessToken } = useAuth();
   const navigate = useNavigate();
 
   const [rows, setRows] = useState<GenerationRow[]>([]);
-  const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [autoAdvance, setAutoAdvance] = useState(true);
   const [statusText, setStatusText] = useState("Loading outputs...");
+  const [loadedAt, setLoadedAt] = useState<number | null>(null);
 
   const visibleRows = useMemo(
     () => rows.filter((row) => row.status === "done" && !!row.output_path),
@@ -1828,29 +1948,25 @@ export function CarouselPage() {
   );
 
   const currentRow = visibleRows[index] ?? null;
-  const currentUrl = currentRow ? previewUrls[currentRow.id] ?? null : null;
-
-  async function getDownloadUrl(generationId: string) {
-    if (!accessToken) throw new Error("Missing access token");
-    const response = await apiFetch<DownloadUrlResponse>(
-      `/generations/${generationId}/download-url`,
-      accessToken,
-      { method: "GET" }
-    );
-    return withCacheBust(response.download_url);
-  }
+  const currentUrl = currentRow?.download_url ?? null;
 
   async function loadOutputs() {
     if (!accessToken) return;
     setLoading(true);
     try {
-      setPreviewUrls({});
-      const rows = await apiFetch<GenerationRow[]>("/generations?status=done&limit=100", accessToken, {
-        method: "GET"
-      });
-      setRows(rows);
-      setIndex(0);
-      setStatusText(rows.length ? "Carousel ready" : "No outputs available.");
+      const currentId = visibleRows[index]?.id ?? null;
+      const fetchedRows = await apiFetch<GenerationRow[]>(
+        "/generations?status=done&limit=100&include_urls=true",
+        accessToken,
+        { method: "GET" }
+      );
+      setRows(fetchedRows);
+
+      const nextVisibleRows = fetchedRows.filter((row) => row.status === "done" && !!row.output_path);
+      const preservedIndex = currentId ? nextVisibleRows.findIndex((row) => row.id === currentId) : -1;
+      setIndex(preservedIndex >= 0 ? preservedIndex : 0);
+      setLoadedAt(Date.now());
+      setStatusText(fetchedRows.length ? "Carousel ready" : "No outputs available.");
     } catch (err) {
       setStatusText(`Failed to load outputs: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
@@ -1863,41 +1979,16 @@ export function CarouselPage() {
   }, [accessToken]);
 
   useEffect(() => {
-    if (!accessToken || !visibleRows.length) return;
-    const missing = visibleRows.filter((row) => !previewUrls[row.id]);
-    if (!missing.length) return;
-
-    Promise.all(
-      missing.map(async (row) => {
-        try {
-          const url = await getDownloadUrl(row.id);
-          return { id: row.id, url };
-        } catch {
-          return null;
-        }
-      })
-    )
-      .then((items) => {
-        const valid = items.filter((item): item is { id: string; url: string } => !!item);
-        if (!valid.length) return;
-        setPreviewUrls((prev) => {
-          const next = { ...prev };
-          for (const item of valid) next[item.id] = item.url;
-          return next;
-        });
-      })
-      .catch(() => {
-        // best effort
-      });
-  }, [accessToken, visibleRows, previewUrls]);
-
-  useEffect(() => {
     if (!autoAdvance || visibleRows.length <= 1) return;
     const timer = window.setInterval(() => {
+      if (loadedAt && Date.now() - loadedAt > URL_REFRESH_THRESHOLD_MS) {
+        void loadOutputs();
+        return;
+      }
       setIndex((prev) => (prev + 1) % visibleRows.length);
     }, AUTO_ADVANCE_MS);
     return () => window.clearInterval(timer);
-  }, [autoAdvance, visibleRows.length]);
+  }, [autoAdvance, visibleRows.length, loadedAt]);
 
   function goPrev() {
     if (!visibleRows.length) return;
@@ -1970,23 +2061,18 @@ export function CarouselPage() {
   );
 }
 
-
-
-
 === D:\AiVastraReactJSDemo 2.2 Codex\src\pages\CatalogPage.tsx ===
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import type { DownloadUrlResponse, GarmentType, GenerationRow } from "../lib/types";
-import { withCacheBust } from "../lib/utils";
+import type { GarmentType, GenerationRow } from "../lib/types";
 
-type PreviewMap = Record<string, string>;
+const SHARE_CONCURRENCY = 4;
 
 type GenerationTileProps = {
   row: GenerationRow;
-  imageUrl?: string;
   onOpen: (row: GenerationRow) => void;
   selectMode: boolean;
   isSelected: boolean;
@@ -2015,42 +2101,9 @@ function getFabricSummaryLabel(row: GenerationRow) {
   return label.replace(/:\s*unknown$/i, "").trim() || "Garment";
 }
 
-function GenerationTile({
-  row,
-  imageUrl,
-  onOpen,
-  selectMode,
-  isSelected,
-  onSelectToggle,
-  onVisible,
-}: GenerationTileProps & { onVisible: (id: string) => void }) {
-  const tileRef = useRef<HTMLElement | null>(null);
-  const observedRef = useRef(false);
-
-  useEffect(() => {
-    const el = tileRef.current;
-    if (!el) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting && !observedRef.current) {
-            observedRef.current = true;
-            onVisible(row.id);
-            observer.disconnect();
-          }
-        }
-      },
-      { rootMargin: "200px" }
-    );
-
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [row.id, onVisible]);
-
+function GenerationTile({ row, onOpen, selectMode, isSelected, onSelectToggle }: GenerationTileProps) {
   return (
     <article
-      ref={tileRef}
       className="catalog-tile"
       style={{
         outline: isSelected ? "2.5px solid #C9A84C" : "none",
@@ -2081,11 +2134,14 @@ function GenerationTile({
         if (selectMode) onSelectToggle(row.id);
         else onOpen(row);
       }}>
-        {imageUrl ? (
+        {row.thumb_url ? (
           <img
             className="catalog-image"
-            src={imageUrl}
+            src={row.thumb_url}
             alt={getFabricSummaryLabel(row)}
+            loading="lazy"
+            decoding="async"
+            style={{ aspectRatio: "3/4", objectFit: "cover" }}
           />
         ) : (
           <div className="image-placeholder">
@@ -2108,7 +2164,6 @@ export function CatalogPage() {
   const [garmentTypes, setGarmentTypes] = useState<GarmentType[]>([]);
   const [selectedGarmentId, setSelectedGarmentId] = useState("");
   const [generationRows, setGenerationRows] = useState<GenerationRow[]>([]);
-  const [previewUrls, setPreviewUrls] = useState<PreviewMap>({});
   const [loadingGarments, setLoadingGarments] = useState(false);
   const [loadingRows, setLoadingRows] = useState(false);
   const [statusText, setStatusText] = useState("Select a garment type to view catalog");
@@ -2158,20 +2213,17 @@ export function CatalogPage() {
     if (!accessToken || !garment) return;
 
     setLoadingRows(true);
-    setPreviewUrls({});
 
     try {
       const rows = await apiFetch<GenerationRow[]>(
-        `/generations?status=done&folder_id=${encodeURIComponent(garment.id)}&limit=100`,
+        `/generations?status=done&folder_id=${encodeURIComponent(garment.id)}&limit=100&include_urls=true`,
         accessToken,
         { method: "GET" }
       );
       setGenerationRows(rows);
-      setPreviewUrls({});
       setStatusText(rows.length ? `Loaded ${rows.length} look(s)` : "No looks generated for this garment yet");
     } catch (err) {
       setGenerationRows([]);
-      setPreviewUrls({});
       setStatusText(`Failed to load catalog: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
       setLoadingRows(false);
@@ -2181,23 +2233,12 @@ export function CatalogPage() {
   useEffect(() => {
     if (!selectedGarment) {
       setGenerationRows([]);
-      setPreviewUrls({});
       setStatusText("Select a garment type to view catalog");
       return;
     }
 
     void loadGenerations(selectedGarment);
   }, [accessToken, selectedGarmentId]);
-
-  async function getDownloadUrl(generationId: string) {
-    if (!accessToken) throw new Error("Missing access token");
-    const response = await apiFetch<DownloadUrlResponse>(
-      `/generations/${generationId}/download-url`,
-      accessToken,
-      { method: "GET" }
-    );
-    return withCacheBust(response.download_url);
-  }
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
@@ -2217,28 +2258,36 @@ export function CatalogPage() {
     if (!accessToken || selectedIds.size === 0) return;
     setSharing(true);
     try {
-      const files: File[] = [];
-      let index = 1;
-      for (const id of selectedIds) {
-        try {
-          const url = await getDownloadUrl(id);
-          const response = await fetch(url);
-          const blob = await response.blob();
-          files.push(new File(
-            [blob],
-            `ai-vastra-look-${index}.jpg`,
-            { type: "image/jpeg" }
-          ));
-          index++;
-        } catch {
-          // skip failed
+      const ids = Array.from(selectedIds);
+      const files: (File | null)[] = new Array(ids.length).fill(null);
+      let cursor = 0;
+
+      async function worker() {
+        while (cursor < ids.length) {
+          const index = cursor++;
+          const id = ids[index];
+          const url = generationRows.find((row) => row.id === id)?.download_url;
+          if (!url) continue;
+          try {
+            const response = await fetch(url);
+            const blob = await response.blob();
+            files[index] = new File([blob], `ai-vastra-look-${index + 1}.jpg`, { type: "image/jpeg" });
+          } catch {
+            // skip failed
+          }
         }
       }
-      if (files.length === 0) return;
-      if (navigator.share && navigator.canShare({ files })) {
-        await navigator.share({ files });
+
+      await Promise.all(
+        Array.from({ length: Math.min(SHARE_CONCURRENCY, ids.length) }, () => worker())
+      );
+
+      const validFiles = files.filter((file): file is File => !!file);
+      if (validFiles.length === 0) return;
+      if (navigator.share && navigator.canShare({ files: validFiles })) {
+        await navigator.share({ files: validFiles });
       } else {
-        for (const file of files) {
+        for (const file of validFiles) {
           const url = URL.createObjectURL(file);
           window.open(url, "_blank");
         }
@@ -2250,16 +2299,6 @@ export function CatalogPage() {
       setSharing(false);
     }
   };
-
-  const handleTileVisible = useCallback(async (id: string) => {
-    if (!accessToken) return;
-    try {
-      const url = await getDownloadUrl(id);
-      setPreviewUrls((prev) => ({ ...prev, [id]: url }));
-    } catch (err) {
-      console.error("Download URL failed for generation", id, err);
-    }
-  }, [accessToken]);
 
   function openViewer(row: GenerationRow) {
     const params = new URLSearchParams({
@@ -2366,12 +2405,10 @@ export function CatalogPage() {
               <GenerationTile
                 key={row.id}
                 row={row}
-                imageUrl={previewUrls[row.id]}
                 onOpen={openViewer}
                 selectMode={selectMode}
                 isSelected={selectedIds.has(row.id)}
                 onSelectToggle={toggleSelect}
-                onVisible={handleTileVisible}
               />
             ))}
           </section>
@@ -2448,6 +2485,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { compressImage } from "../lib/compressImage";
 import { createSignedUrl, uploadToStorage } from "../lib/storage";
 import type { FabricImageRow, ShopContext } from "../lib/types";
 import { guessFileExtension, makeRandomSuffix } from "../lib/utils";
@@ -2624,20 +2662,21 @@ export function FabricSiloPage() {
     resetDraft();
   }
 
-  function handleDraftFilePicked(file: File | null) {
+  async function handleDraftFilePicked(file: File | null) {
     if (!file) return;
-    setDraftFile(file);
-    setDraftPreviewUrl(URL.createObjectURL(file));
+    const compressed = await compressImage(file, 1600);
+    setDraftFile(compressed);
+    setDraftPreviewUrl(URL.createObjectURL(compressed));
     setStatusText("Fabric image selected.");
   }
 
   function onCameraChange(event: ChangeEvent<HTMLInputElement>) {
-    handleDraftFilePicked(event.target.files?.[0] ?? null);
+    void handleDraftFilePicked(event.target.files?.[0] ?? null);
     event.target.value = "";
   }
 
   function onGalleryChange(event: ChangeEvent<HTMLInputElement>) {
-    handleDraftFilePicked(event.target.files?.[0] ?? null);
+    void handleDraftFilePicked(event.target.files?.[0] ?? null);
     event.target.value = "";
   }
 
@@ -2856,7 +2895,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { CustomerConsentModal } from "../components/CustomerConsentModal";
 import { TryOnFlow } from "../components/TryOnFlow";
-import { apiFetch } from "../lib/api";
+import { apiFetch, apiFetchBinary } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { createSignedUrl, uploadToStorage } from "../lib/storage";
 import type {
@@ -2869,6 +2908,7 @@ import type {
   HeroImageRow,
   ShopContext
 } from "../lib/types";
+import { compressImage } from "../lib/compressImage";
 import { guessFileExtension, isPendingStatus, makeRandomSuffix } from "../lib/utils";
 
 type MeResponse = ShopContext & {
@@ -2906,24 +2946,6 @@ function mapGarmentToApplyTo(garment: GarmentType): ApplyToTarget {
   if (context.includes("upper")) return "suit_upper";
 
   return "suit_full_body";
-}
-
-async function findFabricImageById(accessToken: string, fabricImageId: string) {
-  const pageSize = 100;
-
-  for (let offset = 0; offset <= 1000; offset += pageSize) {
-    const rows = await apiFetch<FabricImageRow[]>(
-      `/fabric-images?limit=${pageSize}&offset=${offset}`,
-      accessToken,
-      { method: "GET" }
-    );
-
-    const match = rows.find((row) => row.id === fabricImageId);
-    if (match) return match;
-    if (rows.length < pageSize) return null;
-  }
-
-  return null;
 }
 
 const FINE_CHECKS_SVG = `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
@@ -3065,7 +3087,11 @@ export function GeneratePage() {
       setLoadingPickedFabric(true);
       try {
         setStatusText("Loading selected fabric...");
-        const row = await findFabricImageById(accessToken, pickedFabricImageId);
+        const row = await apiFetch<FabricImageRow>(
+          `/fabric-images/${encodeURIComponent(pickedFabricImageId)}`,
+          accessToken,
+          { method: "GET" }
+        ).catch(() => null);
         if (cancelled) return;
 
         if (!row) {
@@ -3150,32 +3176,34 @@ export function GeneratePage() {
     setFabricScale(null);
   }
 
-  function handleFabricPicked(file: File | null) {
+  async function handleFabricPicked(file: File | null) {
     if (!file) return;
-    setFabricFile(file);
+    const compressed = await compressImage(file, 1600);
+    setFabricFile(compressed);
     setExistingFabricImage(null);
-    setFabricPreviewUrl(URL.createObjectURL(file));
+    setFabricPreviewUrl(URL.createObjectURL(compressed));
     setHasPattern(false);
     setFabricScale(null);
     setStatusText("Fabric image selected.");
   }
 
   function onFabricCameraChange(event: ChangeEvent<HTMLInputElement>) {
-    handleFabricPicked(event.target.files?.[0] ?? null);
+    void handleFabricPicked(event.target.files?.[0] ?? null);
     event.target.value = "";
   }
 
   function onFabricGalleryChange(event: ChangeEvent<HTMLInputElement>) {
-    handleFabricPicked(event.target.files?.[0] ?? null);
+    void handleFabricPicked(event.target.files?.[0] ?? null);
     event.target.value = "";
   }
 
-  function onHeroReplacementChange(event: ChangeEvent<HTMLInputElement>) {
+  async function onHeroReplacementChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
     if (!file) return;
 
-    setHeroReplacementFile(file);
-    setHeroReplacementPreviewUrl(URL.createObjectURL(file));
+    const compressed = await compressImage(file, 1600);
+    setHeroReplacementFile(compressed);
+    setHeroReplacementPreviewUrl(URL.createObjectURL(compressed));
     setStatusText("Replacement hero selected for this generation.");
   }
 
@@ -3324,53 +3352,19 @@ export function GeneratePage() {
       throw new Error("Could not resolve fabric image");
     }
 
-    const reader = new FileReader();
-    const photoB64 = await new Promise<string>((resolve, reject) => {
-      reader.onload = () => {
-        const result = reader.result as string;
-        const b64 = result.split(",")[1];
-        if (!b64) {
-          reject(new Error("Failed to read customer photo"));
-          return;
-        }
-        resolve(b64);
-      };
-      reader.onerror = () => reject(reader.error ?? new Error("Failed to read customer photo"));
-      reader.readAsDataURL(customerPhotoFile);
+    const compressedPhoto = await compressImage(customerPhotoFile, 1280);
+
+    const formData = new FormData();
+    formData.set("fabric_image_id", fabricImageId);
+    formData.set("folder_id", selectedGarmentId);
+    formData.set("consent_confirmed", "true");
+    formData.set("customer_photo", compressedPhoto);
+
+    const blob = await apiFetchBinary("/tryon/quick/v2", accessToken, {
+      method: "POST",
+      body: formData,
     });
 
-    const response = await apiFetch<{
-      result_b64: string;
-      result_mime: string;
-    }>(
-      "/tryon/quick",
-      accessToken,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          fabric_image_id: fabricImageId,
-          folder_id: selectedGarmentId,
-          customer_photo_b64: photoB64,
-          customer_photo_mime:
-            customerPhotoFile.type || "image/jpeg",
-          consent_confirmed: true,
-        }),
-      }
-    );
-
-    function base64ToBlob(b64: string, mime: string): Blob {
-      const bytes = atob(b64);
-      const arr = new Uint8Array(bytes.length);
-      for (let i = 0; i < bytes.length; i++) {
-        arr[i] = bytes.charCodeAt(i);
-      }
-      return new Blob([arr], { type: mime });
-    }
-
-    const blob = base64ToBlob(
-      response.result_b64,
-      response.result_mime
-    );
     return URL.createObjectURL(blob);
   }
 
@@ -3953,7 +3947,6 @@ import {
 } from "../lib/matchColor";
 import { createSignedUrl } from "../lib/storage";
 import type { GenerationRow, MatchColorSaveResponse } from "../lib/types";
-import { withCacheBust } from "../lib/utils";
 
 const NAVY = "#1B1B2F";
 const GOLD = "#C9A84C";
@@ -4009,7 +4002,6 @@ export function MatchColorPage() {
     setLoading(true);
     setErrorText(null);
 
-    let objectUrl: string | null = null;
     try {
       const generation = await apiFetch<GenerationRow>(`/generations/${generationId}`, accessToken, {
         method: "GET"
@@ -4021,10 +4013,9 @@ export function MatchColorPage() {
 
       const signedUrl = await createSignedUrl("generated-outputs", generation.output_path);
       setOutputPath(generation.output_path);
-      setOutputImageUrl(withCacheBust(signedUrl));
 
       const loaded = await loadImageFromUrl(signedUrl);
-      objectUrl = loaded.objectUrl;
+      setOutputImageUrl(loaded.objectUrl);
 
       const canvas = resizeImageToCanvas(loaded.image, 680);
       const ctx = canvas.getContext("2d");
@@ -4043,7 +4034,6 @@ export function MatchColorPage() {
     } catch (err) {
       setErrorText(err instanceof Error ? err.message : "Unknown error");
     } finally {
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
       setLoading(false);
     }
   }
@@ -4051,6 +4041,11 @@ export function MatchColorPage() {
   useEffect(() => {
     void loadMatchColorData();
   }, [accessToken, generationId]);
+
+  useEffect(() => {
+    if (!outputImageUrl?.startsWith("blob:")) return;
+    return () => URL.revokeObjectURL(outputImageUrl);
+  }, [outputImageUrl]);
 
   useEffect(() => {
     const canvas = previewCanvasRef.current;
@@ -4116,7 +4111,7 @@ export function MatchColorPage() {
       if (nextPath) {
         const signedUrl = await createSignedUrl("generated-outputs", nextPath);
         setOutputPath(nextPath);
-        setOutputImageUrl(withCacheBust(signedUrl));
+        setOutputImageUrl(signedUrl);
       }
 
       setSavedHexes((prev) => {
@@ -4323,10 +4318,7 @@ import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { buildGenerationDownloadFilename, triggerBrowserDownload } from "../lib/download";
-import type { DownloadUrlResponse, GenerationRow } from "../lib/types";
-import { withCacheBust } from "../lib/utils";
-
-type PreviewMap = Record<string, string>;
+import type { GenerationRow } from "../lib/types";
 
 type HistoryFilters = {
   fabricCode: string;
@@ -4397,6 +4389,7 @@ function buildHistoryPath(filters: HistoryFilters) {
   const params = new URLSearchParams();
   params.set("status", "done");
   params.set("limit", "100");
+  params.set("include_urls", "true");
 
   if (filters.fabricCode) {
     params.set("fabric_code", filters.fabricCode);
@@ -4420,7 +4413,6 @@ export function OutputHistoryPage() {
   const navigate = useNavigate();
 
   const [rows, setRows] = useState<GenerationRow[]>([]);
-  const [previewUrls, setPreviewUrls] = useState<PreviewMap>({});
   const [loading, setLoading] = useState(false);
   const [statusText, setStatusText] = useState("Loading output history...");
   const [downloadingGenerationId, setDownloadingGenerationId] = useState<string | null>(null);
@@ -4452,21 +4444,10 @@ export function OutputHistoryPage() {
     return label || "Garment";
   }
 
-  async function getDownloadUrl(generationId: string) {
-    if (!accessToken) throw new Error("Missing access token");
-    const response = await apiFetch<DownloadUrlResponse>(
-      `/generations/${generationId}/download-url`,
-      accessToken,
-      { method: "GET" }
-    );
-    return withCacheBust(response.download_url);
-  }
-
   async function loadHistory(filters: HistoryFilters) {
     if (!accessToken) return;
     setLoading(true);
     try {
-      setPreviewUrls({});
       const path = buildHistoryPath(filters);
       const rows = await apiFetch<GenerationRow[]>(path, accessToken, {
         method: "GET"
@@ -4494,35 +4475,6 @@ export function OutputHistoryPage() {
     void loadHistory(appliedFilters);
   }, [accessToken, appliedFilters]);
 
-  useEffect(() => {
-    if (!accessToken || !visibleRows.length) return;
-    const missing = visibleRows.filter((row) => !previewUrls[row.id]);
-    if (!missing.length) return;
-
-    Promise.all(
-      missing.map(async (row) => {
-        try {
-          const url = await getDownloadUrl(row.id);
-          return { id: row.id, url };
-        } catch {
-          return null;
-        }
-      })
-    )
-      .then((items) => {
-        const valid = items.filter((item): item is { id: string; url: string } => !!item);
-        if (!valid.length) return;
-        setPreviewUrls((prev) => {
-          const next = { ...prev };
-          for (const item of valid) next[item.id] = item.url;
-          return next;
-        });
-      })
-      .catch(() => {
-        // best effort previews
-      });
-  }, [accessToken, visibleRows, previewUrls]);
-
   function applyFilters() {
     setAppliedFilters({
       fabricCode: fabricCodeInput.trim(),
@@ -4541,10 +4493,10 @@ export function OutputHistoryPage() {
   }
 
   async function handleQuickDownload(row: GenerationRow) {
-    if (!row.output_path) return;
+    if (!row.output_path || !row.download_url) return;
     setDownloadingGenerationId(row.id);
     try {
-      const url = await getDownloadUrl(row.id);
+      const url = row.download_url;
       triggerBrowserDownload(url, buildGenerationDownloadFilename(row.id, row.output_path, url));
       setStatusText("Download started");
     } catch (err) {
@@ -4572,11 +4524,6 @@ export function OutputHistoryPage() {
       });
 
       setRows((prev) => prev.filter((item) => item.id !== row.id));
-      setPreviewUrls((prev) => {
-        const next = { ...prev };
-        delete next[row.id];
-        return next;
-      });
 
       const base = `Deleted output ${response.generation_id}.`;
       setStatusText(response.warning ? `${base} Warning: ${response.warning}` : base);
@@ -4688,8 +4635,15 @@ export function OutputHistoryPage() {
                   className="catalog-image-btn"
                   onClick={() => navigate(`/output-viewer?generationId=${encodeURIComponent(row.id)}`)}
                 >
-                  {previewUrls[row.id] ? (
-                    <img className="catalog-image" src={previewUrls[row.id]} alt={`Output ${row.id}`} />
+                  {row.thumb_url ? (
+                    <img
+                      className="catalog-image"
+                      src={row.thumb_url}
+                      alt={`Output ${row.id}`}
+                      loading="lazy"
+                      decoding="async"
+                      style={{ aspectRatio: "3/4", objectFit: "cover" }}
+                    />
                   ) : (
                     <div className="image-placeholder">
                       <div className="spinner spinner-small" />
@@ -4733,7 +4687,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { CustomerConsentModal } from "../components/CustomerConsentModal";
 import { TryOnFlow } from "../components/TryOnFlow";
-import { apiFetch } from "../lib/api";
+import { apiFetch, apiFetchBinary } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import type {
   CatalogImageDownloadUrlResponse,
@@ -4741,7 +4695,7 @@ import type {
   DownloadUrlResponse,
   GenerationRow,
 } from "../lib/types";
-import { isPendingStatus, withCacheBust } from "../lib/utils";
+import { isPendingStatus } from "../lib/utils";
 
 export function OutputViewerPage() {
   const { accessToken } = useAuth();
@@ -4820,7 +4774,7 @@ export function OutputViewerPage() {
     const response = await apiFetch<DownloadUrlResponse>(`/generations/${id}/download-url`, accessToken, {
       method: "GET",
     });
-    return withCacheBust(response.download_url);
+    return response.download_url;
   }
 
   async function fetchCatalogImageDownloadUrl(id: string) {
@@ -4828,7 +4782,7 @@ export function OutputViewerPage() {
     const response = await apiFetch<CatalogImageDownloadUrlResponse>(`/catalog-images/${id}/download-url`, accessToken, {
       method: "GET",
     });
-    return withCacheBust(response.download_url);
+    return response.download_url;
   }
 
   async function loadGenerationView() {
@@ -4885,7 +4839,7 @@ export function OutputViewerPage() {
     try {
       if (generationMode) {
         const rows = await apiFetch<GenerationRow[]>(
-          `/generations?status=done&folder_id=${encodeURIComponent(catalogFolderId)}&limit=100`,
+          `/generations?status=done&folder_id=${encodeURIComponent(catalogFolderId)}&limit=100&include_urls=true`,
           accessToken,
           { method: "GET" }
         );
@@ -4909,6 +4863,15 @@ export function OutputViewerPage() {
 
   useEffect(() => {
     if (generationMode) {
+      if (catalogMode) {
+        const cachedRow = generationCatalogVisibleRows.find((row) => row.id === generationId);
+        if (cachedRow) {
+          setGeneration(cachedRow);
+          setImageUrl(cachedRow.download_url ?? null);
+          setStatusText("Catalog image");
+          return;
+        }
+      }
       void loadGenerationView();
       return;
     }
@@ -4919,7 +4882,16 @@ export function OutputViewerPage() {
     }
 
     setStatusText(externalImageUrl ? "Image loaded" : "No image supplied");
-  }, [generationId, generationMode, catalogImageId, catalogImageMode, accessToken, refreshNonce, catalogMode]);
+  }, [
+    generationId,
+    generationMode,
+    catalogImageId,
+    catalogImageMode,
+    accessToken,
+    refreshNonce,
+    catalogMode,
+    generationCatalogVisibleRows,
+  ]);
 
   useEffect(() => {
     if (!accessToken || !generationId || !isPendingStatus(generation?.status)) return;
@@ -4968,45 +4940,17 @@ export function OutputViewerPage() {
     if (!accessToken) throw new Error("Not authenticated");
     if (!generationId) throw new Error("No generation selected");
 
-    const reader = new FileReader();
-    const photoB64 = await new Promise<string>((resolve, reject) => {
-      reader.onload = () => {
-        const result = reader.result as string;
-        const b64 = result.split(",")[1];
-        if (!b64) {
-          reject(new Error("Failed to read customer photo"));
-          return;
-        }
-        resolve(b64);
-      };
-      reader.onerror = () => reject(reader.error ?? new Error("Failed to read customer photo"));
-      reader.readAsDataURL(customerPhotoFile);
-    });
+    const formData = new FormData();
+    formData.set("generation_id", generationId);
+    formData.set("consent_confirmed", "true");
+    formData.set("customer_photo", customerPhotoFile);
 
-    const response = await apiFetch<{
-      result_b64: string;
-      result_mime: string;
-    }>("/tryon/", accessToken, {
+    const blob = await apiFetchBinary("/tryon/v2", accessToken, {
       method: "POST",
-      body: JSON.stringify({
-        generation_id: generationId,
-        customer_photo_b64: photoB64,
-        customer_photo_mime: customerPhotoFile.type || "image/jpeg",
-        consent_confirmed: true,
-      }),
+      body: formData,
     });
 
-    const blob = base64ToBlob(response.result_b64, response.result_mime);
     return URL.createObjectURL(blob);
-  }
-
-  function base64ToBlob(b64: string, mime: string): Blob {
-    const bytes = atob(b64);
-    const arr = new Uint8Array(bytes.length);
-    for (let i = 0; i < bytes.length; i++) {
-      arr[i] = bytes.charCodeAt(i);
-    }
-    return new Blob([arr], { type: mime });
   }
 
   function handleMatchColor() {
@@ -5300,6 +5244,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { compressImage } from "../lib/compressImage";
 import { createSignedUrl, uploadToStorage } from "../lib/storage";
 import type {
   ApplyToTarget,
@@ -5495,20 +5440,21 @@ export function VisualizePage() {
     if (!file || !accessToken || !shopContext || !draftId) return;
     setUploadingFabric(true);
     try {
-      const ext = guessFileExtension(file.name, file.type);
+      const compressedFile = await compressImage(file, 1600);
+      const ext = guessFileExtension(compressedFile.name, compressedFile.type);
       const filename = `${Date.now()}-${makeRandomSuffix()}.${ext}`;
       const storagePath = `${shopContext.shop_id}/${filename}`;
 
       setStatusText("Uploading fabric image...");
-      await uploadToStorage("fabric-images", storagePath, file);
+      await uploadToStorage("fabric-images", storagePath, compressedFile);
 
       const row = await apiFetch<FabricImageRow>("/fabric-images", accessToken, {
         method: "POST",
         body: JSON.stringify({
           storage_path: storagePath,
-          original_filename: file.name || filename,
-          mime_type: file.type || "image/jpeg",
-          file_size_bytes: file.size,
+          original_filename: compressedFile.name || filename,
+          mime_type: compressedFile.type || "image/jpeg",
+          file_size_bytes: compressedFile.size,
           width: null,
           height: null
         })

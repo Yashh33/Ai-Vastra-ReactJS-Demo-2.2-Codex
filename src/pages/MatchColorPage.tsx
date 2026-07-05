@@ -7,12 +7,14 @@ import {
   applyLivePreviewAdjustment,
   emptySwatchAdjustment,
   extractProminentSwatches,
+  hexToHsl01,
   isZeroAdjustment,
   resizeImageToCanvas,
   type SwatchAdjustment
 } from "../lib/matchColor";
 import { createSignedUrl } from "../lib/storage";
 import type { GenerationRow, MatchColorSaveResponse } from "../lib/types";
+import { MatchColorWebGLRenderer, type MatchColorDrawOptions } from "../lib/webglMatchColor";
 
 const NAVY = "#1B1B2F";
 const GOLD = "#C9A84C";
@@ -45,6 +47,10 @@ export function MatchColorPage() {
   const generationId = searchParams.get("generationId") ?? "";
 
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const sourceCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const rendererRef = useRef<MatchColorWebGLRenderer | null>(null);
+  const rafIdRef = useRef<number | null>(null);
+  const pendingDrawRef = useRef<MatchColorDrawOptions | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -90,6 +96,7 @@ export function MatchColorPage() {
       }
 
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      sourceCanvasRef.current = canvas;
       setSourceImageData(imageData);
 
       const nextSwatches = extractProminentSwatches(imageData, MAX_SWATCHES);
@@ -115,8 +122,67 @@ export function MatchColorPage() {
 
   useEffect(() => {
     const canvas = previewCanvasRef.current;
-    if (!canvas || !sourceImageData) return;
+    const sourceCanvas = sourceCanvasRef.current;
+    if (!canvas || !sourceCanvas || !sourceImageData) return;
 
+    let renderer: MatchColorWebGLRenderer | null = null;
+    try {
+      renderer = new MatchColorWebGLRenderer(canvas);
+      renderer.setSource(sourceCanvas, sourceCanvas.width, sourceCanvas.height);
+    } catch {
+      renderer = null;
+    }
+    rendererRef.current = renderer;
+
+    return () => {
+      renderer?.dispose();
+      if (rendererRef.current === renderer) {
+        rendererRef.current = null;
+      }
+    };
+  }, [sourceImageData]);
+
+  useEffect(() => {
+    return () => {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+    };
+  }, []);
+
+  function scheduleDraw(options: MatchColorDrawOptions) {
+    pendingDrawRef.current = options;
+    if (rafIdRef.current !== null) return;
+
+    rafIdRef.current = requestAnimationFrame(() => {
+      rafIdRef.current = null;
+      const pending = pendingDrawRef.current;
+      pendingDrawRef.current = null;
+      const renderer = rendererRef.current;
+      if (renderer && pending) {
+        renderer.draw(pending);
+      }
+    });
+  }
+
+  useEffect(() => {
+    const canvas = previewCanvasRef.current;
+    if (!canvas) return;
+
+    const renderer = rendererRef.current;
+    if (renderer) {
+      const targetHsl = (selectedHex && hexToHsl01(selectedHex)) || { h: 0, s: 0, l: 0 };
+      scheduleDraw({
+        targetHsl,
+        hueShift: currentAdjustment.hueShiftDeg / 360,
+        satDelta: currentAdjustment.satDeltaPct / 100,
+        lightDelta: currentAdjustment.lightDeltaPct / 100
+      });
+      return;
+    }
+
+    if (!sourceImageData) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { useGarmentTypes, useGenerations } from "../lib/queries";
 import type { GarmentType, GenerationRow } from "../lib/types";
 
 const SHARE_CONCURRENCY = 4;
@@ -97,20 +97,34 @@ export function CatalogPage() {
   const { accessToken } = useAuth();
   const navigate = useNavigate();
 
-  const [garmentTypes, setGarmentTypes] = useState<GarmentType[]>([]);
   const [selectedGarmentId, setSelectedGarmentId] = useState("");
-  const [generationRows, setGenerationRows] = useState<GenerationRow[]>([]);
-  const [loadingGarments, setLoadingGarments] = useState(false);
-  const [loadingRows, setLoadingRows] = useState(false);
   const [statusText, setStatusText] = useState("Select a garment type to view catalog");
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sharing, setSharing] = useState(false);
 
+  const {
+    data: garmentTypesData,
+    isLoading: loadingGarments,
+    error: garmentTypesError
+  } = useGarmentTypes();
+  const garmentTypes = garmentTypesData ?? [];
+
   const selectedGarment = useMemo(
     () => garmentTypes.find((garment) => garment.id === selectedGarmentId) ?? null,
     [garmentTypes, selectedGarmentId]
   );
+
+  const {
+    data: generationRowsData,
+    isFetching: loadingRows,
+    error: generationsError,
+    refetch: refetchGenerations
+  } = useGenerations(
+    { status: "done", folder_id: selectedGarmentId, limit: 100, include_urls: true },
+    { enabled: !!selectedGarmentId }
+  );
+  const generationRows = generationRowsData ?? [];
 
   const visibleRows = useMemo(
     () => generationRows.filter((row) => row.status === "done" && !!row.output_path),
@@ -118,63 +132,30 @@ export function CatalogPage() {
   );
 
   useEffect(() => {
-    if (!accessToken) return;
-    let cancelled = false;
-
-    async function loadGarmentTypes() {
-      if (!accessToken) return;
-      setLoadingGarments(true);
-      try {
-        const rows = await apiFetch<GarmentType[]>("/garment-types", accessToken, { method: "GET" });
-        if (cancelled) return;
-        setGarmentTypes(rows);
-        setStatusText(rows.length ? "Select a garment type to view catalog" : "No garment types found");
-      } catch (err) {
-        if (!cancelled) {
-          setStatusText(`Failed to load garment types: ${err instanceof Error ? err.message : "Unknown error"}`);
-        }
-      } finally {
-        if (!cancelled) setLoadingGarments(false);
-      }
-    }
-
-    void loadGarmentTypes();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [accessToken]);
-
-  async function loadGenerations(garment: GarmentType | null) {
-    if (!accessToken || !garment) return;
-
-    setLoadingRows(true);
-
-    try {
-      const rows = await apiFetch<GenerationRow[]>(
-        `/generations?status=done&folder_id=${encodeURIComponent(garment.id)}&limit=100&include_urls=true`,
-        accessToken,
-        { method: "GET" }
+    if (loadingGarments) return;
+    if (garmentTypesError) {
+      setStatusText(
+        `Failed to load garment types: ${garmentTypesError instanceof Error ? garmentTypesError.message : "Unknown error"}`
       );
-      setGenerationRows(rows);
-      setStatusText(rows.length ? `Loaded ${rows.length} look(s)` : "No looks generated for this garment yet");
-    } catch (err) {
-      setGenerationRows([]);
-      setStatusText(`Failed to load catalog: ${err instanceof Error ? err.message : "Unknown error"}`);
-    } finally {
-      setLoadingRows(false);
+      return;
     }
-  }
+    if (!selectedGarmentId) {
+      setStatusText(garmentTypes.length ? "Select a garment type to view catalog" : "No garment types found");
+    }
+  }, [loadingGarments, garmentTypesError, garmentTypes.length, selectedGarmentId]);
 
   useEffect(() => {
-    if (!selectedGarment) {
-      setGenerationRows([]);
+    if (!selectedGarmentId) {
       setStatusText("Select a garment type to view catalog");
       return;
     }
-
-    void loadGenerations(selectedGarment);
-  }, [accessToken, selectedGarmentId]);
+    if (loadingRows) return;
+    if (generationsError) {
+      setStatusText(`Failed to load catalog: ${generationsError instanceof Error ? generationsError.message : "Unknown error"}`);
+      return;
+    }
+    setStatusText(generationRows.length ? `Loaded ${generationRows.length} look(s)` : "No looks generated for this garment yet");
+  }, [selectedGarmentId, loadingRows, generationsError, generationRows.length]);
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
@@ -263,7 +244,7 @@ export function CatalogPage() {
           <div className="catalog-header-actions">
             <button
               className="catalog-icon-btn"
-              onClick={() => void loadGenerations(selectedGarment)}
+              onClick={() => void refetchGenerations()}
               disabled={loadingRows || !selectedGarment}
               aria-label="Refresh"
               title="Refresh"

@@ -5,6 +5,7 @@ import { CustomerConsentModal } from "../components/CustomerConsentModal";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { subscribeToGeneration } from "../lib/realtime";
 import type {
   CatalogImageDownloadUrlResponse,
   CatalogImageRow,
@@ -211,10 +212,22 @@ export function OutputViewerPage() {
 
   useEffect(() => {
     if (!accessToken || !generationId || !isPendingStatus(generation?.status)) return;
+
+    const handleStatusRow = (row: { status: string }) => {
+      if (row.status === "done" || row.status === "failed") {
+        void loadGenerationView();
+      }
+    };
+
+    const unsubscribe = subscribeToGeneration(generationId, handleStatusRow);
     const timer = window.setInterval(() => {
       void loadGenerationView();
-    }, 4000);
-    return () => window.clearInterval(timer);
+    }, 10000);
+
+    return () => {
+      unsubscribe();
+      window.clearInterval(timer);
+    };
   }, [accessToken, generationId, generation?.status]);
 
   useEffect(() => {

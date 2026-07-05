@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { buildGenerationDownloadFilename, triggerBrowserDownload } from "../lib/download";
+import { useGenerations } from "../lib/queries";
 import type { GenerationRow } from "../lib/types";
 
 type HistoryFilters = {
@@ -71,22 +73,6 @@ function DownloadIcon() {
   );
 }
 
-function buildHistoryPath(filters: HistoryFilters) {
-  const params = new URLSearchParams();
-  params.set("status", "done");
-  params.set("limit", "100");
-  params.set("include_urls", "true");
-
-  if (filters.fabricCode) {
-    params.set("fabric_code", filters.fabricCode);
-  }
-  if (filters.fabricColor) {
-    params.set("fabric_color", filters.fabricColor);
-  }
-
-  return `/generations?${params.toString()}`;
-}
-
 function summarizeFilters(filters: HistoryFilters) {
   const parts: string[] = [];
   if (filters.fabricCode) parts.push(`code: ${filters.fabricCode}`);
@@ -97,9 +83,8 @@ function summarizeFilters(filters: HistoryFilters) {
 export function OutputHistoryPage() {
   const { accessToken } = useAuth();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
-  const [rows, setRows] = useState<GenerationRow[]>([]);
-  const [loading, setLoading] = useState(false);
   const [statusText, setStatusText] = useState("Loading output history...");
   const [downloadingGenerationId, setDownloadingGenerationId] = useState<string | null>(null);
   const [deletingGenerationId, setDeletingGenerationId] = useState<string | null>(null);
@@ -108,6 +93,21 @@ export function OutputHistoryPage() {
   const [fabricCodeInput, setFabricCodeInput] = useState("");
   const [fabricColorInput, setFabricColorInput] = useState("");
   const [appliedFilters, setAppliedFilters] = useState<HistoryFilters>({ fabricCode: "", fabricColor: "" });
+  const skipStatusUpdateRef = useRef(false);
+
+  const {
+    data: rowsData,
+    isFetching: loading,
+    error: loadError,
+    refetch: refetchHistory
+  } = useGenerations({
+    status: "done",
+    fabric_code: appliedFilters.fabricCode,
+    fabric_color: appliedFilters.fabricColor,
+    limit: 100,
+    include_urls: true
+  });
+  const rows = rowsData ?? [];
 
   const visibleRows = useMemo(
     () => rows.filter((row) => row.status === "done" && !!row.output_path),
@@ -130,36 +130,29 @@ export function OutputHistoryPage() {
     return label || "Garment";
   }
 
-  async function loadHistory(filters: HistoryFilters) {
-    if (!accessToken) return;
-    setLoading(true);
-    try {
-      const path = buildHistoryPath(filters);
-      const rows = await apiFetch<GenerationRow[]>(path, accessToken, {
-        method: "GET"
-      });
-      setRows(rows);
-
-      const filterSummary = summarizeFilters(filters);
-      if (!rows.length) {
-        setStatusText(filterSummary ? `No outputs found for ${filterSummary}.` : "No outputs yet.");
-      } else {
-        setStatusText(
-          filterSummary
-            ? `Loaded ${rows.length} output image(s) for ${filterSummary}.`
-            : `Loaded ${rows.length} output image(s)`
-        );
-      }
-    } catch (err) {
-      setStatusText(`Failed to load output history: ${err instanceof Error ? err.message : "Unknown error"}`);
-    } finally {
-      setLoading(false);
-    }
-  }
-
   useEffect(() => {
-    void loadHistory(appliedFilters);
-  }, [accessToken, appliedFilters]);
+    if (loading) return;
+    if (skipStatusUpdateRef.current) {
+      skipStatusUpdateRef.current = false;
+      return;
+    }
+
+    if (loadError) {
+      setStatusText(`Failed to load output history: ${loadError instanceof Error ? loadError.message : "Unknown error"}`);
+      return;
+    }
+
+    const filterSummary = summarizeFilters(appliedFilters);
+    if (!rows.length) {
+      setStatusText(filterSummary ? `No outputs found for ${filterSummary}.` : "No outputs yet.");
+    } else {
+      setStatusText(
+        filterSummary
+          ? `Loaded ${rows.length} output image(s) for ${filterSummary}.`
+          : `Loaded ${rows.length} output image(s)`
+      );
+    }
+  }, [loading, loadError, rows.length, appliedFilters]);
 
   function applyFilters() {
     setAppliedFilters({
@@ -209,7 +202,8 @@ export function OutputHistoryPage() {
         method: "DELETE"
       });
 
-      setRows((prev) => prev.filter((item) => item.id !== row.id));
+      skipStatusUpdateRef.current = true;
+      void queryClient.invalidateQueries({ queryKey: ["generations"] });
 
       const base = `Deleted output ${response.generation_id}.`;
       setStatusText(response.warning ? `${base} Warning: ${response.warning}` : base);
@@ -240,7 +234,7 @@ export function OutputHistoryPage() {
           <div className="catalog-header-actions">
             <button
               className="catalog-icon-btn"
-              onClick={() => void loadHistory(appliedFilters)}
+              onClick={() => void refetchHistory()}
               disabled={loading}
               aria-label="Refresh"
               title="Refresh"

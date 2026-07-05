@@ -1,11 +1,13 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { compressImage } from "../lib/compressImage";
+import { useFabricImages, useMe } from "../lib/queries";
 import { createSignedUrl, uploadToStorage } from "../lib/storage";
-import type { FabricImageRow, ShopContext } from "../lib/types";
+import type { FabricImageRow } from "../lib/types";
 import { guessFileExtension, makeRandomSuffix } from "../lib/utils";
 
 type PreviewMap = Record<string, string>;
@@ -98,16 +100,26 @@ export function FabricSiloPage() {
   const { accessToken } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const queryClient = useQueryClient();
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
 
   const pickerMode = searchParams.get("picker") === "true" || searchParams.get("picker") === "1";
 
-  const [shopContext, setShopContext] = useState<ShopContext | null>(null);
-  const [rows, setRows] = useState<FabricImageRow[]>([]);
+  const { data: me, error: meError } = useMe();
+  const shopContext = me ?? null;
+
+  const {
+    data: fabricImagesData,
+    isLoading: loadingRows,
+    error: fabricImagesError,
+    refetch: refetchFabricImages
+  } = useFabricImages();
+  const rows = fabricImagesData ?? [];
+
   const [previewUrls, setPreviewUrls] = useState<PreviewMap>({});
-  const [loadingRows, setLoadingRows] = useState(false);
   const [statusText, setStatusText] = useState("Loading fabric silo...");
+  const skipStatusUpdateRef = useRef(false);
 
   const [addOpen, setAddOpen] = useState(false);
   const [draftFile, setDraftFile] = useState<File | null>(null);
@@ -123,50 +135,29 @@ export function FabricSiloPage() {
     return () => URL.revokeObjectURL(draftPreviewUrl);
   }, [draftPreviewUrl]);
 
-  async function loadRows() {
-    if (!accessToken) return;
-    setLoadingRows(true);
-    setPreviewUrls({});
-
-    try {
-      const fabricRows = await apiFetch<FabricImageRow[]>("/fabric-images?limit=100", accessToken, {
-        method: "GET"
-      });
-      setRows(fabricRows);
-      setPreviewUrls({});
-      setStatusText(fabricRows.length ? `Loaded ${fabricRows.length} fabric(s)` : "No fabrics saved yet.");
-    } catch (err) {
-      setRows([]);
-      setPreviewUrls({});
-      setStatusText(`Failed to load fabric silo: ${err instanceof Error ? err.message : "Unknown error"}`);
-    } finally {
-      setLoadingRows(false);
+  useEffect(() => {
+    if (meError) {
+      setStatusText(`Failed to load shop context: ${meError instanceof Error ? meError.message : "Unknown error"}`);
     }
-  }
+  }, [meError]);
 
   useEffect(() => {
-    if (!accessToken) return;
-    let cancelled = false;
-
-    async function loadInitialData() {
-      if (!accessToken) return;
-      try {
-        const me = await apiFetch<ShopContext>("/me", accessToken, { method: "GET" });
-        if (!cancelled) setShopContext(me);
-      } catch (err) {
-        if (!cancelled) {
-          setStatusText(`Failed to load shop context: ${err instanceof Error ? err.message : "Unknown error"}`);
-        }
-      }
+    if (loadingRows) return;
+    if (skipStatusUpdateRef.current) {
+      skipStatusUpdateRef.current = false;
+      return;
     }
+    if (fabricImagesError) {
+      setStatusText(`Failed to load fabric silo: ${fabricImagesError instanceof Error ? fabricImagesError.message : "Unknown error"}`);
+      return;
+    }
+    setStatusText(rows.length ? `Loaded ${rows.length} fabric(s)` : "No fabrics saved yet.");
+  }, [loadingRows, fabricImagesError, rows.length]);
 
-    void loadInitialData();
-    void loadRows();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [accessToken]);
+  async function loadRows() {
+    setPreviewUrls({});
+    await refetchFabricImages();
+  }
 
   function resetDraft() {
     setDraftFile(null);
@@ -236,7 +227,10 @@ export function FabricSiloPage() {
           console.error("Signed URL failed for", row.storage_path, err);
         });
 
-      setRows((prev) => [row, ...prev]);
+      skipStatusUpdateRef.current = true;
+      queryClient.setQueryData<FabricImageRow[]>(["fabric-images"], (prev) => [row, ...(prev ?? [])]);
+      void queryClient.invalidateQueries({ queryKey: ["fabric-images"] });
+
       setStatusText(draftFabricColor.trim() ? `Saved ${fabricCode} (${draftFabricColor.trim()}).` : `Saved ${fabricCode}.`);
       closeAddSheet();
     } catch (err) {
