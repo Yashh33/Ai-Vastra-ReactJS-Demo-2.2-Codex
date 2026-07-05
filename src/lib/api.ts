@@ -11,7 +11,7 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const headers = new Headers(init.headers ?? {});
   headers.set("Authorization", `Bearer ${accessToken}`);
-  if (init.body && !headers.has("Content-Type")) {
+  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
@@ -42,4 +42,44 @@ export async function apiFetch<T>(
   }
 
   return payload as T;
+}
+
+export async function apiFetchBinary(
+  path: string,
+  accessToken: string,
+  init: RequestInit = {}
+): Promise<Blob> {
+  const headers = new Headers(init.headers ?? {});
+  headers.set("Authorization", `Bearer ${accessToken}`);
+  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const response = await fetch(`${APP_ENV.apiBaseUrl}${path}`, {
+    ...init,
+    headers
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    let payload: unknown = null;
+    if (text) {
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        payload = text;
+      }
+    }
+
+    const detail =
+      typeof payload === "object" &&
+      payload !== null &&
+      "detail" in (payload as ErrorPayload)
+        ? String((payload as ErrorPayload).detail)
+        : `HTTP ${response.status}`;
+
+    throw new Error(detail);
+  }
+
+  return response.blob();
 }

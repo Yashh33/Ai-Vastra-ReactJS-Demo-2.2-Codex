@@ -4,9 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { buildGenerationDownloadFilename, triggerBrowserDownload } from "../lib/download";
-import type { DownloadUrlResponse, GenerationRow } from "../lib/types";
-
-type PreviewMap = Record<string, string>;
+import type { GenerationRow } from "../lib/types";
 
 type HistoryFilters = {
   fabricCode: string;
@@ -77,6 +75,7 @@ function buildHistoryPath(filters: HistoryFilters) {
   const params = new URLSearchParams();
   params.set("status", "done");
   params.set("limit", "100");
+  params.set("include_urls", "true");
 
   if (filters.fabricCode) {
     params.set("fabric_code", filters.fabricCode);
@@ -100,7 +99,6 @@ export function OutputHistoryPage() {
   const navigate = useNavigate();
 
   const [rows, setRows] = useState<GenerationRow[]>([]);
-  const [previewUrls, setPreviewUrls] = useState<PreviewMap>({});
   const [loading, setLoading] = useState(false);
   const [statusText, setStatusText] = useState("Loading output history...");
   const [downloadingGenerationId, setDownloadingGenerationId] = useState<string | null>(null);
@@ -132,21 +130,10 @@ export function OutputHistoryPage() {
     return label || "Garment";
   }
 
-  async function getDownloadUrl(generationId: string) {
-    if (!accessToken) throw new Error("Missing access token");
-    const response = await apiFetch<DownloadUrlResponse>(
-      `/generations/${generationId}/download-url`,
-      accessToken,
-      { method: "GET" }
-    );
-    return response.download_url;
-  }
-
   async function loadHistory(filters: HistoryFilters) {
     if (!accessToken) return;
     setLoading(true);
     try {
-      setPreviewUrls({});
       const path = buildHistoryPath(filters);
       const rows = await apiFetch<GenerationRow[]>(path, accessToken, {
         method: "GET"
@@ -174,35 +161,6 @@ export function OutputHistoryPage() {
     void loadHistory(appliedFilters);
   }, [accessToken, appliedFilters]);
 
-  useEffect(() => {
-    if (!accessToken || !visibleRows.length) return;
-    const missing = visibleRows.filter((row) => !previewUrls[row.id]);
-    if (!missing.length) return;
-
-    Promise.all(
-      missing.map(async (row) => {
-        try {
-          const url = await getDownloadUrl(row.id);
-          return { id: row.id, url };
-        } catch {
-          return null;
-        }
-      })
-    )
-      .then((items) => {
-        const valid = items.filter((item): item is { id: string; url: string } => !!item);
-        if (!valid.length) return;
-        setPreviewUrls((prev) => {
-          const next = { ...prev };
-          for (const item of valid) next[item.id] = item.url;
-          return next;
-        });
-      })
-      .catch(() => {
-        // best effort previews
-      });
-  }, [accessToken, visibleRows, previewUrls]);
-
   function applyFilters() {
     setAppliedFilters({
       fabricCode: fabricCodeInput.trim(),
@@ -221,10 +179,10 @@ export function OutputHistoryPage() {
   }
 
   async function handleQuickDownload(row: GenerationRow) {
-    if (!row.output_path) return;
+    if (!row.output_path || !row.download_url) return;
     setDownloadingGenerationId(row.id);
     try {
-      const url = await getDownloadUrl(row.id);
+      const url = row.download_url;
       triggerBrowserDownload(url, buildGenerationDownloadFilename(row.id, row.output_path, url));
       setStatusText("Download started");
     } catch (err) {
@@ -252,11 +210,6 @@ export function OutputHistoryPage() {
       });
 
       setRows((prev) => prev.filter((item) => item.id !== row.id));
-      setPreviewUrls((prev) => {
-        const next = { ...prev };
-        delete next[row.id];
-        return next;
-      });
 
       const base = `Deleted output ${response.generation_id}.`;
       setStatusText(response.warning ? `${base} Warning: ${response.warning}` : base);
@@ -368,8 +321,15 @@ export function OutputHistoryPage() {
                   className="catalog-image-btn"
                   onClick={() => navigate(`/output-viewer?generationId=${encodeURIComponent(row.id)}`)}
                 >
-                  {previewUrls[row.id] ? (
-                    <img className="catalog-image" src={previewUrls[row.id]} alt={`Output ${row.id}`} />
+                  {row.thumb_url ? (
+                    <img
+                      className="catalog-image"
+                      src={row.thumb_url}
+                      alt={`Output ${row.id}`}
+                      loading="lazy"
+                      decoding="async"
+                      style={{ aspectRatio: "3/4", objectFit: "cover" }}
+                    />
                   ) : (
                     <div className="image-placeholder">
                       <div className="spinner spinner-small" />

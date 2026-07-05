@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { CustomerConsentModal } from "../components/CustomerConsentModal";
 import { TryOnFlow } from "../components/TryOnFlow";
-import { apiFetch } from "../lib/api";
+import { apiFetch, apiFetchBinary } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import type {
   CatalogImageDownloadUrlResponse,
@@ -155,7 +155,7 @@ export function OutputViewerPage() {
     try {
       if (generationMode) {
         const rows = await apiFetch<GenerationRow[]>(
-          `/generations?status=done&folder_id=${encodeURIComponent(catalogFolderId)}&limit=100`,
+          `/generations?status=done&folder_id=${encodeURIComponent(catalogFolderId)}&limit=100&include_urls=true`,
           accessToken,
           { method: "GET" }
         );
@@ -179,6 +179,15 @@ export function OutputViewerPage() {
 
   useEffect(() => {
     if (generationMode) {
+      if (catalogMode) {
+        const cachedRow = generationCatalogVisibleRows.find((row) => row.id === generationId);
+        if (cachedRow) {
+          setGeneration(cachedRow);
+          setImageUrl(cachedRow.download_url ?? null);
+          setStatusText("Catalog image");
+          return;
+        }
+      }
       void loadGenerationView();
       return;
     }
@@ -189,7 +198,16 @@ export function OutputViewerPage() {
     }
 
     setStatusText(externalImageUrl ? "Image loaded" : "No image supplied");
-  }, [generationId, generationMode, catalogImageId, catalogImageMode, accessToken, refreshNonce, catalogMode]);
+  }, [
+    generationId,
+    generationMode,
+    catalogImageId,
+    catalogImageMode,
+    accessToken,
+    refreshNonce,
+    catalogMode,
+    generationCatalogVisibleRows,
+  ]);
 
   useEffect(() => {
     if (!accessToken || !generationId || !isPendingStatus(generation?.status)) return;
@@ -238,45 +256,17 @@ export function OutputViewerPage() {
     if (!accessToken) throw new Error("Not authenticated");
     if (!generationId) throw new Error("No generation selected");
 
-    const reader = new FileReader();
-    const photoB64 = await new Promise<string>((resolve, reject) => {
-      reader.onload = () => {
-        const result = reader.result as string;
-        const b64 = result.split(",")[1];
-        if (!b64) {
-          reject(new Error("Failed to read customer photo"));
-          return;
-        }
-        resolve(b64);
-      };
-      reader.onerror = () => reject(reader.error ?? new Error("Failed to read customer photo"));
-      reader.readAsDataURL(customerPhotoFile);
-    });
+    const formData = new FormData();
+    formData.set("generation_id", generationId);
+    formData.set("consent_confirmed", "true");
+    formData.set("customer_photo", customerPhotoFile);
 
-    const response = await apiFetch<{
-      result_b64: string;
-      result_mime: string;
-    }>("/tryon/", accessToken, {
+    const blob = await apiFetchBinary("/tryon/v2", accessToken, {
       method: "POST",
-      body: JSON.stringify({
-        generation_id: generationId,
-        customer_photo_b64: photoB64,
-        customer_photo_mime: customerPhotoFile.type || "image/jpeg",
-        consent_confirmed: true,
-      }),
+      body: formData,
     });
 
-    const blob = base64ToBlob(response.result_b64, response.result_mime);
     return URL.createObjectURL(blob);
-  }
-
-  function base64ToBlob(b64: string, mime: string): Blob {
-    const bytes = atob(b64);
-    const arr = new Uint8Array(bytes.length);
-    for (let i = 0; i < bytes.length; i++) {
-      arr[i] = bytes.charCodeAt(i);
-    }
-    return new Blob([arr], { type: mime });
   }
 
   function handleMatchColor() {

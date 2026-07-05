@@ -85,6 +85,8 @@ export type GenerationRow = {
   completed_at: string | null;
   fabric_summary_label?: string;
   generation_fabrics?: GenerationFabricSnapshot[];
+  download_url?: string | null;
+  thumb_url?: string | null;
 };
 
 export type GenerationCreateResponse = {

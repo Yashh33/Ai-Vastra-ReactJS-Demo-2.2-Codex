@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { CustomerConsentModal } from "../components/CustomerConsentModal";
 import { TryOnFlow } from "../components/TryOnFlow";
-import { apiFetch } from "../lib/api";
+import { apiFetch, apiFetchBinary } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { createSignedUrl, uploadToStorage } from "../lib/storage";
 import type {
@@ -462,53 +462,17 @@ export function GeneratePage() {
 
     const compressedPhoto = await compressImage(customerPhotoFile, 1280);
 
-    const reader = new FileReader();
-    const photoB64 = await new Promise<string>((resolve, reject) => {
-      reader.onload = () => {
-        const result = reader.result as string;
-        const b64 = result.split(",")[1];
-        if (!b64) {
-          reject(new Error("Failed to read customer photo"));
-          return;
-        }
-        resolve(b64);
-      };
-      reader.onerror = () => reject(reader.error ?? new Error("Failed to read customer photo"));
-      reader.readAsDataURL(compressedPhoto);
+    const formData = new FormData();
+    formData.set("fabric_image_id", fabricImageId);
+    formData.set("folder_id", selectedGarmentId);
+    formData.set("consent_confirmed", "true");
+    formData.set("customer_photo", compressedPhoto);
+
+    const blob = await apiFetchBinary("/tryon/quick/v2", accessToken, {
+      method: "POST",
+      body: formData,
     });
 
-    const response = await apiFetch<{
-      result_b64: string;
-      result_mime: string;
-    }>(
-      "/tryon/quick",
-      accessToken,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          fabric_image_id: fabricImageId,
-          folder_id: selectedGarmentId,
-          customer_photo_b64: photoB64,
-          customer_photo_mime:
-            compressedPhoto.type || "image/jpeg",
-          consent_confirmed: true,
-        }),
-      }
-    );
-
-    function base64ToBlob(b64: string, mime: string): Blob {
-      const bytes = atob(b64);
-      const arr = new Uint8Array(bytes.length);
-      for (let i = 0; i < bytes.length; i++) {
-        arr[i] = bytes.charCodeAt(i);
-      }
-      return new Blob([arr], { type: mime });
-    }
-
-    const blob = base64ToBlob(
-      response.result_b64,
-      response.result_mime
-    );
     return URL.createObjectURL(blob);
   }
 

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { compressImage } from "../lib/compressImage";
 
@@ -16,6 +16,16 @@ export function TryOnFlow({ onClose, onSubmit }: Props) {
   const [sharing, setSharing] = useState(false);
   const captureRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!previewUrl?.startsWith("blob:")) return;
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
+
+  useEffect(() => {
+    if (!resultUrl?.startsWith("blob:")) return;
+    return () => URL.revokeObjectURL(resultUrl);
+  }, [resultUrl]);
 
   async function handleFileSelect(file: File) {
     const compressed = await compressImage(file, 1280);

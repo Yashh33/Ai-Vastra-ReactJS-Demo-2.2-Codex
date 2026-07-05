@@ -1,15 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import type { DownloadUrlResponse, GarmentType, GenerationRow } from "../lib/types";
+import type { GarmentType, GenerationRow } from "../lib/types";
 
-type PreviewMap = Record<string, string>;
+const SHARE_CONCURRENCY = 4;
 
 type GenerationTileProps = {
   row: GenerationRow;
-  imageUrl?: string;
   onOpen: (row: GenerationRow) => void;
   selectMode: boolean;
   isSelected: boolean;
@@ -38,42 +37,9 @@ function getFabricSummaryLabel(row: GenerationRow) {
   return label.replace(/:\s*unknown$/i, "").trim() || "Garment";
 }
 
-function GenerationTile({
-  row,
-  imageUrl,
-  onOpen,
-  selectMode,
-  isSelected,
-  onSelectToggle,
-  onVisible,
-}: GenerationTileProps & { onVisible: (id: string) => void }) {
-  const tileRef = useRef<HTMLElement | null>(null);
-  const observedRef = useRef(false);
-
-  useEffect(() => {
-    const el = tileRef.current;
-    if (!el) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting && !observedRef.current) {
-            observedRef.current = true;
-            onVisible(row.id);
-            observer.disconnect();
-          }
-        }
-      },
-      { rootMargin: "200px" }
-    );
-
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [row.id, onVisible]);
-
+function GenerationTile({ row, onOpen, selectMode, isSelected, onSelectToggle }: GenerationTileProps) {
   return (
     <article
-      ref={tileRef}
       className="catalog-tile"
       style={{
         outline: isSelected ? "2.5px solid #C9A84C" : "none",
@@ -104,11 +70,14 @@ function GenerationTile({
         if (selectMode) onSelectToggle(row.id);
         else onOpen(row);
       }}>
-        {imageUrl ? (
+        {row.thumb_url ? (
           <img
             className="catalog-image"
-            src={imageUrl}
+            src={row.thumb_url}
             alt={getFabricSummaryLabel(row)}
+            loading="lazy"
+            decoding="async"
+            style={{ aspectRatio: "3/4", objectFit: "cover" }}
           />
         ) : (
           <div className="image-placeholder">
@@ -131,7 +100,6 @@ export function CatalogPage() {
   const [garmentTypes, setGarmentTypes] = useState<GarmentType[]>([]);
   const [selectedGarmentId, setSelectedGarmentId] = useState("");
   const [generationRows, setGenerationRows] = useState<GenerationRow[]>([]);
-  const [previewUrls, setPreviewUrls] = useState<PreviewMap>({});
   const [loadingGarments, setLoadingGarments] = useState(false);
   const [loadingRows, setLoadingRows] = useState(false);
   const [statusText, setStatusText] = useState("Select a garment type to view catalog");
@@ -181,20 +149,17 @@ export function CatalogPage() {
     if (!accessToken || !garment) return;
 
     setLoadingRows(true);
-    setPreviewUrls({});
 
     try {
       const rows = await apiFetch<GenerationRow[]>(
-        `/generations?status=done&folder_id=${encodeURIComponent(garment.id)}&limit=100`,
+        `/generations?status=done&folder_id=${encodeURIComponent(garment.id)}&limit=100&include_urls=true`,
         accessToken,
         { method: "GET" }
       );
       setGenerationRows(rows);
-      setPreviewUrls({});
       setStatusText(rows.length ? `Loaded ${rows.length} look(s)` : "No looks generated for this garment yet");
     } catch (err) {
       setGenerationRows([]);
-      setPreviewUrls({});
       setStatusText(`Failed to load catalog: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
       setLoadingRows(false);
@@ -204,23 +169,12 @@ export function CatalogPage() {
   useEffect(() => {
     if (!selectedGarment) {
       setGenerationRows([]);
-      setPreviewUrls({});
       setStatusText("Select a garment type to view catalog");
       return;
     }
 
     void loadGenerations(selectedGarment);
   }, [accessToken, selectedGarmentId]);
-
-  async function getDownloadUrl(generationId: string) {
-    if (!accessToken) throw new Error("Missing access token");
-    const response = await apiFetch<DownloadUrlResponse>(
-      `/generations/${generationId}/download-url`,
-      accessToken,
-      { method: "GET" }
-    );
-    return response.download_url;
-  }
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
@@ -240,28 +194,36 @@ export function CatalogPage() {
     if (!accessToken || selectedIds.size === 0) return;
     setSharing(true);
     try {
-      const files: File[] = [];
-      let index = 1;
-      for (const id of selectedIds) {
-        try {
-          const url = await getDownloadUrl(id);
-          const response = await fetch(url);
-          const blob = await response.blob();
-          files.push(new File(
-            [blob],
-            `ai-vastra-look-${index}.jpg`,
-            { type: "image/jpeg" }
-          ));
-          index++;
-        } catch {
-          // skip failed
+      const ids = Array.from(selectedIds);
+      const files: (File | null)[] = new Array(ids.length).fill(null);
+      let cursor = 0;
+
+      async function worker() {
+        while (cursor < ids.length) {
+          const index = cursor++;
+          const id = ids[index];
+          const url = generationRows.find((row) => row.id === id)?.download_url;
+          if (!url) continue;
+          try {
+            const response = await fetch(url);
+            const blob = await response.blob();
+            files[index] = new File([blob], `ai-vastra-look-${index + 1}.jpg`, { type: "image/jpeg" });
+          } catch {
+            // skip failed
+          }
         }
       }
-      if (files.length === 0) return;
-      if (navigator.share && navigator.canShare({ files })) {
-        await navigator.share({ files });
+
+      await Promise.all(
+        Array.from({ length: Math.min(SHARE_CONCURRENCY, ids.length) }, () => worker())
+      );
+
+      const validFiles = files.filter((file): file is File => !!file);
+      if (validFiles.length === 0) return;
+      if (navigator.share && navigator.canShare({ files: validFiles })) {
+        await navigator.share({ files: validFiles });
       } else {
-        for (const file of files) {
+        for (const file of validFiles) {
           const url = URL.createObjectURL(file);
           window.open(url, "_blank");
         }
@@ -273,16 +235,6 @@ export function CatalogPage() {
       setSharing(false);
     }
   };
-
-  const handleTileVisible = useCallback(async (id: string) => {
-    if (!accessToken) return;
-    try {
-      const url = await getDownloadUrl(id);
-      setPreviewUrls((prev) => ({ ...prev, [id]: url }));
-    } catch (err) {
-      console.error("Download URL failed for generation", id, err);
-    }
-  }, [accessToken]);
 
   function openViewer(row: GenerationRow) {
     const params = new URLSearchParams({
@@ -389,12 +341,10 @@ export function CatalogPage() {
               <GenerationTile
                 key={row.id}
                 row={row}
-                imageUrl={previewUrls[row.id]}
                 onOpen={openViewer}
                 selectMode={selectMode}
                 isSelected={selectedIds.has(row.id)}
                 onSelectToggle={toggleSelect}
-                onVisible={handleTileVisible}
               />
             ))}
           </section>

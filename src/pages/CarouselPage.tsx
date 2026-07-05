@@ -3,20 +3,21 @@ import { useNavigate } from "react-router-dom";
 
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import type { DownloadUrlResponse, GenerationRow } from "../lib/types";
+import type { GenerationRow } from "../lib/types";
 
 const AUTO_ADVANCE_MS = 3500;
+const URL_REFRESH_THRESHOLD_MS = 50 * 60 * 1000;
 
 export function CarouselPage() {
   const { accessToken } = useAuth();
   const navigate = useNavigate();
 
   const [rows, setRows] = useState<GenerationRow[]>([]);
-  const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [autoAdvance, setAutoAdvance] = useState(true);
   const [statusText, setStatusText] = useState("Loading outputs...");
+  const [loadedAt, setLoadedAt] = useState<number | null>(null);
 
   const visibleRows = useMemo(
     () => rows.filter((row) => row.status === "done" && !!row.output_path),
@@ -24,29 +25,25 @@ export function CarouselPage() {
   );
 
   const currentRow = visibleRows[index] ?? null;
-  const currentUrl = currentRow ? previewUrls[currentRow.id] ?? null : null;
-
-  async function getDownloadUrl(generationId: string) {
-    if (!accessToken) throw new Error("Missing access token");
-    const response = await apiFetch<DownloadUrlResponse>(
-      `/generations/${generationId}/download-url`,
-      accessToken,
-      { method: "GET" }
-    );
-    return response.download_url;
-  }
+  const currentUrl = currentRow?.download_url ?? null;
 
   async function loadOutputs() {
     if (!accessToken) return;
     setLoading(true);
     try {
-      setPreviewUrls({});
-      const rows = await apiFetch<GenerationRow[]>("/generations?status=done&limit=100", accessToken, {
-        method: "GET"
-      });
-      setRows(rows);
-      setIndex(0);
-      setStatusText(rows.length ? "Carousel ready" : "No outputs available.");
+      const currentId = visibleRows[index]?.id ?? null;
+      const fetchedRows = await apiFetch<GenerationRow[]>(
+        "/generations?status=done&limit=100&include_urls=true",
+        accessToken,
+        { method: "GET" }
+      );
+      setRows(fetchedRows);
+
+      const nextVisibleRows = fetchedRows.filter((row) => row.status === "done" && !!row.output_path);
+      const preservedIndex = currentId ? nextVisibleRows.findIndex((row) => row.id === currentId) : -1;
+      setIndex(preservedIndex >= 0 ? preservedIndex : 0);
+      setLoadedAt(Date.now());
+      setStatusText(fetchedRows.length ? "Carousel ready" : "No outputs available.");
     } catch (err) {
       setStatusText(`Failed to load outputs: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
@@ -59,41 +56,16 @@ export function CarouselPage() {
   }, [accessToken]);
 
   useEffect(() => {
-    if (!accessToken || !visibleRows.length) return;
-    const missing = visibleRows.filter((row) => !previewUrls[row.id]);
-    if (!missing.length) return;
-
-    Promise.all(
-      missing.map(async (row) => {
-        try {
-          const url = await getDownloadUrl(row.id);
-          return { id: row.id, url };
-        } catch {
-          return null;
-        }
-      })
-    )
-      .then((items) => {
-        const valid = items.filter((item): item is { id: string; url: string } => !!item);
-        if (!valid.length) return;
-        setPreviewUrls((prev) => {
-          const next = { ...prev };
-          for (const item of valid) next[item.id] = item.url;
-          return next;
-        });
-      })
-      .catch(() => {
-        // best effort
-      });
-  }, [accessToken, visibleRows, previewUrls]);
-
-  useEffect(() => {
     if (!autoAdvance || visibleRows.length <= 1) return;
     const timer = window.setInterval(() => {
+      if (loadedAt && Date.now() - loadedAt > URL_REFRESH_THRESHOLD_MS) {
+        void loadOutputs();
+        return;
+      }
       setIndex((prev) => (prev + 1) % visibleRows.length);
     }, AUTO_ADVANCE_MS);
     return () => window.clearInterval(timer);
-  }, [autoAdvance, visibleRows.length]);
+  }, [autoAdvance, visibleRows.length, loadedAt]);
 
   function goPrev() {
     if (!visibleRows.length) return;
@@ -165,6 +137,3 @@ export function CarouselPage() {
     </main>
   );
 }
-
-
-
