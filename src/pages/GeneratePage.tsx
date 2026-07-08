@@ -6,12 +6,13 @@ import { CustomerConsentModal } from "../components/CustomerConsentModal";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { useGarmentTypes, useMe } from "../lib/queries";
+import { useFabricImages, useGarmentTypes, useMe } from "../lib/queries";
 import { subscribeToGeneration } from "../lib/realtime";
 import { createSignedUrl, uploadToStorage } from "../lib/storage";
 import type {
   ApplyToTarget,
   FabricImageRow,
+  GarmentFabricSlot,
   GarmentType,
   GenerationCreateResponse,
   GenerationFabricAssignmentPayload,
@@ -31,6 +32,21 @@ function mapGarmentToApplyTo(garment: GarmentType): ApplyToTarget {
 
   return "suit_full_body";
 }
+
+const MULTI_DRAFT_STORAGE_KEY = "aivastra-multi-draft";
+
+type MultiFabricSelection = {
+  fabricImageId: string;
+  previewUrl: string | null;
+  label: string;
+};
+
+type MultiDraftSelection = { fabricImageId: string; label: string };
+
+type MultiDraft = {
+  selectedGarmentId?: string;
+  multiSelections?: Record<string, MultiDraftSelection>;
+};
 
 const FINE_CHECKS_SVG = `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
   <rect width="64" height="64" fill="#B8C8E0"/>
@@ -58,6 +74,10 @@ export function GeneratePage() {
 
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
+  const multiCameraInputRef = useRef<HTMLInputElement | null>(null);
+  const multiGalleryInputRef = useRef<HTMLInputElement | null>(null);
+  const hydratedMultiDraftRef = useRef(false);
+  const handledMultiReturnParamsRef = useRef(false);
 
   const pickedFabricImageId =
     searchParams.get("fabric_image_id") ?? searchParams.get("selectedFabricImageId") ?? "";
@@ -69,6 +89,7 @@ export function GeneratePage() {
     error: garmentTypesError,
     refetch: refetchGarmentTypes
   } = useGarmentTypes();
+  const { data: fabricImagesData } = useFabricImages();
   const garmentTypes = garmentTypesData ?? [];
   const shopContext = me ?? null;
   const creditBalance = me?.credits_balance !== null && me?.credits_balance !== undefined ? String(me.credits_balance) : "-";
@@ -94,10 +115,27 @@ export function GeneratePage() {
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [showTryOnFlow, setShowTryOnFlow] = useState(false);
 
+  const [generateMode, setGenerateMode] = useState<"single" | "multi">(
+    searchParams.get("tab") === "multi" ? "multi" : "single"
+  );
+  const [multiSelections, setMultiSelections] = useState<Record<string, MultiFabricSelection>>({});
+  const [multiPickerSlotId, setMultiPickerSlotId] = useState<string | null>(null);
+  const [multiUploading, setMultiUploading] = useState(false);
+  const [multiRecentPreviewUrls, setMultiRecentPreviewUrls] = useState<Record<string, string>>({});
+  const [lastCompletedGenerationId, setLastCompletedGenerationId] = useState<string | null>(null);
+
   const selectedGarment = useMemo(
     () => garmentTypes.find((garment) => garment.id === selectedGarmentId) ?? null,
     [garmentTypes, selectedGarmentId]
   );
+
+  const sortedFabricSlots: GarmentFabricSlot[] = useMemo(
+    () => [...(selectedGarment?.fabric_slots ?? [])].sort((a, b) => a.sort_order - b.sort_order),
+    [selectedGarment]
+  );
+  const allMultiSlotsFilled =
+    sortedFabricSlots.length > 0 &&
+    sortedFabricSlots.every((slot) => !!multiSelections[slot.id]?.fabricImageId);
 
   const selectedFabricImageId = existingFabricImage?.id ?? "";
   const selectedHeroPreviewUrl =
@@ -112,6 +150,8 @@ export function GeneratePage() {
     heroReady &&
     (!saveToSilo || !!fabricCode.trim()) &&
     !actionBusy;
+
+  const canGenerateMulti = !!selectedGarment && allMultiSlotsFilled && !actionBusy;
 
   useEffect(() => {
     if (!fabricPreviewUrl?.startsWith("blob:")) return;
@@ -188,6 +228,13 @@ export function GeneratePage() {
       if (row.status === "done") {
         setVisualizingGenerationId(null);
         setStatusText("Generation ready.");
+        setLastCompletedGenerationId(row.id);
+        setMultiSelections({});
+        try {
+          sessionStorage.removeItem(MULTI_DRAFT_STORAGE_KEY);
+        } catch {
+          // ignore storage errors
+        }
         navigate(`/output-viewer?generationId=${encodeURIComponent(row.id)}`);
         return;
       }
@@ -226,6 +273,136 @@ export function GeneratePage() {
       window.clearInterval(timer);
     };
   }, [accessToken, navigate, visualizingGenerationId]);
+
+  function assignFabricToSlot(slotId: string, selection: MultiFabricSelection) {
+    setMultiSelections((prev) => ({ ...prev, [slotId]: selection }));
+  }
+
+  useEffect(() => {
+    try {
+      const draftSelections: Record<string, MultiDraftSelection> = {};
+      Object.entries(multiSelections).forEach(([slotId, selection]) => {
+        draftSelections[slotId] = { fabricImageId: selection.fabricImageId, label: selection.label };
+      });
+      const draft: MultiDraft = { selectedGarmentId, multiSelections: draftSelections };
+      sessionStorage.setItem(MULTI_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+    } catch {
+      // ignore storage errors
+    }
+  }, [selectedGarmentId, multiSelections]);
+
+  useEffect(() => {
+    if (!accessToken || hydratedMultiDraftRef.current) return;
+    hydratedMultiDraftRef.current = true;
+    let cancelled = false;
+
+    async function hydrateDraft() {
+      if (!accessToken) return;
+      try {
+        const raw = sessionStorage.getItem(MULTI_DRAFT_STORAGE_KEY);
+        if (!raw) return;
+
+        const parsed = JSON.parse(raw) as MultiDraft;
+        if (parsed.selectedGarmentId) setSelectedGarmentId(parsed.selectedGarmentId);
+
+        const entries = Object.entries(parsed.multiSelections ?? {});
+        if (!entries.length) return;
+
+        setMultiSelections((prev) => {
+          const next = { ...prev };
+          entries.forEach(([slotId, selection]) => {
+            next[slotId] = { fabricImageId: selection.fabricImageId, label: selection.label, previewUrl: null };
+          });
+          return next;
+        });
+
+        for (const [slotId, selection] of entries) {
+          try {
+            const row = await apiFetch<FabricImageRow>(
+              `/fabric-images/${encodeURIComponent(selection.fabricImageId)}`,
+              accessToken,
+              { method: "GET" }
+            );
+            const signed = await createSignedUrl("fabric-images", row.storage_path, 3600).catch(() => null);
+            if (cancelled) return;
+            setMultiSelections((prev) =>
+              prev[slotId] ? { ...prev, [slotId]: { ...prev[slotId], previewUrl: signed } } : prev
+            );
+          } catch {
+            // tolerate a failed re-sign; keep the selection with no preview
+          }
+        }
+      } catch {
+        // ignore malformed draft
+      }
+    }
+
+    void hydrateDraft();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken]);
+
+  useEffect(() => {
+    if (!accessToken || handledMultiReturnParamsRef.current) return;
+
+    const slotId = searchParams.get("slot_id");
+    const fabricImageId = searchParams.get("fabric_image_id");
+    if (!slotId || !fabricImageId) return;
+
+    handledMultiReturnParamsRef.current = true;
+    let cancelled = false;
+
+    async function resolveReturnedFabric() {
+      if (!accessToken) return;
+      try {
+        const row = await apiFetch<FabricImageRow>(
+          `/fabric-images/${encodeURIComponent(fabricImageId as string)}`,
+          accessToken,
+          { method: "GET" }
+        );
+        const signed = await createSignedUrl("fabric-images", row.storage_path, 3600).catch(() => null);
+        if (cancelled) return;
+        assignFabricToSlot(slotId as string, {
+          fabricImageId: row.id,
+          previewUrl: signed,
+          label: row.original_filename?.trim() || "Fabric"
+        });
+      } catch {
+        // tolerate a failed resolve; slot stays unpicked
+      }
+    }
+
+    void resolveReturnedFabric();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, searchParams]);
+
+  useEffect(() => {
+    if (!multiPickerSlotId) return;
+    let cancelled = false;
+
+    const rows = (fabricImagesData ?? []).slice(0, 15);
+    rows.forEach((row) => {
+      if (multiRecentPreviewUrls[row.id]) return;
+      createSignedUrl("fabric-images", row.storage_path, 3600)
+        .then((url) => {
+          if (cancelled) return;
+          setMultiRecentPreviewUrls((prev) => ({ ...prev, [row.id]: url }));
+        })
+        .catch(() => {
+          // tolerate a failed thumbnail sign
+        });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+    // multiRecentPreviewUrls intentionally omitted: re-running per cached URL would re-scan all rows unnecessarily.
+  }, [multiPickerSlotId, fabricImagesData]);
 
   function clearFabricSelection() {
     setFabricFile(null);
@@ -432,6 +609,131 @@ export function GeneratePage() {
     return URL.createObjectURL(blob);
   }
 
+  async function uploadMultiFabricImage(file: File) {
+    if (!accessToken || !shopContext) throw new Error("Shop context is still loading.");
+
+    const ext = guessFileExtension(file.name, file.type);
+    const filename = `${Date.now()}-${makeRandomSuffix()}.${ext}`;
+    const storagePath = `${shopContext.shop_id}/${filename}`;
+
+    await uploadToStorage("fabric-images", storagePath, file);
+
+    return apiFetch<FabricImageRow>("/fabric-images", accessToken, {
+      method: "POST",
+      body: JSON.stringify({
+        storage_path: storagePath,
+        original_filename: file.name || filename,
+        mime_type: file.type || "image/jpeg",
+        file_size_bytes: file.size,
+        width: null,
+        height: null
+      })
+    });
+  }
+
+  async function handleMultiFabricPicked(file: File | null, slotId: string) {
+    if (!file) return;
+
+    setMultiUploading(true);
+    try {
+      const compressed = await compressImage(file, 1600);
+      const previewUrl = URL.createObjectURL(compressed);
+      const uploaded = await uploadMultiFabricImage(compressed);
+      assignFabricToSlot(slotId, { fabricImageId: uploaded.id, previewUrl, label: "New fabric" });
+      setMultiPickerSlotId(null);
+    } catch (err) {
+      setStatusText(`Fabric upload failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setMultiUploading(false);
+    }
+  }
+
+  function onMultiCameraChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    event.target.value = "";
+    if (multiPickerSlotId) void handleMultiFabricPicked(file, multiPickerSlotId);
+  }
+
+  function onMultiGalleryChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    event.target.value = "";
+    if (multiPickerSlotId) void handleMultiFabricPicked(file, multiPickerSlotId);
+  }
+
+  function chooseRecentFabric(row: FabricImageRow) {
+    if (!multiPickerSlotId) return;
+    assignFabricToSlot(multiPickerSlotId, {
+      fabricImageId: row.id,
+      previewUrl: multiRecentPreviewUrls[row.id] ?? null,
+      label: row.original_filename?.trim() || "Fabric"
+    });
+    setMultiPickerSlotId(null);
+  }
+
+  async function handleCreateMultiGeneration() {
+    if (!accessToken || !selectedGarment || !allMultiSlotsFilled) return;
+
+    setCreatingGeneration(true);
+    try {
+      const heroImageId = await ensureHeroImageId(selectedGarment);
+
+      const fabrics: GenerationFabricAssignmentPayload[] = sortedFabricSlots.map((slot) => {
+        const selection = multiSelections[slot.id];
+        if (!selection) throw new Error(`Missing fabric selection for ${slot.label}.`);
+
+        return {
+          fabric_image_id: selection.fabricImageId,
+          apply_to: slot.apply_to as ApplyToTarget,
+          fabric_code: selection.label !== "New fabric" ? selection.label : "unknown",
+          fabric_color: null,
+          fabric_scale: null
+        };
+      });
+
+      setStatusText("Creating generation job...");
+      const response = await apiFetch<GenerationCreateResponse>("/generations", accessToken, {
+        method: "POST",
+        body: JSON.stringify({
+          hero_image_id: heroImageId,
+          fabrics
+        })
+      });
+
+      void queryClient.invalidateQueries({ queryKey: ["generations"] });
+
+      if (Number.isFinite(response.balance_after)) {
+        queryClient.setQueryData(["me"], (prev: typeof me) =>
+          prev ? { ...prev, credits_balance: response.balance_after } : prev
+        );
+      }
+      void queryClient.invalidateQueries({ queryKey: ["me"] });
+
+      setVisualizingGenerationId(response.id);
+      setStatusText("Generating look...");
+    } catch (err) {
+      setStatusText(`Generate failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setCreatingGeneration(false);
+    }
+  }
+
+  async function handleMultiTryOnSubmit(customerPhotoFile: File): Promise<string> {
+    if (!accessToken) throw new Error("Not authenticated");
+    if (!lastCompletedGenerationId) throw new Error("Generate first to enable try-on.");
+
+    const formData = new FormData();
+    formData.set("generation_id", lastCompletedGenerationId);
+    formData.set("consent_confirmed", "true");
+    formData.set("customer_photo", customerPhotoFile);
+
+    const blob = await apiFetchBinary("/tryon/v2", accessToken, {
+      method: "POST",
+      body: formData
+    });
+
+    return URL.createObjectURL(blob);
+  }
+
   return (
     <main className="screen">
       <section className="page-shell">
@@ -441,6 +743,25 @@ export function GeneratePage() {
           </div>
         </header>
 
+        <div className="pill-row">
+          <button
+            type="button"
+            className={`style-pill ${generateMode === "single" ? "active" : ""}`}
+            onClick={() => setGenerateMode("single")}
+          >
+            Single fabric
+          </button>
+          <button
+            type="button"
+            className={`style-pill ${generateMode === "multi" ? "active" : ""}`}
+            onClick={() => setGenerateMode("multi")}
+          >
+            Multi fabric
+          </button>
+        </div>
+
+        {generateMode === "single" && (
+        <>
         <section className="card stack-sm">
           <p className="tiny muted">{statusText}</p>
         </section>
@@ -816,7 +1137,365 @@ export function GeneratePage() {
             </div>
           ) : null}
         </section>
+        </>
+        )}
+
+        {generateMode === "multi" && (
+        <>
+        <section className="card stack-sm">
+          <p className="tiny muted">{statusText}</p>
+        </section>
+
+        <section className="card stack-sm">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+            <span className="section-label">Select Style</span>
+            <button
+              onClick={() => void refetchGarmentTypes()}
+              style={{
+                width: "32px",
+                height: "32px",
+                borderRadius: "50%",
+                border: "0.5px solid var(--border)",
+                background: "var(--white)",
+                cursor: "pointer",
+                display: "grid",
+                placeItems: "center",
+                color: "var(--text-muted)"
+              }}
+              aria-label="Refresh garment types"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              >
+                <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+                <path d="M21 3v5h-5" />
+              </svg>
+            </button>
+          </div>
+
+          <div className="pill-row">
+            {garmentTypes.map((garment) => (
+              <button
+                key={garment.id}
+                className={`style-pill ${selectedGarmentId === garment.id ? "active" : ""}`}
+                type="button"
+                onClick={() => {
+                  setSelectedGarmentId(garment.id);
+                  setHeroChangeOpen(false);
+                  setHeroReplacementFile(null);
+                  setHeroReplacementPreviewUrl(null);
+                }}
+                disabled={actionBusy || loadingGarmentTypes}
+              >
+                {garment.name}
+              </button>
+            ))}
+          </div>
+
+          {loadingGarmentTypes ? <p className="tiny muted">Loading garment types...</p> : null}
+        </section>
+
+        {selectedGarment && sortedFabricSlots.length === 0 && (
+          <section className="card stack-sm">
+            <p className="tiny muted">
+              No fabric slots configured for this garment type. Ask admin to set up slots.
+            </p>
+          </section>
+        )}
+
+        {selectedGarment && sortedFabricSlots.length > 0 && (
+          <>
+            {sortedFabricSlots.map((slot, index) => {
+              const selection = multiSelections[slot.id];
+              return (
+                <section key={slot.id} className="card" style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                  <div
+                    style={{
+                      width: "28px",
+                      height: "28px",
+                      borderRadius: "50%",
+                      background: "#1B1B2F",
+                      color: "#C9A84C",
+                      fontSize: "13px",
+                      fontWeight: 700,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0
+                    }}
+                  >
+                    {index + 1}
+                  </div>
+
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px", flexWrap: "wrap" }}>
+                      <span style={{ fontSize: "14px", fontWeight: 700, color: "var(--text-primary)" }}>{slot.label}</span>
+                      <span
+                        style={{
+                          fontSize: "10px",
+                          fontWeight: 600,
+                          color: "#8B6914",
+                          border: "1px solid #C9A84C",
+                          background: "transparent",
+                          borderRadius: "12px",
+                          padding: "2px 8px"
+                        }}
+                      >
+                        {slot.apply_to}
+                      </span>
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      {selection?.previewUrl ? (
+                        <img
+                          src={selection.previewUrl}
+                          alt={selection.label}
+                          style={{
+                            width: "64px",
+                            height: "64px",
+                            borderRadius: "10px",
+                            objectFit: "cover",
+                            border: "0.5px solid var(--border)",
+                            flexShrink: 0
+                          }}
+                        />
+                      ) : (
+                        <div
+                          style={{
+                            width: "64px",
+                            height: "64px",
+                            borderRadius: "10px",
+                            border: "1.5px dashed #C9A84C",
+                            flexShrink: 0
+                          }}
+                        />
+                      )}
+
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        {selection ? (
+                          <>
+                            <div
+                              style={{
+                                fontSize: "12px",
+                                color: "var(--text-primary)",
+                                fontWeight: 600,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap"
+                              }}
+                            >
+                              {selection.label}
+                            </div>
+                            <button
+                              type="button"
+                              className="btn btn-light"
+                              style={{ marginTop: "6px", padding: "6px 12px", fontSize: "12px" }}
+                              onClick={() => setMultiPickerSlotId(slot.id)}
+                              disabled={actionBusy}
+                            >
+                              Change
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn-light"
+                            onClick={() => setMultiPickerSlotId(slot.id)}
+                            disabled={actionBusy}
+                          >
+                            Choose
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              );
+            })}
+
+            <section className="card stack-sm">
+              <button
+                className="btn-primary"
+                type="button"
+                disabled={!canGenerateMulti}
+                onClick={() => void handleCreateMultiGeneration()}
+              >
+                {creatingGeneration ? (
+                  "Sewing..."
+                ) : (
+                  <>
+                    <svg viewBox="0 0 24 24" aria-hidden focusable="false">
+                      <circle cx="6" cy="6" r="3" />
+                      <circle cx="6" cy="18" r="3" />
+                      <path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12" />
+                    </svg>
+                    Sew this Look
+                  </>
+                )}
+              </button>
+
+              <button
+                onClick={() => {
+                  if (!lastCompletedGenerationId) return;
+                  setShowConsentModal(true);
+                }}
+                disabled={!lastCompletedGenerationId}
+                style={{
+                  width: "100%",
+                  minHeight: "48px",
+                  background: "transparent",
+                  color: "#1B1B2F",
+                  border: "1.5px solid #1B1B2F",
+                  borderRadius: "14px",
+                  fontSize: "14px",
+                  fontWeight: 700,
+                  cursor: lastCompletedGenerationId ? "pointer" : "not-allowed",
+                  fontFamily: "inherit",
+                  marginTop: "8px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px",
+                  opacity: lastCompletedGenerationId ? 1 : 0.5
+                }}
+              >
+                👤 Try On Customer
+              </button>
+              {!lastCompletedGenerationId ? (
+                <p className="tiny muted">Generate first to enable</p>
+              ) : null}
+
+              {visualizingGenerationId ? (
+                <div className="loading-box">
+                  <div className="spinner" />
+                  <p className="tiny muted">Generating look...</p>
+                </div>
+              ) : null}
+            </section>
+          </>
+        )}
+
+        <input
+          ref={multiCameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          hidden
+          onChange={onMultiCameraChange}
+        />
+        <input
+          ref={multiGalleryInputRef}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={onMultiGalleryChange}
+        />
+        </>
+        )}
       </section>
+
+      {multiPickerSlotId && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 100,
+            background: "rgba(0,0,0,0.6)",
+            display: "flex",
+            alignItems: "flex-end",
+            justifyContent: "center"
+          }}
+          onClick={() => setMultiPickerSlotId(null)}
+        >
+          <div
+            style={{
+              background: "var(--white)",
+              borderRadius: "20px 20px 0 0",
+              padding: "20px 16px 32px",
+              width: "100%",
+              maxWidth: "480px",
+              maxHeight: "80vh",
+              overflowY: "auto",
+              display: "grid",
+              gap: "14px"
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div style={{ width: "40px", height: "4px", borderRadius: "2px", background: "var(--border)", margin: "0 auto" }} />
+
+            <span className="section-label">Choose Fabric</span>
+
+            <div className="row">
+              <button
+                className="btn btn-light flex-1"
+                type="button"
+                onClick={() => multiCameraInputRef.current?.click()}
+                disabled={multiUploading}
+              >
+                Camera
+              </button>
+              <button
+                className="btn btn-light flex-1"
+                type="button"
+                onClick={() => multiGalleryInputRef.current?.click()}
+                disabled={multiUploading}
+              >
+                Gallery
+              </button>
+            </div>
+
+            {multiUploading ? <p className="tiny muted">Uploading...</p> : null}
+
+            <span className="section-label">Recent fabrics</span>
+            <div className="fabric-scroll">
+              {(fabricImagesData ?? []).slice(0, 15).map((row) => (
+                <div
+                  key={row.id}
+                  className="fabric-tile"
+                  style={{ cursor: "pointer" }}
+                  onClick={() => chooseRecentFabric(row)}
+                >
+                  {multiRecentPreviewUrls[row.id] ? (
+                    <img className="fabric-thumb" src={multiRecentPreviewUrls[row.id]} alt={row.original_filename ?? "Fabric"} />
+                  ) : (
+                    <div className="fabric-thumb" style={{ display: "grid", placeItems: "center", color: "var(--text-muted)", fontSize: "10px" }}>
+                      ...
+                    </div>
+                  )}
+                  <div className="fabric-label">{row.original_filename || "Fabric"}</div>
+                </div>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (!multiPickerSlotId) return;
+                navigate(`/fabric-silo?picker=1&returnTab=multi&slotId=${encodeURIComponent(multiPickerSlotId)}`);
+              }}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#1B1B2F",
+                fontWeight: 600,
+                fontSize: "13px",
+                textDecoration: "underline",
+                cursor: "pointer",
+                padding: 0,
+                justifySelf: "start"
+              }}
+            >
+              Browse all fabrics
+            </button>
+          </div>
+        </div>
+      )}
 
       {showConsentModal && (
         <CustomerConsentModal
@@ -831,7 +1510,7 @@ export function GeneratePage() {
       {showTryOnFlow && (
         <TryOnFlow
           onClose={() => setShowTryOnFlow(false)}
-          onSubmit={handleQuickTryOnSubmit}
+          onSubmit={generateMode === "multi" ? handleMultiTryOnSubmit : handleQuickTryOnSubmit}
         />
       )}
     </main>
