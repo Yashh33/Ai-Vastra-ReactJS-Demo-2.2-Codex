@@ -122,7 +122,6 @@ export function GeneratePage() {
   const [multiPickerSlotId, setMultiPickerSlotId] = useState<string | null>(null);
   const [multiUploading, setMultiUploading] = useState(false);
   const [multiRecentPreviewUrls, setMultiRecentPreviewUrls] = useState<Record<string, string>>({});
-  const [lastCompletedGenerationId, setLastCompletedGenerationId] = useState<string | null>(null);
 
   const selectedGarment = useMemo(
     () => garmentTypes.find((garment) => garment.id === selectedGarmentId) ?? null,
@@ -228,7 +227,6 @@ export function GeneratePage() {
       if (row.status === "done") {
         setVisualizingGenerationId(null);
         setStatusText("Generation ready.");
-        setLastCompletedGenerationId(row.id);
         setMultiSelections({});
         try {
           sessionStorage.removeItem(MULTI_DRAFT_STORAGE_KEY);
@@ -719,14 +717,27 @@ export function GeneratePage() {
 
   async function handleMultiTryOnSubmit(customerPhotoFile: File): Promise<string> {
     if (!accessToken) throw new Error("Not authenticated");
-    if (!lastCompletedGenerationId) throw new Error("Generate first to enable try-on.");
+    if (!selectedGarment) throw new Error("Select a garment type first.");
+    if (!allMultiSlotsFilled) throw new Error("Fill all fabric slots first.");
+    if (!shopContext) throw new Error("Shop context is loading.");
+
+    const heroImageId = await ensureHeroImageId(selectedGarment);
+    const compressedPhoto = await compressImage(customerPhotoFile, 1280);
 
     const formData = new FormData();
-    formData.set("generation_id", lastCompletedGenerationId);
+    formData.set("hero_image_id", heroImageId);
+    formData.set("folder_id", selectedGarment.id);
     formData.set("consent_confirmed", "true");
-    formData.set("customer_photo", customerPhotoFile);
+    formData.set("customer_photo", compressedPhoto);
 
-    const blob = await apiFetchBinary("/tryon/v2", accessToken, {
+    sortedFabricSlots.forEach((slot, index) => {
+      const selection = multiSelections[slot.id];
+      if (!selection) return;
+      formData.set(`fabric_image_id_${index + 1}`, selection.fabricImageId);
+      formData.set(`apply_to_${index + 1}`, slot.apply_to);
+    });
+
+    const blob = await apiFetchBinary("/tryon/multi/v2", accessToken, {
       method: "POST",
       body: formData
     });
@@ -1342,10 +1353,10 @@ export function GeneratePage() {
 
               <button
                 onClick={() => {
-                  if (!lastCompletedGenerationId) return;
+                  if (!allMultiSlotsFilled || !selectedGarment) return;
                   setShowConsentModal(true);
                 }}
-                disabled={!lastCompletedGenerationId}
+                disabled={!allMultiSlotsFilled || !selectedGarment}
                 style={{
                   width: "100%",
                   minHeight: "48px",
@@ -1355,21 +1366,18 @@ export function GeneratePage() {
                   borderRadius: "14px",
                   fontSize: "14px",
                   fontWeight: 700,
-                  cursor: lastCompletedGenerationId ? "pointer" : "not-allowed",
+                  cursor: allMultiSlotsFilled && selectedGarment ? "pointer" : "not-allowed",
                   fontFamily: "inherit",
                   marginTop: "8px",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   gap: "8px",
-                  opacity: lastCompletedGenerationId ? 1 : 0.5
+                  opacity: allMultiSlotsFilled && selectedGarment ? 1 : 0.5
                 }}
               >
                 👤 Try On Customer
               </button>
-              {!lastCompletedGenerationId ? (
-                <p className="tiny muted">Generate first to enable</p>
-              ) : null}
 
               {visualizingGenerationId ? (
                 <div className="loading-box">
