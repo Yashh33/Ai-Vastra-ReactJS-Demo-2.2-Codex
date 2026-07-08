@@ -1,0 +1,6001 @@
+﻿=== D:\AiVastraReactJSDemo 2.2 Codex\src\components\AppShell.tsx ===
+import { useState } from "react";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
+
+import { useMe } from "../lib/queries";
+import { supabase } from "../lib/supabase";
+
+function formatCredits(value: number | null | undefined) {
+  if (value === null || value === undefined) return "?";
+  return String(value);
+}
+
+function ScissorsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden focusable="false">
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12" />
+    </svg>
+  );
+}
+
+function GridIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden focusable="false">
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
+    </svg>
+  );
+}
+
+function StackIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden focusable="false">
+      <path d="m2 17 10 5 10-5M2 12l10 5 10-5M12 2 2 7l10 5 10-5-10-5z" />
+    </svg>
+  );
+}
+
+function PersonIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden focusable="false">
+      <circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M4 21c1.5-4 4.2-6 8-6s6.5 2 8 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function AppShell() {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const { data: me, isError: meError } = useMe();
+
+  const shopHeaderText = meError
+    ? "Ai Vastra"
+    : (me?.header_display_text || me?.shop_name || me?.email || "Ai Vastra").trim() || "Ai Vastra";
+  const creditBalance = meError ? "?" : formatCredits(me?.credits_balance);
+
+  const activeTab =
+    location.pathname === "/" || location.pathname === "/generate"
+      ? "sew"
+      : location.pathname === "/catalog"
+        ? "lookbook"
+        : location.pathname === "/fabric-silo"
+          ? "fabrics"
+          : "";
+
+  const handleLogout = async () => {
+    const confirmed = window.confirm("Log out of this device?");
+    if (!confirmed) return;
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      // ignore errors
+    } finally {
+      window.location.href = "/login";
+    }
+  };
+
+  return (
+    <div className="app-shell">
+      <header className="app-shell-header">
+        <span className="app-brand-text">{shopHeaderText}</span>
+        <div className="row" style={{ flexWrap: "nowrap" }}>
+          <span className="credits-chip">{creditBalance} credits</span>
+          <button
+            className="catalog-icon-btn"
+            type="button"
+            onClick={() => void handleLogout()}
+            disabled={loggingOut}
+            aria-label="Logout"
+            title="Logout"
+          >
+            <PersonIcon />
+          </button>
+        </div>
+      </header>
+
+      <div className="app-shell-content">
+        <Outlet />
+      </div>
+
+      <nav className="app-bottom-nav" aria-label="Primary navigation">
+        <button
+          className={`nav-tab ${activeTab === "sew" ? "active" : ""}`}
+          type="button"
+          onClick={() => navigate("/generate")}
+        >
+          <ScissorsIcon />
+          <span>Sew</span>
+          {activeTab === "sew" ? <span className="nav-dot" /> : null}
+        </button>
+        <button
+          className={`nav-tab ${activeTab === "lookbook" ? "active" : ""}`}
+          type="button"
+          onClick={() => navigate("/catalog")}
+        >
+          <GridIcon />
+          <span>Lookbook</span>
+          {activeTab === "lookbook" ? <span className="nav-dot" /> : null}
+        </button>
+        <button
+          className={`nav-tab ${activeTab === "fabrics" ? "active" : ""}`}
+          type="button"
+          onClick={() => navigate("/fabric-silo")}
+        >
+          <StackIcon />
+          <span>My Fabrics</span>
+          {activeTab === "fabrics" ? <span className="nav-dot" /> : null}
+        </button>
+      </nav>
+    </div>
+  );
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\components\CustomerConsentModal.tsx ===
+import { useEffect } from "react";
+
+type Props = {
+  onConsent: () => void;
+  onCancel: () => void;
+};
+
+export function CustomerConsentModal({ onConsent, onCancel }: Props) {
+  useEffect(() => {
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, []);
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 100,
+        background: "rgba(0,0,0,0.6)",
+        display: "flex",
+        alignItems: "flex-end",
+        justifyContent: "center",
+      }}
+    >
+      <div
+        style={{
+          background: "var(--white)",
+          borderRadius: "20px 20px 0 0",
+          padding: "24px 20px 36px",
+          width: "100%",
+          maxWidth: "480px",
+          display: "grid",
+          gap: "16px",
+        }}
+      >
+        <div
+          style={{
+            width: "40px",
+            height: "4px",
+            borderRadius: "2px",
+            background: "var(--border)",
+            margin: "0 auto",
+          }}
+        />
+
+        <div style={{ display: "grid", gap: "6px" }}>
+          <h2
+            style={{
+              fontSize: "18px",
+              fontWeight: 700,
+              color: "var(--navy)",
+              margin: 0,
+            }}
+          >
+            ðŸ“· Customer Photo Notice
+          </h2>
+          <p
+            style={{
+              fontSize: "13px",
+              color: "var(--text-muted)",
+              margin: 0,
+              lineHeight: 1.5,
+            }}
+          >
+            Before taking a photo, please make sure your customer understands
+            the following:
+          </p>
+        </div>
+
+        <div
+          style={{
+            background: "#F8F8F8",
+            borderRadius: "12px",
+            padding: "14px",
+            display: "grid",
+            gap: "10px",
+          }}
+        >
+          {[
+            "Photo is sent to an AI service to generate a preview",
+            "Deleted immediately after the preview is created",
+            "Never saved to our servers",
+            "Used only for this single visualization",
+          ].map((point, idx) => (
+            <div
+              key={idx}
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: "10px",
+              }}
+            >
+              <span
+                style={{
+                  width: "20px",
+                  height: "20px",
+                  borderRadius: "50%",
+                  background: "#1B1B2F",
+                  color: "#C9A84C",
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  marginTop: "1px",
+                }}
+              >
+                âœ“
+              </span>
+              <span
+                style={{
+                  fontSize: "13px",
+                  color: "var(--text-primary)",
+                  lineHeight: 1.4,
+                }}
+              >
+                {point}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        <p
+          style={{
+            fontSize: "12px",
+            color: "var(--text-muted)",
+            margin: 0,
+            textAlign: "center",
+            lineHeight: 1.4,
+          }}
+        >
+          This preview is a visualization only and does not predict actual fit
+          or appearance.
+        </p>
+
+        <div style={{ display: "grid", gap: "10px" }}>
+          <button
+            onClick={onConsent}
+            style={{
+              width: "100%",
+              minHeight: "52px",
+              background: "#1B1B2F",
+              color: "#C9A84C",
+              border: "none",
+              borderRadius: "14px",
+              fontSize: "15px",
+              fontWeight: 700,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            Customer Consents âœ“
+          </button>
+          <button
+            onClick={onCancel}
+            style={{
+              width: "100%",
+              minHeight: "44px",
+              background: "transparent",
+              color: "var(--text-muted)",
+              border: "0.5px solid var(--border)",
+              borderRadius: "12px",
+              fontSize: "14px",
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\components\ProtectedRoute.tsx ===
+import { Navigate, Outlet, useLocation } from "react-router-dom";
+
+import { useAuth } from "../lib/auth";
+
+export function ProtectedRoute() {
+  const { loading, session } = useAuth();
+  const location = useLocation();
+
+  if (loading) {
+    return (
+      <main className="screen screen-centered">
+        <div className="spinner" aria-label="Loading" />
+      </main>
+    );
+  }
+
+  if (!session) {
+    return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
+  }
+
+  return <Outlet />;
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\components\TryOnFlow.tsx ===
+import { useEffect, useRef, useState } from "react";
+
+import { compressImage } from "../lib/compressImage";
+
+type Props = {
+  onClose: () => void;
+  onSubmit: (customerPhotoFile: File) => Promise<string>;
+};
+
+export function TryOnFlow({ onClose, onSubmit }: Props) {
+  const [customerPhoto, setCustomerPhoto] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const captureRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!previewUrl?.startsWith("blob:")) return;
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
+
+  useEffect(() => {
+    if (!resultUrl?.startsWith("blob:")) return;
+    return () => URL.revokeObjectURL(resultUrl);
+  }, [resultUrl]);
+
+  async function handleFileSelect(file: File) {
+    const compressed = await compressImage(file, 1280);
+    setCustomerPhoto(compressed);
+    setPreviewUrl(URL.createObjectURL(compressed));
+    setResultUrl(null);
+    setError(null);
+  }
+
+  async function handleGenerate() {
+    if (!customerPhoto) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const url = await onSubmit(customerPhoto);
+      setResultUrl(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleShare() {
+    if (!resultUrl) return;
+    setSharing(true);
+    try {
+      const response = await fetch(resultUrl);
+      const blob = await response.blob();
+      const file = new File([blob], "ai-vastra-tryon.jpg", {
+        type: "image/jpeg",
+      });
+      if (navigator.share && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file] });
+      } else {
+        window.open(resultUrl, "_blank");
+      }
+    } catch {
+      window.open(resultUrl, "_blank");
+    } finally {
+      setSharing(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 100,
+        background: "var(--surface)",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <div
+        style={{
+          padding: "14px 16px",
+          background: "var(--white)",
+          borderBottom: "0.5px solid var(--border)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <h2
+          style={{
+            fontSize: "17px",
+            fontWeight: 700,
+            color: "var(--navy)",
+            margin: 0,
+          }}
+        >
+          {resultUrl ? "Try-On Preview" : "Customer Try-On"}
+        </h2>
+        <button
+          onClick={onClose}
+          style={{
+            background: "transparent",
+            border: "none",
+            fontSize: "22px",
+            cursor: "pointer",
+            color: "var(--text-muted)",
+            lineHeight: 1,
+            padding: "4px",
+          }}
+        >
+          Ã—
+        </button>
+      </div>
+
+      <div
+        style={{
+          flex: 1,
+          overflow: "auto",
+          padding: "16px",
+          display: "grid",
+          gap: "14px",
+          alignContent: "start",
+        }}
+      >
+        {resultUrl && (
+          <>
+            <img
+              src={resultUrl}
+              alt="Try-on result"
+              style={{
+                width: "100%",
+                borderRadius: "16px",
+                border: "0.5px solid var(--border)",
+                display: "block",
+              }}
+            />
+            <button
+              onClick={handleShare}
+              disabled={sharing}
+              style={{
+                width: "100%",
+                minHeight: "52px",
+                background: "#1B1B2F",
+                color: "#C9A84C",
+                border: "none",
+                borderRadius: "14px",
+                fontSize: "15px",
+                fontWeight: 700,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                opacity: sharing ? 0.6 : 1,
+              }}
+            >
+              {sharing ? "Preparing..." : "â†‘ Share / Save"}
+            </button>
+            <button
+              onClick={() => {
+                setResultUrl(null);
+                setCustomerPhoto(null);
+                setPreviewUrl(null);
+              }}
+              style={{
+                width: "100%",
+                minHeight: "44px",
+                background: "transparent",
+                color: "var(--text-muted)",
+                border: "0.5px solid var(--border)",
+                borderRadius: "12px",
+                fontSize: "14px",
+                fontWeight: 600,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              Try Another Photo
+            </button>
+          </>
+        )}
+
+        {!resultUrl && (
+          <>
+            {!previewUrl && (
+              <div
+                style={{
+                  background: "var(--white)",
+                  border: "0.5px solid var(--border)",
+                  borderRadius: "16px",
+                  padding: "14px",
+                  display: "grid",
+                  gap: "10px",
+                }}
+              >
+                <p
+                  style={{
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    color: "var(--text-primary)",
+                    margin: 0,
+                  }}
+                >
+                  Take or choose a photo of your customer
+                </p>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: "8px",
+                  }}
+                >
+                  <button
+                    onClick={() => captureRef.current?.click()}
+                    style={{
+                      minHeight: "48px",
+                      background: "#1B1B2F",
+                      color: "#C9A84C",
+                      border: "none",
+                      borderRadius: "12px",
+                      fontSize: "14px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    ðŸ“· Capture
+                  </button>
+                  <button
+                    onClick={() => galleryRef.current?.click()}
+                    style={{
+                      minHeight: "48px",
+                      background: "var(--white)",
+                      color: "var(--text-primary)",
+                      border: "0.5px solid var(--border)",
+                      borderRadius: "12px",
+                      fontSize: "14px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    ðŸ–¼ Gallery
+                  </button>
+                </div>
+                <input
+                  ref={captureRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void handleFileSelect(f);
+                  }}
+                />
+                <input
+                  ref={galleryRef}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void handleFileSelect(f);
+                  }}
+                />
+              </div>
+            )}
+
+            {previewUrl && (
+              <>
+                <div style={{ position: "relative" }}>
+                  <img
+                    src={previewUrl}
+                    alt="Customer photo"
+                    style={{
+                      width: "100%",
+                      borderRadius: "16px",
+                      border: "0.5px solid var(--border)",
+                      display: "block",
+                    }}
+                  />
+                  <button
+                    onClick={() => {
+                      setCustomerPhoto(null);
+                      setPreviewUrl(null);
+                    }}
+                    style={{
+                      position: "absolute",
+                      top: "10px",
+                      right: "10px",
+                      width: "28px",
+                      height: "28px",
+                      borderRadius: "50%",
+                      background: "#1B1B2F",
+                      border: "2px solid white",
+                      color: "#C9A84C",
+                      fontSize: "16px",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: 0,
+                    }}
+                  >
+                    Ã—
+                  </button>
+                </div>
+
+                {error && (
+                  <p
+                    style={{
+                      fontSize: "13px",
+                      color: "#991B1B",
+                      background: "#FEF2F2",
+                      padding: "10px 12px",
+                      borderRadius: "10px",
+                      margin: 0,
+                    }}
+                  >
+                    {error}
+                  </p>
+                )}
+
+                <button
+                  onClick={handleGenerate}
+                  disabled={busy}
+                  style={{
+                    width: "100%",
+                    minHeight: "52px",
+                    background: "#1B1B2F",
+                    color: "#C9A84C",
+                    border: "none",
+                    borderRadius: "14px",
+                    fontSize: "15px",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    opacity: busy ? 0.7 : 1,
+                  }}
+                >
+                  {busy ? "Fitting..." : "Generate Preview"}
+                </button>
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\lib\api.ts ===
+import { APP_ENV } from "./env";
+
+type ErrorPayload = {
+  detail?: string;
+};
+
+export async function apiFetch<T>(
+  path: string,
+  accessToken: string,
+  init: RequestInit = {}
+): Promise<T> {
+  const headers = new Headers(init.headers ?? {});
+  headers.set("Authorization", `Bearer ${accessToken}`);
+  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const response = await fetch(`${APP_ENV.apiBaseUrl}${path}`, {
+    ...init,
+    headers
+  });
+
+  const text = await response.text();
+  let payload: unknown = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = text;
+    }
+  }
+
+  if (!response.ok) {
+    const detail =
+      typeof payload === "object" &&
+      payload !== null &&
+      "detail" in (payload as ErrorPayload)
+        ? String((payload as ErrorPayload).detail)
+        : `HTTP ${response.status}`;
+
+    throw new Error(detail);
+  }
+
+  return payload as T;
+}
+
+export async function apiFetchBinary(
+  path: string,
+  accessToken: string,
+  init: RequestInit = {}
+): Promise<Blob> {
+  const headers = new Headers(init.headers ?? {});
+  headers.set("Authorization", `Bearer ${accessToken}`);
+  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const response = await fetch(`${APP_ENV.apiBaseUrl}${path}`, {
+    ...init,
+    headers
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    let payload: unknown = null;
+    if (text) {
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        payload = text;
+      }
+    }
+
+    const detail =
+      typeof payload === "object" &&
+      payload !== null &&
+      "detail" in (payload as ErrorPayload)
+        ? String((payload as ErrorPayload).detail)
+        : `HTTP ${response.status}`;
+
+    throw new Error(detail);
+  }
+
+  return response.blob();
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\lib\auth.tsx ===
+import type { Session, User } from "@supabase/supabase-js";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
+
+import { supabase } from "./supabase";
+
+type AuthContextValue = {
+  loading: boolean;
+  session: Session | null;
+  user: User | null;
+  accessToken: string | null;
+  signOut: () => Promise<void>;
+};
+
+const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [loading, setLoading] = useState(true);
+  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!mounted) return;
+        setSession(data.session ?? null);
+        setUser(data.session?.user ?? null);
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+
+    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (!mounted) return;
+      setSession(nextSession ?? null);
+      setUser(nextSession?.user ?? null);
+      setLoading(false);
+    });
+
+    return () => {
+      mounted = false;
+      data.subscription.unsubscribe();
+    };
+  }, []);
+
+  const value = useMemo<AuthContextValue>(
+    () => ({
+      loading,
+      session,
+      user,
+      accessToken: session?.access_token ?? null,
+      signOut: async () => {
+        const { error } = await supabase.auth.signOut();
+        if (error) {
+          throw error;
+        }
+      }
+    }),
+    [loading, session, user]
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth() {
+  const ctx = useContext(AuthContext);
+  if (!ctx) {
+    throw new Error("useAuth must be used inside AuthProvider");
+  }
+  return ctx;
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\lib\compressImage.ts ===
+async function loadBitmapSource(file: File): Promise<{ source: CanvasImageSource; width: number; height: number; cleanup: () => void }> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    return {
+      source: bitmap,
+      width: bitmap.width,
+      height: bitmap.height,
+      cleanup: () => bitmap.close()
+    };
+  } catch {
+    const objectUrl = URL.createObjectURL(file);
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error("Image load failed"));
+      element.src = objectUrl;
+    });
+
+    return {
+      source: image,
+      width: image.naturalWidth,
+      height: image.naturalHeight,
+      cleanup: () => URL.revokeObjectURL(objectUrl)
+    };
+  }
+}
+
+function replaceExtensionWithJpg(filename: string) {
+  const withoutExt = filename.includes(".") ? filename.slice(0, filename.lastIndexOf(".")) : filename;
+  return `${withoutExt || "image"}.jpg`;
+}
+
+export async function compressImage(file: File, maxDimension: number, quality = 0.8): Promise<File> {
+  if (!file.type.startsWith("image/")) return file;
+
+  let cleanup: (() => void) | null = null;
+  try {
+    const { source, width, height, cleanup: cleanupSource } = await loadBitmapSource(file);
+    cleanup = cleanupSource;
+
+    if (width <= maxDimension && height <= maxDimension && file.size < 500_000) {
+      return file;
+    }
+
+    const scale = maxDimension / Math.max(width, height);
+    const targetWidth = Math.max(1, Math.round(width * scale));
+    const targetHeight = Math.max(1, Math.round(height * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas context unavailable");
+
+    ctx.drawImage(source, 0, 0, targetWidth, targetHeight);
+
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((result) => resolve(result), "image/jpeg", quality);
+    });
+    if (!blob) throw new Error("Canvas toBlob failed");
+
+    return new File([blob], replaceExtensionWithJpg(file.name || "image.jpg"), { type: "image/jpeg" });
+  } catch (err) {
+    console.warn("compressImage failed, using original file", err);
+    return file;
+  } finally {
+    cleanup?.();
+  }
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\lib\download.ts ===
+function inferExtensionFromPath(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const beforeHash = value.split("#")[0] ?? value;
+  const clean = beforeHash.split("?")[0] ?? beforeHash;
+  const lastSegment = clean.split("/").pop() || "";
+  const dot = lastSegment.lastIndexOf(".");
+  if (dot <= 0 || dot === lastSegment.length - 1) return null;
+  const ext = lastSegment.slice(dot + 1).toLowerCase();
+  return /^[a-z0-9]+$/.test(ext) ? ext : null;
+}
+
+export function buildGenerationDownloadFilename(
+  generationId: string,
+  outputPath?: string | null,
+  signedUrl?: string | null
+) {
+  const ext = inferExtensionFromPath(outputPath) || inferExtensionFromPath(signedUrl) || "jpg";
+  return `ai-vastra-${generationId}.${ext}`;
+}
+
+export function triggerBrowserDownload(url: string, filename: string) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\lib\env.ts ===
+function requireEnv(name: string): string {
+  const value = import.meta.env[name as keyof ImportMetaEnv];
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`Missing required env var: ${name}`);
+  }
+  return value.trim();
+}
+
+export const APP_ENV = {
+  supabaseUrl: requireEnv("VITE_SUPABASE_URL"),
+  supabaseAnonKey: requireEnv("VITE_SUPABASE_ANON_KEY"),
+  apiBaseUrl: requireEnv("VITE_API_BASE_URL").replace(/\/+$/, ""),
+  demoEmail: (import.meta.env.VITE_DEMO_EMAIL ?? "").trim(),
+  demoPassword: (import.meta.env.VITE_DEMO_PASSWORD ?? "").trim()
+};
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\lib\matchColor.ts ===
+export type SwatchAdjustment = {
+  hueShiftDeg: number;
+  satDeltaPct: number;
+  lightDeltaPct: number;
+};
+
+const HUE_TOL = 18 / 360;
+const SAT_TOL = 0.28;
+const LIGHT_TOL = 0.28;
+const FEATHER = 0.08;
+
+type RGB = { r: number; g: number; b: number };
+export type HSL01 = { h: number; s: number; l: number };
+
+export function emptySwatchAdjustment(): SwatchAdjustment {
+  return {
+    hueShiftDeg: 0,
+    satDeltaPct: 0,
+    lightDeltaPct: 0
+  };
+}
+
+export function isZeroAdjustment(value?: SwatchAdjustment | null) {
+  if (!value) return true;
+  return value.hueShiftDeg === 0 && value.satDeltaPct === 0 && value.lightDeltaPct === 0;
+}
+
+export function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function mod(value: number, base: number) {
+  return ((value % base) + base) % base;
+}
+
+function smoothstep(edge0: number, edge1: number, value: number) {
+  const denom = Math.max(edge1 - edge0, 1e-8);
+  const t = clamp((value - edge0) / denom, 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+export function normalizeHexColor(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const raw = value.trim();
+  if (!raw.startsWith("#")) return null;
+  const hex = raw.slice(1);
+
+  if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+    const [r, g, b] = hex.split("");
+    return `#${r}${r}${g}${g}${b}${b}`.toUpperCase();
+  }
+
+  if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+    return `#${hex}`.toUpperCase();
+  }
+
+  if (/^[0-9a-fA-F]{8}$/.test(hex)) {
+    return `#${hex.slice(2)}`.toUpperCase();
+  }
+
+  return null;
+}
+
+export function hexToRgb(hex: string): RGB | null {
+  const normalized = normalizeHexColor(hex);
+  if (!normalized) return null;
+  const raw = normalized.slice(1);
+  return {
+    r: parseInt(raw.slice(0, 2), 16),
+    g: parseInt(raw.slice(2, 4), 16),
+    b: parseInt(raw.slice(4, 6), 16)
+  };
+}
+
+function rgb01ToHsl(rgb01: RGB): HSL01 {
+  const r = clamp(rgb01.r, 0, 1);
+  const g = clamp(rgb01.g, 0, 1);
+  const b = clamp(rgb01.b, 0, 1);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+
+  let h = 0;
+  let s = 0;
+  const l = (max + min) / 2;
+
+  if (delta > 1e-8) {
+    s = delta / Math.max(1 - Math.abs(2 * l - 1), 1e-8);
+    if (max === r) h = mod((g - b) / delta, 6) / 6;
+    else if (max === g) h = ((b - r) / delta + 2) / 6;
+    else h = ((r - g) / delta + 4) / 6;
+  }
+
+  return {
+    h: mod(h, 1),
+    s: clamp(s, 0, 1),
+    l: clamp(l, 0, 1)
+  };
+}
+
+export function hexToHsl01(hex: string): HSL01 | null {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return null;
+  return rgb01ToHsl({
+    r: rgb.r / 255,
+    g: rgb.g / 255,
+    b: rgb.b / 255
+  });
+}
+
+function hslToRgb01(hsl: HSL01): RGB {
+  const h = mod(hsl.h, 1);
+  const s = clamp(hsl.s, 0, 1);
+  const l = clamp(hsl.l, 0, 1);
+
+  if (s <= 1e-8) {
+    return { r: l, g: l, b: l };
+  }
+
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+
+  const hue2rgb = (t: number) => {
+    const tt = mod(t, 1);
+    if (tt < 1 / 6) return p + (q - p) * 6 * tt;
+    if (tt < 1 / 2) return q;
+    if (tt < 2 / 3) return p + (q - p) * (2 / 3 - tt) * 6;
+    return p;
+  };
+
+  return {
+    r: clamp(hue2rgb(h + 1 / 3), 0, 1),
+    g: clamp(hue2rgb(h), 0, 1),
+    b: clamp(hue2rgb(h - 1 / 3), 0, 1)
+  };
+}
+
+function rgb255ToHex(rgb: RGB) {
+  const to2 = (v: number) => clamp(Math.round(v), 0, 255).toString(16).padStart(2, "0");
+  return `#${to2(rgb.r)}${to2(rgb.g)}${to2(rgb.b)}`.toUpperCase();
+}
+
+function rgbDistance(a: RGB, b: RGB) {
+  const dr = a.r - b.r;
+  const dg = a.g - b.g;
+  const db = a.b - b.b;
+  return Math.sqrt(dr * dr + dg * dg + db * db);
+}
+
+function uniqueSwatches(candidates: RGB[], maxSwatches: number) {
+  const output: RGB[] = [];
+  for (const rgb of candidates) {
+    const duplicate = output.some((existing) => rgbDistance(existing, rgb) < 36);
+    if (duplicate) continue;
+    output.push(rgb);
+    if (output.length >= maxSwatches) break;
+  }
+  return output;
+}
+
+export function extractProminentSwatches(
+  imageData: ImageData,
+  maxSwatches = 8
+): string[] {
+  const counts = new Map<number, number>();
+  const data = imageData.data;
+  const sampleStride = 4; // sample every 4th pixel
+
+  for (let i = 0; i < data.length; i += 4 * sampleStride) {
+    const r = data[i] ?? 0;
+    const g = data[i + 1] ?? 0;
+    const b = data[i + 2] ?? 0;
+    const a = data[i + 3] ?? 0;
+    if (a < 220) continue;
+
+    const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  const topBuckets = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 40)
+    .map(([key]) => {
+      const r = ((key >> 8) & 0x0f) * 16 + 8;
+      const g = ((key >> 4) & 0x0f) * 16 + 8;
+      const b = (key & 0x0f) * 16 + 8;
+      return { r, g, b };
+    });
+
+  const swatches = uniqueSwatches(topBuckets, maxSwatches).map(rgb255ToHex);
+  return swatches;
+}
+
+export function resizeImageToCanvas(
+  image: HTMLImageElement,
+  maxDimension = 680
+): HTMLCanvasElement {
+  const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
+  const width = Math.max(1, Math.round(image.naturalWidth * scale));
+  const height = Math.max(1, Math.round(image.naturalHeight * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    throw new Error("Canvas context unavailable");
+  }
+  ctx.drawImage(image, 0, 0, width, height);
+  return canvas;
+}
+
+export function applyLivePreviewAdjustment(
+  source: ImageData,
+  targetHex: string | null,
+  adjustment: SwatchAdjustment | null
+) {
+  const targetRgb = targetHex ? hexToRgb(targetHex) : null;
+  if (!targetRgb || isZeroAdjustment(adjustment)) {
+    return new ImageData(new Uint8ClampedArray(source.data), source.width, source.height);
+  }
+
+  const targetHsl = rgb01ToHsl({
+    r: targetRgb.r / 255,
+    g: targetRgb.g / 255,
+    b: targetRgb.b / 255
+  });
+
+  const hueShift = (adjustment?.hueShiftDeg ?? 0) / 360;
+  const satDelta = (adjustment?.satDeltaPct ?? 0) / 100;
+  const lightDelta = (adjustment?.lightDeltaPct ?? 0) / 100;
+
+  const src = source.data;
+  const out = new Uint8ClampedArray(src.length);
+
+  for (let i = 0; i < src.length; i += 4) {
+    const r255 = src[i] ?? 0;
+    const g255 = src[i + 1] ?? 0;
+    const b255 = src[i + 2] ?? 0;
+    const a255 = src[i + 3] ?? 0;
+
+    const r = r255 / 255;
+    const g = g255 / 255;
+    const b = b255 / 255;
+
+    const hsl = rgb01ToHsl({ r, g, b });
+
+    const hueDiff = Math.abs(mod(hsl.h - targetHsl.h + 0.5, 1) - 0.5);
+    const satDiff = Math.abs(hsl.s - targetHsl.s);
+    const lightDiff = Math.abs(hsl.l - targetHsl.l);
+
+    const hMask = 1 - smoothstep(HUE_TOL, HUE_TOL + FEATHER, hueDiff);
+    const sMask = 1 - smoothstep(SAT_TOL, SAT_TOL + FEATHER, satDiff);
+    const lMask = 1 - smoothstep(LIGHT_TOL, LIGHT_TOL + FEATHER, lightDiff);
+    const mask = clamp(hMask * sMask * lMask, 0, 1);
+
+    const shiftedHsl: HSL01 = {
+      h: mod(hsl.h + hueShift * mask, 1),
+      s: clamp(hsl.s + satDelta * mask, 0, 1),
+      l: clamp(hsl.l + lightDelta * mask, 0, 1)
+    };
+    const shiftedRgb = hslToRgb01(shiftedHsl);
+
+    const outR = clamp(r * (1 - mask) + shiftedRgb.r * mask, 0, 1);
+    const outG = clamp(g * (1 - mask) + shiftedRgb.g * mask, 0, 1);
+    const outB = clamp(b * (1 - mask) + shiftedRgb.b * mask, 0, 1);
+
+    out[i] = Math.round(outR * 255);
+    out[i + 1] = Math.round(outG * 255);
+    out[i + 2] = Math.round(outB * 255);
+    out[i + 3] = a255;
+  }
+
+  return new ImageData(out, source.width, source.height);
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\lib\queries.ts ===
+import { useQuery } from "@tanstack/react-query";
+
+import { apiFetch } from "./api";
+import { useAuth } from "./auth";
+import type { FabricImageRow, GarmentType, GenerationRow, ShopContext } from "./types";
+
+export type MeResponse = ShopContext & {
+  shop_name?: string | null;
+  header_display_text?: string | null;
+  credits_balance?: number | null;
+};
+
+export function useMe() {
+  const { accessToken } = useAuth();
+
+  return useQuery({
+    queryKey: ["me"],
+    queryFn: () => apiFetch<MeResponse>("/me", accessToken as string, { method: "GET" }),
+    enabled: !!accessToken
+  });
+}
+
+export function useGarmentTypes() {
+  const { accessToken } = useAuth();
+
+  return useQuery({
+    queryKey: ["garment-types"],
+    queryFn: () => apiFetch<GarmentType[]>("/garment-types", accessToken as string, { method: "GET" }),
+    enabled: !!accessToken
+  });
+}
+
+export function useFabricImages() {
+  const { accessToken } = useAuth();
+
+  return useQuery({
+    queryKey: ["fabric-images"],
+    queryFn: () => apiFetch<FabricImageRow[]>("/fabric-images?limit=100", accessToken as string, { method: "GET" }),
+    enabled: !!accessToken
+  });
+}
+
+export type GenerationsParams = {
+  status?: string;
+  folder_id?: string;
+  fabric_code?: string;
+  fabric_color?: string;
+  limit?: number;
+  include_urls?: boolean;
+};
+
+function buildGenerationsQueryString(params: GenerationsParams) {
+  const search = new URLSearchParams();
+  if (params.status) search.set("status", params.status);
+  if (params.folder_id) search.set("folder_id", params.folder_id);
+  if (params.fabric_code) search.set("fabric_code", params.fabric_code);
+  if (params.fabric_color) search.set("fabric_color", params.fabric_color);
+  if (params.limit !== undefined) search.set("limit", String(params.limit));
+  if (params.include_urls !== undefined) search.set("include_urls", String(params.include_urls));
+  return search.toString();
+}
+
+export function useGenerations(params: GenerationsParams, options?: { enabled?: boolean }) {
+  const { accessToken } = useAuth();
+
+  return useQuery({
+    queryKey: ["generations", params],
+    queryFn: () =>
+      apiFetch<GenerationRow[]>(`/generations?${buildGenerationsQueryString(params)}`, accessToken as string, {
+        method: "GET"
+      }),
+    enabled: !!accessToken && (options?.enabled ?? true)
+  });
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\lib\realtime.ts ===
+import { supabase } from "./supabase";
+
+export type GenerationRealtimeRow = {
+  id: string;
+  status: string;
+  error: string | null;
+  output_path: string | null;
+};
+
+export function subscribeToGeneration(
+  generationId: string,
+  onUpdate: (row: GenerationRealtimeRow) => void
+) {
+  const channel = supabase
+    .channel(`gen-${generationId}`)
+    .on<GenerationRealtimeRow>(
+      "postgres_changes",
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: "generations",
+        filter: `id=eq.${generationId}`
+      },
+      (payload) => onUpdate(payload.new)
+    )
+    .subscribe();
+
+  return () => {
+    void supabase.removeChannel(channel);
+  };
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\lib\storage.ts ===
+import { supabase } from "./supabase";
+
+const DEFAULT_TTL_SECONDS = 3600;
+
+export async function createSignedUrl(
+  bucket: "hero-images" | "fabric-images" | "generated-outputs" | "shop-logos",
+  path: string,
+  expiresInSeconds = DEFAULT_TTL_SECONDS
+) {
+  const { data, error } = await supabase.storage
+    .from(bucket)
+    .createSignedUrl(path, expiresInSeconds);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const signed =
+    (data as { signedUrl?: string; signedURL?: string } | null)?.signedUrl ??
+    (data as { signedUrl?: string; signedURL?: string } | null)?.signedURL;
+
+  if (!signed) {
+    throw new Error("Signed URL response was empty");
+  }
+
+  return signed;
+}
+
+export async function uploadToStorage(
+  bucket: "hero-images" | "fabric-images",
+  storagePath: string,
+  file: File
+) {
+  const { error } = await supabase.storage.from(bucket).upload(storagePath, file, {
+    contentType: file.type || "image/jpeg",
+    upsert: false
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\lib\supabase.ts ===
+import { createClient } from "@supabase/supabase-js";
+
+import { APP_ENV } from "./env";
+
+export const supabase = createClient(APP_ENV.supabaseUrl, APP_ENV.supabaseAnonKey, {
+  auth: {
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: false
+  }
+});
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\lib\types.ts ===
+export type ShopContext = {
+  auth_user_id: string;
+  email: string | null;
+  shop_id: string;
+  role: string;
+};
+
+export type FolderRow = {
+  id: string;
+  shop_id: string;
+  name: string;
+  prompt_template: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GarmentType = {
+  id: string;
+  name: string;
+  prompt_template: string;
+  default_hero_image_id: string | null;
+  hero_image_signed_url: string | null;
+};
+
+export type HeroImageRow = {
+  id: string;
+  shop_id: string;
+  folder_id: string;
+  storage_path: string;
+  original_filename: string | null;
+  mime_type: string | null;
+  file_size_bytes: number | null;
+  width: number | null;
+  height: number | null;
+  created_at: string;
+};
+
+export type FabricImageRow = {
+  id: string;
+  shop_id: string;
+  storage_path: string;
+  original_filename: string | null;
+  mime_type: string | null;
+  file_size_bytes: number | null;
+  width: number | null;
+  height: number | null;
+  created_at: string;
+};
+
+export type GenerationStatus = "queued" | "processing" | "done" | "failed" | string;
+
+export type ApplyToTarget = "shirt" | "pant" | "suit_full_body" | "suit_upper" | "koti";
+
+export type GenerationFabricAssignmentPayload = {
+  fabric_image_id: string;
+  apply_to: ApplyToTarget;
+  fabric_code: string;
+  fabric_color?: string | null;
+  fabric_scale?: "fine" | "medium" | "bold" | null;
+};
+
+export type GenerationFabricSnapshot = {
+  generation_id: string;
+  apply_to: ApplyToTarget | string;
+  sort_order: number;
+  fabric_code: string | null;
+  fabric_color: string | null;
+};
+
+export type GenerationRow = {
+  id: string;
+  shop_id: string;
+  hero_image_id: string;
+  fabric_image_id: string;
+  folder_id: string;
+  status: GenerationStatus;
+  prompt_used: string | null;
+  nano_request_id: string | null;
+  output_path: string | null;
+  error: string | null;
+  credits_used: number;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  fabric_summary_label?: string;
+  generation_fabrics?: GenerationFabricSnapshot[];
+  download_url?: string | null;
+  thumb_url?: string | null;
+};
+
+export type GenerationCreateResponse = {
+  id: string;
+  status: string;
+  credits_used: number;
+  balance_before: number;
+  balance_after: number;
+  prompt_saved: boolean;
+  warning?: string;
+};
+
+export type DownloadUrlResponse = {
+  generation_id: string;
+  download_url: string;
+  expires_in_seconds: number;
+};
+
+export type MatchColorSaveResponse = {
+  generation_id: string;
+  output_path: string;
+  edited: boolean;
+  applied_edits?: number;
+};
+
+export type CatalogImageRow = {
+  id: string;
+  shop_id: string;
+  folder_id: string;
+  storage_path: string;
+  original_filename: string | null;
+  mime_type: string | null;
+  file_size_bytes: number | null;
+  width: number | null;
+  height: number | null;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CatalogImageDownloadUrlResponse = {
+  catalog_image_id: string;
+  download_url: string;
+  expires_in_seconds: number;
+};
+
+export type MatchColorEditPayload = {
+  selected_hex: string;
+  hue_shift_degrees: number;
+  saturation_delta_percent: number;
+  lightness_delta_percent: number;
+};
+
+
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\lib\utils.ts ===
+export function makeRandomSuffix() {
+  return Math.random().toString(36).slice(2, 8);
+}
+
+export function guessFileExtension(filename?: string | null, mimeType?: string | null) {
+  const fromName = filename?.split(".").pop()?.toLowerCase();
+  const fromMime = mimeType?.split("/").pop()?.toLowerCase();
+  const value = (fromName || fromMime || "jpg").replace(/[^a-z0-9]/g, "");
+  return value || "jpg";
+}
+
+export function formatDateLabel(value?: string | null) {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleString();
+}
+
+export function isPendingStatus(status?: string | null) {
+  return status === "queued" || status === "processing";
+}
+
+export function truncateText(value: string | null | undefined, max = 220) {
+  if (!value) return "-";
+  if (value.length <= max) return value;
+  return `${value.slice(0, max)}...`;
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\lib\webglMatchColor.ts ===
+import type { HSL01 } from "./matchColor";
+
+const VERTEX_SHADER_SOURCE = `
+attribute vec2 a_position;
+varying vec2 v_uv;
+
+void main() {
+  v_uv = (a_position + 1.0) * 0.5;
+  gl_Position = vec4(a_position, 0.0, 1.0);
+}
+`;
+
+const FRAGMENT_SHADER_SOURCE = `
+precision mediump float;
+
+uniform sampler2D u_image;
+uniform vec3 u_target_hsl;
+uniform float u_hue_shift;
+uniform float u_sat_delta;
+uniform float u_light_delta;
+uniform float u_hue_tol;
+uniform float u_sat_tol;
+uniform float u_light_tol;
+uniform float u_feather;
+
+varying vec2 v_uv;
+
+float hueDistance(float a, float b) {
+  float d = abs(a - b);
+  return min(d, 1.0 - d);
+}
+
+vec3 rgb2hsl(vec3 c) {
+  float maxC = max(c.r, max(c.g, c.b));
+  float minC = min(c.r, min(c.g, c.b));
+  float delta = maxC - minC;
+
+  float h = 0.0;
+  float s = 0.0;
+  float l = (maxC + minC) * 0.5;
+
+  if (delta > 0.00001) {
+    if (maxC == c.r) {
+      h = mod(((c.g - c.b) / delta), 6.0);
+    } else if (maxC == c.g) {
+      h = ((c.b - c.r) / delta) + 2.0;
+    } else {
+      h = ((c.r - c.g) / delta) + 4.0;
+    }
+    h = h / 6.0;
+    if (h < 0.0) {
+      h += 1.0;
+    }
+
+    s = delta / max(1.0 - abs(2.0 * l - 1.0), 0.00001);
+  }
+
+  return vec3(h, clamp(s, 0.0, 1.0), clamp(l, 0.0, 1.0));
+}
+
+float hue2rgb(float p, float q, float t) {
+  if (t < 0.0) t += 1.0;
+  if (t > 1.0) t -= 1.0;
+  if (t < 1.0 / 6.0) return p + (q - p) * 6.0 * t;
+  if (t < 1.0 / 2.0) return q;
+  if (t < 2.0 / 3.0) return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+  return p;
+}
+
+vec3 hsl2rgb(vec3 hsl) {
+  float h = hsl.x;
+  float s = clamp(hsl.y, 0.0, 1.0);
+  float l = clamp(hsl.z, 0.0, 1.0);
+
+  if (s <= 0.00001) {
+    return vec3(l, l, l);
+  }
+
+  float q = l < 0.5 ? l * (1.0 + s) : l + s - l * s;
+  float p = 2.0 * l - q;
+
+  return vec3(
+    hue2rgb(p, q, h + 1.0 / 3.0),
+    hue2rgb(p, q, h),
+    hue2rgb(p, q, h - 1.0 / 3.0)
+  );
+}
+
+void main() {
+  vec4 src = texture2D(u_image, v_uv);
+  vec3 srcRgb = src.rgb;
+  vec3 hsl = rgb2hsl(srcRgb);
+
+  float hueDiff = hueDistance(hsl.x, u_target_hsl.x);
+  float satDiff = abs(hsl.y - u_target_hsl.y);
+  float lightDiff = abs(hsl.z - u_target_hsl.z);
+
+  float hMask = 1.0 - smoothstep(u_hue_tol, u_hue_tol + u_feather, hueDiff);
+  float sMask = 1.0 - smoothstep(u_sat_tol, u_sat_tol + u_feather, satDiff);
+  float lMask = 1.0 - smoothstep(u_light_tol, u_light_tol + u_feather, lightDiff);
+  float mask = clamp(hMask * sMask * lMask, 0.0, 1.0);
+
+  vec3 shifted = hsl;
+  shifted.x = fract(shifted.x + u_hue_shift * mask + 1.0);
+  shifted.y = clamp(shifted.y + u_sat_delta * mask, 0.0, 1.0);
+  shifted.z = clamp(shifted.z + u_light_delta * mask, 0.0, 1.0);
+
+  vec3 outRgb = mix(srcRgb, hsl2rgb(shifted), mask);
+  gl_FragColor = vec4(outRgb, src.a);
+}
+`;
+
+const DEFAULT_TOLERANCE = {
+  hueTol: 18 / 360,
+  satTol: 0.28,
+  lightTol: 0.28,
+  feather: 0.08
+};
+
+type UniformLocations = {
+  image: WebGLUniformLocation;
+  targetHsl: WebGLUniformLocation;
+  hueShift: WebGLUniformLocation;
+  satDelta: WebGLUniformLocation;
+  lightDelta: WebGLUniformLocation;
+  hueTol: WebGLUniformLocation;
+  satTol: WebGLUniformLocation;
+  lightTol: WebGLUniformLocation;
+  feather: WebGLUniformLocation;
+};
+
+export type MatchColorDrawOptions = {
+  targetHsl: HSL01;
+  hueShift: number;
+  satDelta: number;
+  lightDelta: number;
+  hueTol?: number;
+  satTol?: number;
+  lightTol?: number;
+  feather?: number;
+};
+
+function requireContext(
+  canvas: HTMLCanvasElement
+): WebGLRenderingContext {
+  const gl =
+    canvas.getContext("webgl", {
+      alpha: true,
+      antialias: false,
+      preserveDrawingBuffer: false
+    }) ??
+    canvas.getContext("experimental-webgl", {
+      alpha: true,
+      antialias: false,
+      preserveDrawingBuffer: false
+    });
+
+  if (!gl) {
+    throw new Error("WebGL is not available");
+  }
+
+  return gl as WebGLRenderingContext;
+}
+
+function compileShader(gl: WebGLRenderingContext, type: number, source: string) {
+  const shader = gl.createShader(type);
+  if (!shader) {
+    throw new Error("Failed to create shader");
+  }
+
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    const error = gl.getShaderInfoLog(shader) || "Unknown shader compile error";
+    gl.deleteShader(shader);
+    throw new Error(error);
+  }
+
+  return shader;
+}
+
+function linkProgram(gl: WebGLRenderingContext, vertexSource: string, fragmentSource: string) {
+  const vertexShader = compileShader(gl, gl.VERTEX_SHADER, vertexSource);
+  const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
+  const program = gl.createProgram();
+  if (!program) {
+    gl.deleteShader(vertexShader);
+    gl.deleteShader(fragmentShader);
+    throw new Error("Failed to create program");
+  }
+
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+  gl.deleteShader(vertexShader);
+  gl.deleteShader(fragmentShader);
+
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    const error = gl.getProgramInfoLog(program) || "Unknown program link error";
+    gl.deleteProgram(program);
+    throw new Error(error);
+  }
+
+  return program;
+}
+
+function getUniform(gl: WebGLRenderingContext, program: WebGLProgram, name: string) {
+  const uniform = gl.getUniformLocation(program, name);
+  if (!uniform) {
+    throw new Error(`Missing shader uniform: ${name}`);
+  }
+  return uniform;
+}
+
+export class MatchColorWebGLRenderer {
+  private readonly canvas: HTMLCanvasElement;
+  private readonly gl: WebGLRenderingContext;
+  private readonly program: WebGLProgram;
+  private readonly texture: WebGLTexture;
+  private readonly positionBuffer: WebGLBuffer;
+  private readonly uniforms: UniformLocations;
+  private readonly positionLocation: number;
+  private sourceWidth = 1;
+  private sourceHeight = 1;
+  private outputScale = 1;
+  private disposed = false;
+
+  constructor(canvas: HTMLCanvasElement) {
+    this.canvas = canvas;
+    this.gl = requireContext(canvas);
+    this.program = linkProgram(this.gl, VERTEX_SHADER_SOURCE, FRAGMENT_SHADER_SOURCE);
+
+    const texture = this.gl.createTexture();
+    const buffer = this.gl.createBuffer();
+    if (!texture || !buffer) {
+      throw new Error("Failed to create WebGL resources");
+    }
+    this.texture = texture;
+    this.positionBuffer = buffer;
+
+    this.positionLocation = this.gl.getAttribLocation(this.program, "a_position");
+    if (this.positionLocation < 0) {
+      throw new Error("Missing shader attribute: a_position");
+    }
+
+    this.uniforms = {
+      image: getUniform(this.gl, this.program, "u_image"),
+      targetHsl: getUniform(this.gl, this.program, "u_target_hsl"),
+      hueShift: getUniform(this.gl, this.program, "u_hue_shift"),
+      satDelta: getUniform(this.gl, this.program, "u_sat_delta"),
+      lightDelta: getUniform(this.gl, this.program, "u_light_delta"),
+      hueTol: getUniform(this.gl, this.program, "u_hue_tol"),
+      satTol: getUniform(this.gl, this.program, "u_sat_tol"),
+      lightTol: getUniform(this.gl, this.program, "u_light_tol"),
+      feather: getUniform(this.gl, this.program, "u_feather")
+    };
+
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.positionBuffer);
+    this.gl.bufferData(
+      this.gl.ARRAY_BUFFER,
+      new Float32Array([
+        -1, -1,
+        1, -1,
+        -1, 1,
+        -1, 1,
+        1, -1,
+        1, 1
+      ]),
+      this.gl.STATIC_DRAW
+    );
+
+    this.gl.bindTexture(this.gl.TEXTURE_2D, this.texture);
+    this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
+    this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
+    this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
+    this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
+  }
+
+  setSource(source: TexImageSource, width: number, height: number) {
+    this.ensureActive();
+
+    this.sourceWidth = Math.max(1, Math.round(width));
+    this.sourceHeight = Math.max(1, Math.round(height));
+
+    this.gl.bindTexture(this.gl.TEXTURE_2D, this.texture);
+    this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, 1);
+    this.gl.texImage2D(
+      this.gl.TEXTURE_2D,
+      0,
+      this.gl.RGBA,
+      this.gl.RGBA,
+      this.gl.UNSIGNED_BYTE,
+      source
+    );
+
+    this.resizeCanvas();
+  }
+
+  setOutputScale(scale: number) {
+    this.ensureActive();
+    const nextScale = Math.max(0.35, Math.min(1, scale));
+    if (Math.abs(nextScale - this.outputScale) < 1e-4) return;
+    this.outputScale = nextScale;
+    this.resizeCanvas();
+  }
+
+  draw(options: MatchColorDrawOptions) {
+    this.ensureActive();
+
+    this.gl.useProgram(this.program);
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.positionBuffer);
+    this.gl.enableVertexAttribArray(this.positionLocation);
+    this.gl.vertexAttribPointer(this.positionLocation, 2, this.gl.FLOAT, false, 0, 0);
+
+    this.gl.activeTexture(this.gl.TEXTURE0);
+    this.gl.bindTexture(this.gl.TEXTURE_2D, this.texture);
+    this.gl.uniform1i(this.uniforms.image, 0);
+
+    this.gl.uniform3f(
+      this.uniforms.targetHsl,
+      options.targetHsl.h,
+      options.targetHsl.s,
+      options.targetHsl.l
+    );
+    this.gl.uniform1f(this.uniforms.hueShift, options.hueShift);
+    this.gl.uniform1f(this.uniforms.satDelta, options.satDelta);
+    this.gl.uniform1f(this.uniforms.lightDelta, options.lightDelta);
+    this.gl.uniform1f(this.uniforms.hueTol, options.hueTol ?? DEFAULT_TOLERANCE.hueTol);
+    this.gl.uniform1f(this.uniforms.satTol, options.satTol ?? DEFAULT_TOLERANCE.satTol);
+    this.gl.uniform1f(this.uniforms.lightTol, options.lightTol ?? DEFAULT_TOLERANCE.lightTol);
+    this.gl.uniform1f(this.uniforms.feather, options.feather ?? DEFAULT_TOLERANCE.feather);
+
+    this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    this.gl.clearColor(0, 0, 0, 0);
+    this.gl.clear(this.gl.COLOR_BUFFER_BIT);
+    this.gl.drawArrays(this.gl.TRIANGLES, 0, 6);
+  }
+
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.gl.deleteBuffer(this.positionBuffer);
+    this.gl.deleteTexture(this.texture);
+    this.gl.deleteProgram(this.program);
+  }
+
+  private resizeCanvas() {
+    const renderDpr = 1; // keep GPU workload predictable on phones
+    this.canvas.width = Math.max(1, Math.round(this.sourceWidth * this.outputScale * renderDpr));
+    this.canvas.height = Math.max(1, Math.round(this.sourceHeight * this.outputScale * renderDpr));
+  }
+
+  private ensureActive() {
+    if (this.disposed) {
+      throw new Error("Renderer already disposed");
+    }
+  }
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\pages\CarouselPage.tsx ===
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+
+import { useGenerations } from "../lib/queries";
+
+const AUTO_ADVANCE_MS = 3500;
+const URL_REFRESH_THRESHOLD_MS = 50 * 60 * 1000;
+
+export function CarouselPage() {
+  const navigate = useNavigate();
+
+  const [index, setIndex] = useState(0);
+  const [autoAdvance, setAutoAdvance] = useState(true);
+  const [statusText, setStatusText] = useState("Loading outputs...");
+  const pendingCurrentIdRef = useRef<string | null>(null);
+
+  const {
+    data: rowsData,
+    isFetching: loading,
+    error: loadError,
+    dataUpdatedAt,
+    refetch
+  } = useGenerations({ status: "done", limit: 100, include_urls: true });
+  const rows = rowsData ?? [];
+
+  const visibleRows = useMemo(
+    () => rows.filter((row) => row.status === "done" && !!row.output_path),
+    [rows]
+  );
+
+  const currentRow = visibleRows[index] ?? null;
+  const currentUrl = currentRow?.download_url ?? null;
+
+  function loadOutputs() {
+    pendingCurrentIdRef.current = visibleRows[index]?.id ?? null;
+    return refetch();
+  }
+
+  useEffect(() => {
+    if (!rowsData) return;
+    const lastId = pendingCurrentIdRef.current;
+    pendingCurrentIdRef.current = null;
+
+    const preservedIndex = lastId ? visibleRows.findIndex((row) => row.id === lastId) : -1;
+    setIndex(preservedIndex >= 0 ? preservedIndex : 0);
+  }, [rowsData]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (loadError) {
+      setStatusText(`Failed to load outputs: ${loadError instanceof Error ? loadError.message : "Unknown error"}`);
+      return;
+    }
+    setStatusText(rows.length ? "Carousel ready" : "No outputs available.");
+  }, [loading, loadError, rows.length]);
+
+  useEffect(() => {
+    if (!autoAdvance || visibleRows.length <= 1) return;
+    const timer = window.setInterval(() => {
+      if (dataUpdatedAt && Date.now() - dataUpdatedAt > URL_REFRESH_THRESHOLD_MS) {
+        void loadOutputs();
+        return;
+      }
+      setIndex((prev) => (prev + 1) % visibleRows.length);
+    }, AUTO_ADVANCE_MS);
+    return () => window.clearInterval(timer);
+  }, [autoAdvance, visibleRows.length, dataUpdatedAt]);
+
+  function goPrev() {
+    if (!visibleRows.length) return;
+    setIndex((prev) => (prev - 1 + visibleRows.length) % visibleRows.length);
+  }
+
+  function goNext() {
+    if (!visibleRows.length) return;
+    setIndex((prev) => (prev + 1) % visibleRows.length);
+  }
+
+  return (
+    <main className="screen carousel-screen">
+      <section className="page-shell carousel-shell">
+        <header className="page-header">
+          <div>
+            <h1>Carousel Mode</h1>
+            <p className="muted-light">
+              {statusText}
+              {visibleRows.length > 1 && autoAdvance ? ` - Auto ${AUTO_ADVANCE_MS / 1000}s` : ""}
+            </p>
+          </div>
+        </header>
+
+        <section className="carousel-viewer" onClick={goNext} role="button" tabIndex={0}>
+          {loading ? (
+            <div className="loading-box dark">
+              <div className="spinner" />
+            </div>
+          ) : !currentRow ? (
+            <div className="loading-box dark">
+              <p className="tiny muted-light">No output images available.</p>
+            </div>
+          ) : currentUrl ? (
+            <img src={currentUrl} alt={`Output ${currentRow.id}`} />
+          ) : (
+            <div className="loading-box dark">
+              <div className="spinner" />
+            </div>
+          )}
+        </section>
+
+        <footer className="row">
+          <button className="btn btn-light flex-1" onClick={goPrev} disabled={!visibleRows.length}>
+            Previous
+          </button>
+          <span className="counter-chip">
+            {visibleRows.length ? `${index + 1} / ${visibleRows.length}` : "0 / 0"}
+          </span>
+          <button className="btn btn-light flex-1" onClick={goNext} disabled={!visibleRows.length}>
+            Next
+          </button>
+        </footer>
+
+        <div className="row">
+          <label className="switch-row">
+            <input
+              type="checkbox"
+              checked={autoAdvance}
+              onChange={(event) => setAutoAdvance(event.target.checked)}
+            />
+            <span>Auto advance</span>
+          </label>
+          <button className="btn btn-dark" onClick={loadOutputs} disabled={loading}>
+            {loading ? "Refreshing..." : "Refresh"}
+          </button>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\pages\CatalogPage.tsx ===
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+
+import { useAuth } from "../lib/auth";
+import { useGarmentTypes, useGenerations } from "../lib/queries";
+import type { GarmentType, GenerationRow } from "../lib/types";
+
+const SHARE_CONCURRENCY = 4;
+
+type GenerationTileProps = {
+  row: GenerationRow;
+  onOpen: (row: GenerationRow) => void;
+  selectMode: boolean;
+  isSelected: boolean;
+  onSelectToggle: (id: string) => void;
+};
+
+function RefreshIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden focusable="false">
+      <path
+        d="M20 11a8 8 0 1 1-2.34-5.66M20 4v6h-6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function getFabricSummaryLabel(row: GenerationRow) {
+  const label = row.fabric_summary_label?.trim();
+  if (!label) return "Garment";
+  // Remove ": unknown" or ":unknown" suffix if present
+  return label.replace(/:\s*unknown$/i, "").trim() || "Garment";
+}
+
+function GenerationTile({ row, onOpen, selectMode, isSelected, onSelectToggle }: GenerationTileProps) {
+  return (
+    <article
+      className="catalog-tile"
+      style={{
+        outline: isSelected ? "2.5px solid #C9A84C" : "none",
+        outlineOffset: "-2px",
+        position: "relative",
+      }}
+    >
+      {isSelected && (
+        <div style={{
+          position: "absolute",
+          top: "8px",
+          right: "8px",
+          width: "22px",
+          height: "22px",
+          borderRadius: "50%",
+          background: "#C9A84C",
+          border: "2px solid white",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 2,
+          fontSize: "12px",
+          color: "#1B1B2F",
+          fontWeight: 700,
+        }}>âœ“</div>
+      )}
+      <button className="catalog-image-btn" onClick={() => {
+        if (selectMode) onSelectToggle(row.id);
+        else onOpen(row);
+      }}>
+        {row.thumb_url ? (
+          <img
+            className="catalog-image"
+            src={row.thumb_url}
+            alt={getFabricSummaryLabel(row)}
+            loading="lazy"
+            decoding="async"
+            style={{ aspectRatio: "3/4", objectFit: "cover" }}
+          />
+        ) : (
+          <div className="image-placeholder">
+            <div className="spinner spinner-small" />
+          </div>
+        )}
+      </button>
+
+      <div className="catalog-meta-row">
+        <p className="catalog-garment-label">{getFabricSummaryLabel(row)}</p>
+      </div>
+    </article>
+  );
+}
+
+export function CatalogPage() {
+  const { accessToken } = useAuth();
+  const navigate = useNavigate();
+
+  const [selectedGarmentId, setSelectedGarmentId] = useState("");
+  const [statusText, setStatusText] = useState("Select a garment type to view catalog");
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [sharing, setSharing] = useState(false);
+
+  const {
+    data: garmentTypesData,
+    isLoading: loadingGarments,
+    error: garmentTypesError
+  } = useGarmentTypes();
+  const garmentTypes = garmentTypesData ?? [];
+
+  const selectedGarment = useMemo(
+    () => garmentTypes.find((garment) => garment.id === selectedGarmentId) ?? null,
+    [garmentTypes, selectedGarmentId]
+  );
+
+  const {
+    data: generationRowsData,
+    isFetching: loadingRows,
+    error: generationsError,
+    refetch: refetchGenerations
+  } = useGenerations(
+    { status: "done", folder_id: selectedGarmentId, limit: 100, include_urls: true },
+    { enabled: !!selectedGarmentId }
+  );
+  const generationRows = generationRowsData ?? [];
+
+  const visibleRows = useMemo(
+    () => generationRows.filter((row) => row.status === "done" && !!row.output_path),
+    [generationRows]
+  );
+
+  useEffect(() => {
+    if (loadingGarments) return;
+    if (garmentTypesError) {
+      setStatusText(
+        `Failed to load garment types: ${garmentTypesError instanceof Error ? garmentTypesError.message : "Unknown error"}`
+      );
+      return;
+    }
+    if (!selectedGarmentId) {
+      setStatusText(garmentTypes.length ? "Select a garment type to view catalog" : "No garment types found");
+    }
+  }, [loadingGarments, garmentTypesError, garmentTypes.length, selectedGarmentId]);
+
+  useEffect(() => {
+    if (!selectedGarmentId) {
+      setStatusText("Select a garment type to view catalog");
+      return;
+    }
+    if (loadingRows) return;
+    if (generationsError) {
+      setStatusText(`Failed to load catalog: ${generationsError instanceof Error ? generationsError.message : "Unknown error"}`);
+      return;
+    }
+    setStatusText(generationRows.length ? `Loaded ${generationRows.length} look(s)` : "No looks generated for this garment yet");
+  }, [selectedGarmentId, loadingRows, generationsError, generationRows.length]);
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  };
+
+  const handleBulkShare = async () => {
+    if (!accessToken || selectedIds.size === 0) return;
+    setSharing(true);
+    try {
+      const ids = Array.from(selectedIds);
+      const files: (File | null)[] = new Array(ids.length).fill(null);
+      let cursor = 0;
+
+      async function worker() {
+        while (cursor < ids.length) {
+          const index = cursor++;
+          const id = ids[index];
+          const url = generationRows.find((row) => row.id === id)?.download_url;
+          if (!url) continue;
+          try {
+            const response = await fetch(url);
+            const blob = await response.blob();
+            files[index] = new File([blob], `ai-vastra-look-${index + 1}.jpg`, { type: "image/jpeg" });
+          } catch {
+            // skip failed
+          }
+        }
+      }
+
+      await Promise.all(
+        Array.from({ length: Math.min(SHARE_CONCURRENCY, ids.length) }, () => worker())
+      );
+
+      const validFiles = files.filter((file): file is File => !!file);
+      if (validFiles.length === 0) return;
+      if (navigator.share && navigator.canShare({ files: validFiles })) {
+        await navigator.share({ files: validFiles });
+      } else {
+        for (const file of validFiles) {
+          const url = URL.createObjectURL(file);
+          window.open(url, "_blank");
+        }
+      }
+      exitSelectMode();
+    } catch {
+      // cancelled or error
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  function openViewer(row: GenerationRow) {
+    const params = new URLSearchParams({
+      generationId: row.id,
+      mode: "catalog"
+    });
+
+    if (selectedGarment?.name) {
+      params.set("catalogFolderName", selectedGarment.name);
+    }
+
+    navigate(`/output-viewer?${params.toString()}`);
+  }
+
+  return (
+    <main className="screen catalog-screen">
+      <section className="catalog-shell">
+        <header className="catalog-header">
+          <div className="catalog-header-left">
+            <div className="catalog-title-wrap">
+              <h1 className="catalog-title">Lookbook</h1>
+              <p className="catalog-subtitle">{selectedGarment ? `${visibleRows.length} looks` : "Style"}</p>
+            </div>
+          </div>
+
+          <div className="catalog-header-actions">
+            <button
+              className="catalog-icon-btn"
+              onClick={() => void refetchGenerations()}
+              disabled={loadingRows || !selectedGarment}
+              aria-label="Refresh"
+              title="Refresh"
+            >
+              <RefreshIcon />
+            </button>
+            <button
+              onClick={() => {
+                if (selectMode) exitSelectMode();
+                else setSelectMode(true);
+              }}
+              style={{
+                width: "34px",
+                height: "34px",
+                borderRadius: "50%",
+                border: "0.5px solid var(--border)",
+                background: selectMode ? "#1B1B2F" : "var(--white)",
+                cursor: "pointer",
+                display: "grid",
+                placeItems: "center",
+                color: selectMode ? "#C9A84C" : "var(--text-muted)",
+              }}
+              aria-label="Select images"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16"
+                fill="none" stroke="currentColor"
+                strokeWidth="2" strokeLinecap="round"
+                strokeLinejoin="round">
+                <circle cx="12" cy="12" r="9"/>
+                <path d="M8 12l3 3 5-5"/>
+              </svg>
+            </button>
+          </div>
+        </header>
+
+        <section className="card stack-sm">
+          <h2>Select Style</h2>
+          <div style={{
+            display: "flex",
+            gap: "8px",
+            overflowX: "auto",
+            scrollbarWidth: "none",
+            msOverflowStyle: "none",
+            paddingBottom: "4px",
+            flexWrap: "nowrap",
+          }}>
+            {garmentTypes.map((garment) => (
+              <button
+                key={garment.id}
+                className={`style-pill ${selectedGarmentId === garment.id ? "active" : ""}`}
+                style={{ flexShrink: 0 }}
+                type="button"
+                onClick={() => setSelectedGarmentId(garment.id)}
+                disabled={loadingGarments}
+              >
+                {garment.name}
+              </button>
+            ))}
+          </div>
+          {loadingGarments ? <p className="tiny muted">Loading garment types...</p> : null}
+          <p className="tiny muted">{statusText}</p>
+        </section>
+
+        {!selectedGarment ? (
+          <div className="empty-box">Select a style to view lookbook</div>
+        ) : loadingRows ? (
+          <div className="loading-box">
+            <div className="spinner" />
+          </div>
+        ) : visibleRows.length === 0 ? (
+          <div className="empty-box">No looks generated for this garment yet</div>
+        ) : (
+          <section className="catalog-grid">
+            {visibleRows.map((row) => (
+              <GenerationTile
+                key={row.id}
+                row={row}
+                onOpen={openViewer}
+                selectMode={selectMode}
+                isSelected={selectedIds.has(row.id)}
+                onSelectToggle={toggleSelect}
+              />
+            ))}
+          </section>
+        )}
+
+        {selectMode && (
+          <div style={{
+            position: "fixed",
+            bottom: "65px",
+            left: 0,
+            right: 0,
+            background: "#1B1B2F",
+            padding: "12px 16px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "12px",
+            zIndex: 40,
+          }}>
+            <button
+              onClick={exitSelectMode}
+              style={{
+                background: "transparent",
+                border: "0.5px solid rgba(201,168,76,0.4)",
+                borderRadius: "10px",
+                color: "#C9A84C",
+                padding: "8px 16px",
+                fontSize: "13px",
+                fontWeight: 600,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              Cancel
+            </button>
+            <span style={{
+              color: "rgba(201,168,76,0.7)",
+              fontSize: "13px",
+              fontWeight: 600,
+            }}>
+              {selectedIds.size} selected
+            </span>
+            <button
+              onClick={handleBulkShare}
+              disabled={sharing || selectedIds.size === 0}
+              style={{
+                background: "#C9A84C",
+                border: "none",
+                borderRadius: "10px",
+                color: "#1B1B2F",
+                padding: "8px 16px",
+                fontSize: "13px",
+                fontWeight: 700,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                opacity: sharing ? 0.6 : 1,
+              }}
+            >
+              {sharing
+                ? "Preparing..."
+                : `Share ${selectedIds.size} look${selectedIds.size > 1 ? "s" : ""}`
+              }
+            </button>
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\pages\FabricSiloPage.tsx ===
+import { useQueryClient } from "@tanstack/react-query";
+import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+
+import { apiFetch } from "../lib/api";
+import { useAuth } from "../lib/auth";
+import { compressImage } from "../lib/compressImage";
+import { useFabricImages, useMe } from "../lib/queries";
+import { createSignedUrl, uploadToStorage } from "../lib/storage";
+import type { FabricImageRow } from "../lib/types";
+import { guessFileExtension, makeRandomSuffix } from "../lib/utils";
+
+type PreviewMap = Record<string, string>;
+
+type FabricTileProps = {
+  row: FabricImageRow;
+  imageUrl?: string;
+  pickerMode: boolean;
+  onSelect: (row: FabricImageRow) => void;
+};
+
+function RefreshIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden focusable="false">
+      <path
+        d="M20 11a8 8 0 1 1-2.34-5.66M20 4v6h-6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function getFabricLabel(row: FabricImageRow) {
+  const label = row.original_filename?.trim();
+  return label || "Fabric";
+}
+
+function FabricTile({ row, imageUrl, pickerMode, onSelect, onVisible }: FabricTileProps & { onVisible: (id: string) => void }) {
+  const tileRef = useRef<HTMLElement | null>(null);
+  const observedRef = useRef(false);
+
+  useEffect(() => {
+    const el = tileRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting && !observedRef.current) {
+            observedRef.current = true;
+            onVisible(row.id);
+            observer.disconnect();
+          }
+        }
+      },
+      { rootMargin: "200px" }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [row.id, onVisible]);
+
+  return (
+    <article ref={tileRef} className="catalog-tile">
+      <button
+        className="catalog-image-btn"
+        type="button"
+        onClick={pickerMode ? () => onSelect(row) : undefined}
+      >
+        {imageUrl ? (
+          <img
+            className="catalog-image"
+            src={imageUrl}
+            alt="fabric"
+          />
+        ) : (
+          <div className="image-placeholder">
+            <div className="spinner spinner-small" />
+          </div>
+        )}
+      </button>
+
+      <div className="catalog-meta-row">
+        <p className="catalog-garment-label">{getFabricLabel(row)}</p>
+        {pickerMode ? (
+          <button className="catalog-chip-btn catalog-chip-download" type="button" onClick={() => onSelect(row)}>
+            Select
+          </button>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+export function FabricSiloPage() {
+  const { accessToken } = useAuth();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const queryClient = useQueryClient();
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
+
+  const pickerMode = searchParams.get("picker") === "true" || searchParams.get("picker") === "1";
+
+  const { data: me, error: meError } = useMe();
+  const shopContext = me ?? null;
+
+  const {
+    data: fabricImagesData,
+    isLoading: loadingRows,
+    error: fabricImagesError,
+    refetch: refetchFabricImages
+  } = useFabricImages();
+  const rows = fabricImagesData ?? [];
+
+  const [previewUrls, setPreviewUrls] = useState<PreviewMap>({});
+  const [statusText, setStatusText] = useState("Loading fabric silo...");
+  const skipStatusUpdateRef = useRef(false);
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [draftFile, setDraftFile] = useState<File | null>(null);
+  const [draftPreviewUrl, setDraftPreviewUrl] = useState<string | null>(null);
+  const [draftFabricCode, setDraftFabricCode] = useState("");
+  const [draftFabricColor, setDraftFabricColor] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const pageTitle = pickerMode ? "Select a Cloth" : "My Fabrics";
+
+  useEffect(() => {
+    if (!draftPreviewUrl?.startsWith("blob:")) return;
+    return () => URL.revokeObjectURL(draftPreviewUrl);
+  }, [draftPreviewUrl]);
+
+  useEffect(() => {
+    if (meError) {
+      setStatusText(`Failed to load shop context: ${meError instanceof Error ? meError.message : "Unknown error"}`);
+    }
+  }, [meError]);
+
+  useEffect(() => {
+    if (loadingRows) return;
+    if (skipStatusUpdateRef.current) {
+      skipStatusUpdateRef.current = false;
+      return;
+    }
+    if (fabricImagesError) {
+      setStatusText(`Failed to load fabric silo: ${fabricImagesError instanceof Error ? fabricImagesError.message : "Unknown error"}`);
+      return;
+    }
+    setStatusText(rows.length ? `Loaded ${rows.length} fabric(s)` : "No fabrics saved yet.");
+  }, [loadingRows, fabricImagesError, rows.length]);
+
+  async function loadRows() {
+    setPreviewUrls({});
+    await refetchFabricImages();
+  }
+
+  function resetDraft() {
+    setDraftFile(null);
+    setDraftPreviewUrl(null);
+    setDraftFabricCode("");
+    setDraftFabricColor("");
+  }
+
+  function closeAddSheet() {
+    setAddOpen(false);
+    resetDraft();
+  }
+
+  async function handleDraftFilePicked(file: File | null) {
+    if (!file) return;
+    const compressed = await compressImage(file, 1600);
+    setDraftFile(compressed);
+    setDraftPreviewUrl(URL.createObjectURL(compressed));
+    setStatusText("Fabric image selected.");
+  }
+
+  function onCameraChange(event: ChangeEvent<HTMLInputElement>) {
+    void handleDraftFilePicked(event.target.files?.[0] ?? null);
+    event.target.value = "";
+  }
+
+  function onGalleryChange(event: ChangeEvent<HTMLInputElement>) {
+    void handleDraftFilePicked(event.target.files?.[0] ?? null);
+    event.target.value = "";
+  }
+
+  async function handleSaveFabric() {
+    if (!accessToken || !shopContext || !draftFile) return;
+
+    const fabricCode = draftFabricCode.trim();
+    if (!fabricCode) {
+      setStatusText("Fabric Code is required.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const ext = guessFileExtension(draftFile.name, draftFile.type);
+      const filename = `${Date.now()}-${makeRandomSuffix()}.${ext}`;
+      const storagePath = `${shopContext.shop_id}/${filename}`;
+
+      setStatusText("Saving fabric...");
+      await uploadToStorage("fabric-images", storagePath, draftFile);
+
+      const row = await apiFetch<FabricImageRow>("/fabric-images", accessToken, {
+        method: "POST",
+        body: JSON.stringify({
+          storage_path: storagePath,
+          original_filename: fabricCode,
+          mime_type: draftFile.type || "image/jpeg",
+          file_size_bytes: draftFile.size,
+          width: null,
+          height: null
+        })
+      });
+
+      createSignedUrl("fabric-images", row.storage_path, 3600)
+        .then((url) => {
+          setPreviewUrls((prev) => ({ ...prev, [row.id]: url }));
+        })
+        .catch((err) => {
+          console.error("Signed URL failed for", row.storage_path, err);
+        });
+
+      skipStatusUpdateRef.current = true;
+      queryClient.setQueryData<FabricImageRow[]>(["fabric-images"], (prev) => [row, ...(prev ?? [])]);
+      void queryClient.invalidateQueries({ queryKey: ["fabric-images"] });
+
+      setStatusText(draftFabricColor.trim() ? `Saved ${fabricCode} (${draftFabricColor.trim()}).` : `Saved ${fabricCode}.`);
+      closeAddSheet();
+    } catch (err) {
+      setStatusText(`Save failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function selectFabric(row: FabricImageRow) {
+    navigate(`/generate?fabric_image_id=${encodeURIComponent(row.id)}`);
+  }
+
+  const handleTileVisible = useCallback(async (id: string) => {
+    if (!accessToken) return;
+    const row = rows.find((r) => r.id === id);
+    if (!row) return;
+    try {
+      const url = await createSignedUrl("fabric-images", row.storage_path, 3600);
+      setPreviewUrls((prev) => ({ ...prev, [id]: url }));
+    } catch (err) {
+      console.error("Signed URL failed for", row.storage_path, err);
+    }
+  }, [accessToken, rows]);
+
+  return (
+    <main className="screen catalog-screen">
+      <section className="catalog-shell">
+        <header className="catalog-header">
+          <div className="catalog-header-left">
+            <div className="catalog-title-wrap">
+              <h1 className="catalog-title">{pageTitle}</h1>
+              <p className="catalog-subtitle">{rows.length} cloths saved</p>
+            </div>
+          </div>
+
+          <div className="catalog-header-actions">
+            <button
+              className="catalog-icon-btn"
+              onClick={() => void loadRows()}
+              disabled={loadingRows}
+              aria-label="Refresh"
+              title="Refresh"
+            >
+              <RefreshIcon />
+            </button>
+          </div>
+        </header>
+
+        <section className="card stack-sm">
+          <p className="tiny muted">{statusText}</p>
+        </section>
+
+        {addOpen ? (
+          <section className="card stack-sm">
+            <h2>Add New Cloth</h2>
+
+            <div className="row">
+              <button
+                className="btn btn-light flex-1"
+                type="button"
+                onClick={() => cameraInputRef.current?.click()}
+                disabled={saving}
+              >
+                Capture
+              </button>
+              <button
+                className="btn btn-light flex-1"
+                type="button"
+                onClick={() => galleryInputRef.current?.click()}
+                disabled={saving}
+              >
+                Gallery
+              </button>
+            </div>
+
+            {draftPreviewUrl ? (
+              <img className="preview-image" src={draftPreviewUrl} alt="Fabric preview" />
+            ) : (
+              <div className="preview-placeholder">Capture or choose a fabric image</div>
+            )}
+
+            <label className="field">
+              <span>Cloth Code <strong>*</strong></span>
+              <input
+                type="text"
+                value={draftFabricCode}
+                onChange={(event) => setDraftFabricCode(event.target.value)}
+                placeholder="e.g. F123"
+                disabled={saving}
+              />
+            </label>
+
+            <label className="field">
+              <span>Colour</span>
+              <input
+                type="text"
+                value={draftFabricColor}
+                onChange={(event) => setDraftFabricColor(event.target.value)}
+                placeholder="e.g. Navy Blue"
+                disabled={saving}
+              />
+            </label>
+
+            <div className="row">
+              <button
+                className="btn btn-dark flex-1"
+                type="button"
+                onClick={() => void handleSaveFabric()}
+                disabled={saving || !draftFile || !draftFabricCode.trim()}
+              >
+                {saving ? "Saving..." : "Save Cloth"}
+              </button>
+              <button className="btn btn-light flex-1" type="button" onClick={closeAddSheet} disabled={saving}>
+                Cancel
+              </button>
+            </div>
+
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              hidden
+              onChange={onCameraChange}
+            />
+            <input ref={galleryInputRef} type="file" accept="image/*" hidden onChange={onGalleryChange} />
+          </section>
+        ) : null}
+
+        {loadingRows ? (
+          <div className="loading-box">
+            <div className="spinner" />
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="empty-box">No cloths saved yet. Tap + to add your first cloth.</div>
+        ) : (
+          <section className="catalog-grid">
+            {rows.map((row) => (
+              <FabricTile
+                key={row.id}
+                row={row}
+                imageUrl={previewUrls[row.id]}
+                pickerMode={pickerMode}
+                onSelect={selectFabric}
+                onVisible={handleTileVisible}
+              />
+            ))}
+          </section>
+        )}
+
+        <div className="fab-wrap">
+          <button
+            className="fab-btn"
+            type="button"
+            onClick={() => setAddOpen(true)}
+            disabled={saving}
+            aria-label="Add fabric"
+            title="Add fabric"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden focusable="false">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\pages\GeneratePage.tsx ===
+import { useQueryClient } from "@tanstack/react-query";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+
+import { CustomerConsentModal } from "../components/CustomerConsentModal";
+import { TryOnFlow } from "../components/TryOnFlow";
+import { apiFetch, apiFetchBinary } from "../lib/api";
+import { useAuth } from "../lib/auth";
+import { useGarmentTypes, useMe } from "../lib/queries";
+import { subscribeToGeneration } from "../lib/realtime";
+import { createSignedUrl, uploadToStorage } from "../lib/storage";
+import type {
+  ApplyToTarget,
+  FabricImageRow,
+  GarmentType,
+  GenerationCreateResponse,
+  GenerationFabricAssignmentPayload,
+  GenerationRow,
+  HeroImageRow
+} from "../lib/types";
+import { compressImage } from "../lib/compressImage";
+import { guessFileExtension, isPendingStatus, makeRandomSuffix } from "../lib/utils";
+
+function mapGarmentToApplyTo(garment: GarmentType): ApplyToTarget {
+  const context = `${garment.name} ${garment.prompt_template}`.toLowerCase();
+
+  if (context.includes("shirt")) return "shirt";
+  if (context.includes("pant") || context.includes("trouser")) return "pant";
+  if (context.includes("koti") || context.includes("vest")) return "koti";
+  if (context.includes("upper")) return "suit_upper";
+
+  return "suit_full_body";
+}
+
+const FINE_CHECKS_SVG = `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <rect width="64" height="64" fill="#B8C8E0"/>
+  ${Array.from({ length: 15 }, (_, i) => `<line x1="0" y1="${(i + 1) * 4}" x2="64" y2="${(i + 1) * 4}" stroke="#2B4B8A" stroke-width="0.7" opacity="0.7"/>`).join("")}
+  ${Array.from({ length: 15 }, (_, i) => `<line x1="${(i + 1) * 4}" y1="0" x2="${(i + 1) * 4}" y2="64" stroke="#2B4B8A" stroke-width="0.7" opacity="0.7"/>`).join("")}
+</svg>`;
+
+const MEDIUM_CHECKS_SVG = `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <rect width="64" height="64" fill="#B8C8E0"/>
+  ${Array.from({ length: 7 }, (_, i) => `<line x1="0" y1="${(i + 1) * 8}" x2="64" y2="${(i + 1) * 8}" stroke="#2B4B8A" stroke-width="1.5" opacity="0.8"/>`).join("")}
+  ${Array.from({ length: 7 }, (_, i) => `<line x1="${(i + 1) * 8}" y1="0" x2="${(i + 1) * 8}" y2="64" stroke="#2B4B8A" stroke-width="1.5" opacity="0.8"/>`).join("")}
+</svg>`;
+
+const BOLD_CHECKS_SVG = `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <rect width="64" height="64" fill="#B8C8E0"/>
+  ${Array.from({ length: 3 }, (_, i) => `<line x1="0" y1="${(i + 1) * 16}" x2="64" y2="${(i + 1) * 16}" stroke="#2B4B8A" stroke-width="3" opacity="0.9"/>`).join("")}
+  ${Array.from({ length: 3 }, (_, i) => `<line x1="${(i + 1) * 16}" y1="0" x2="${(i + 1) * 16}" y2="64" stroke="#2B4B8A" stroke-width="3" opacity="0.9"/>`).join("")}
+</svg>`;
+
+export function GeneratePage() {
+  const { accessToken } = useAuth();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const queryClient = useQueryClient();
+
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
+
+  const pickedFabricImageId =
+    searchParams.get("fabric_image_id") ?? searchParams.get("selectedFabricImageId") ?? "";
+
+  const { data: me } = useMe();
+  const {
+    data: garmentTypesData,
+    isLoading: loadingGarmentTypes,
+    error: garmentTypesError,
+    refetch: refetchGarmentTypes
+  } = useGarmentTypes();
+  const garmentTypes = garmentTypesData ?? [];
+  const shopContext = me ?? null;
+  const creditBalance = me?.credits_balance !== null && me?.credits_balance !== undefined ? String(me.credits_balance) : "-";
+  const [selectedGarmentId, setSelectedGarmentId] = useState("");
+
+  const [fabricFile, setFabricFile] = useState<File | null>(null);
+  const [existingFabricImage, setExistingFabricImage] = useState<FabricImageRow | null>(null);
+  const [fabricPreviewUrl, setFabricPreviewUrl] = useState<string | null>(null);
+  const [saveToSilo, setSaveToSilo] = useState(false);
+  const [fabricCode, setFabricCode] = useState("");
+  const [fabricColor, setFabricColor] = useState("");
+  const [hasPattern, setHasPattern] = useState(false);
+  const [fabricScale, setFabricScale] = useState<"fine" | "medium" | "bold" | null>(null);
+
+  const [heroChangeOpen, setHeroChangeOpen] = useState(false);
+  const [heroReplacementFile, setHeroReplacementFile] = useState<File | null>(null);
+  const [heroReplacementPreviewUrl, setHeroReplacementPreviewUrl] = useState<string | null>(null);
+
+  const [loadingPickedFabric, setLoadingPickedFabric] = useState(false);
+  const [creatingGeneration, setCreatingGeneration] = useState(false);
+  const [visualizingGenerationId, setVisualizingGenerationId] = useState<string | null>(null);
+  const [statusText, setStatusText] = useState("Preparing Generate screen...");
+  const [showConsentModal, setShowConsentModal] = useState(false);
+  const [showTryOnFlow, setShowTryOnFlow] = useState(false);
+
+  const selectedGarment = useMemo(
+    () => garmentTypes.find((garment) => garment.id === selectedGarmentId) ?? null,
+    [garmentTypes, selectedGarmentId]
+  );
+
+  const selectedFabricImageId = existingFabricImage?.id ?? "";
+  const selectedHeroPreviewUrl =
+    heroReplacementPreviewUrl || selectedGarment?.hero_image_signed_url || null;
+
+  const fabricReady = !!fabricFile || !!existingFabricImage?.id;
+  const heroReady = !!heroReplacementFile || !!selectedGarment?.default_hero_image_id;
+  const actionBusy = loadingGarmentTypes || loadingPickedFabric || creatingGeneration || !!visualizingGenerationId;
+  const canGenerate =
+    fabricReady &&
+    !!selectedGarment &&
+    heroReady &&
+    (!saveToSilo || !!fabricCode.trim()) &&
+    !actionBusy;
+
+  useEffect(() => {
+    if (!fabricPreviewUrl?.startsWith("blob:")) return;
+    return () => URL.revokeObjectURL(fabricPreviewUrl);
+  }, [fabricPreviewUrl]);
+
+  useEffect(() => {
+    if (!heroReplacementPreviewUrl?.startsWith("blob:")) return;
+    return () => URL.revokeObjectURL(heroReplacementPreviewUrl);
+  }, [heroReplacementPreviewUrl]);
+
+  useEffect(() => {
+    if (loadingGarmentTypes) return;
+    if (garmentTypesError) {
+      setStatusText(`Load failed: ${garmentTypesError instanceof Error ? garmentTypesError.message : "Unknown error"}`);
+      return;
+    }
+    setStatusText(garmentTypes.length ? "Ready to generate." : "No garment types found.");
+  }, [loadingGarmentTypes, garmentTypesError, garmentTypes.length]);
+
+  useEffect(() => {
+    if (!accessToken || !pickedFabricImageId) return;
+    let cancelled = false;
+
+    async function loadPickedFabric() {
+      if (!accessToken) return;
+      setLoadingPickedFabric(true);
+      try {
+        setStatusText("Loading selected fabric...");
+        const row = await apiFetch<FabricImageRow>(
+          `/fabric-images/${encodeURIComponent(pickedFabricImageId)}`,
+          accessToken,
+          { method: "GET" }
+        ).catch(() => null);
+        if (cancelled) return;
+
+        if (!row) {
+          setStatusText("Selected fabric was not found.");
+          return;
+        }
+
+        const signed = await createSignedUrl("fabric-images", row.storage_path, 3600).catch(() => null);
+        if (cancelled) return;
+
+        setExistingFabricImage(row);
+        setFabricFile(null);
+        setFabricPreviewUrl(signed);
+        setHasPattern(false);
+        setFabricScale(null);
+        setStatusText("Fabric selected from silo.");
+      } catch (err) {
+        if (!cancelled) {
+          setStatusText(`Selected fabric failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+        }
+      } finally {
+        if (!cancelled) setLoadingPickedFabric(false);
+      }
+    }
+
+    void loadPickedFabric();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, pickedFabricImageId]);
+
+  useEffect(() => {
+    if (!accessToken || !visualizingGenerationId) return;
+    let cancelled = false;
+
+    const handleStatusRow = (row: { id: string; status: string; error: string | null }) => {
+      if (cancelled) return;
+
+      if (row.status === "done") {
+        setVisualizingGenerationId(null);
+        setStatusText("Generation ready.");
+        navigate(`/output-viewer?generationId=${encodeURIComponent(row.id)}`);
+        return;
+      }
+
+      if (row.status === "failed") {
+        setVisualizingGenerationId(null);
+        setStatusText(row.error || "Generation failed.");
+        return;
+      }
+
+      if (isPendingStatus(row.status)) {
+        setStatusText("Generating look...");
+      }
+    };
+
+    const poll = async () => {
+      try {
+        const row = await apiFetch<GenerationRow>(`/generations/${visualizingGenerationId}`, accessToken, {
+          method: "GET"
+        });
+        handleStatusRow(row);
+      } catch (err) {
+        if (!cancelled) {
+          setStatusText(`Generation status failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+        }
+      }
+    };
+
+    void poll();
+    const unsubscribe = subscribeToGeneration(visualizingGenerationId, handleStatusRow);
+    const timer = window.setInterval(poll, 10000);
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      window.clearInterval(timer);
+    };
+  }, [accessToken, navigate, visualizingGenerationId]);
+
+  function clearFabricSelection() {
+    setFabricFile(null);
+    setExistingFabricImage(null);
+    setFabricPreviewUrl(null);
+    setHasPattern(false);
+    setFabricScale(null);
+  }
+
+  async function handleFabricPicked(file: File | null) {
+    if (!file) return;
+    const compressed = await compressImage(file, 1600);
+    setFabricFile(compressed);
+    setExistingFabricImage(null);
+    setFabricPreviewUrl(URL.createObjectURL(compressed));
+    setHasPattern(false);
+    setFabricScale(null);
+    setStatusText("Fabric image selected.");
+  }
+
+  function onFabricCameraChange(event: ChangeEvent<HTMLInputElement>) {
+    void handleFabricPicked(event.target.files?.[0] ?? null);
+    event.target.value = "";
+  }
+
+  function onFabricGalleryChange(event: ChangeEvent<HTMLInputElement>) {
+    void handleFabricPicked(event.target.files?.[0] ?? null);
+    event.target.value = "";
+  }
+
+  async function onHeroReplacementChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    if (!file) return;
+
+    const compressed = await compressImage(file, 1600);
+    setHeroReplacementFile(compressed);
+    setHeroReplacementPreviewUrl(URL.createObjectURL(compressed));
+    setStatusText("Replacement hero selected for this generation.");
+  }
+
+  async function uploadFabricImage(file: File) {
+    if (!accessToken || !shopContext) throw new Error("Shop context is still loading.");
+
+    const ext = guessFileExtension(file.name, file.type);
+    const filename = `${Date.now()}-${makeRandomSuffix()}.${ext}`;
+    const storagePath = `${shopContext.shop_id}/${filename}`;
+    const originalFilename = saveToSilo && fabricCode.trim() ? fabricCode.trim() : file.name || filename;
+
+    setStatusText(saveToSilo ? "Saving fabric image..." : "Uploading fabric image...");
+    await uploadToStorage("fabric-images", storagePath, file);
+
+    return apiFetch<FabricImageRow>("/fabric-images", accessToken, {
+      method: "POST",
+      body: JSON.stringify({
+        storage_path: storagePath,
+        original_filename: originalFilename,
+        mime_type: file.type || "image/jpeg",
+        file_size_bytes: file.size,
+        width: null,
+        height: null
+      })
+    });
+  }
+
+  async function uploadHeroReplacement(file: File, garment: GarmentType) {
+    if (!accessToken || !shopContext) throw new Error("Shop context is still loading.");
+
+    const ext = guessFileExtension(file.name, file.type);
+    const storagePath = `temp/${shopContext.shop_id}/${Date.now()}-${makeRandomSuffix()}.${ext}`;
+
+    setStatusText("Uploading temporary hero image...");
+    await uploadToStorage("hero-images", storagePath, file);
+
+    return apiFetch<HeroImageRow>("/hero-images", accessToken, {
+      method: "POST",
+      body: JSON.stringify({
+        folder_id: garment.id,
+        storage_path: storagePath,
+        original_filename: file.name || `hero-${Date.now()}.${ext}`,
+        mime_type: file.type || "image/jpeg",
+        file_size_bytes: file.size,
+        width: null,
+        height: null
+      })
+    });
+  }
+
+  async function ensureFabricImage() {
+    if (existingFabricImage?.id) return existingFabricImage;
+    if (fabricFile) return uploadFabricImage(fabricFile);
+    throw new Error("Select a fabric image first.");
+  }
+
+  async function ensureHeroImageId(garment: GarmentType) {
+    if (heroReplacementFile) {
+      const row = await uploadHeroReplacement(heroReplacementFile, garment);
+      return row.id;
+    }
+
+    if (garment.default_hero_image_id) return garment.default_hero_image_id;
+
+    throw new Error("This garment type has no default hero image. Use Change to select one.");
+  }
+
+  async function handleCreateGeneration() {
+    if (!accessToken || !selectedGarment) return;
+
+    setCreatingGeneration(true);
+    try {
+      const fabricImage = await ensureFabricImage();
+      const heroImageId = await ensureHeroImageId(selectedGarment);
+
+      const fabricAssignment: GenerationFabricAssignmentPayload = {
+        fabric_image_id: fabricImage.id,
+        apply_to: mapGarmentToApplyTo(selectedGarment),
+        fabric_code: saveToSilo ? fabricCode.trim() : "unknown",
+        fabric_color: saveToSilo ? fabricColor.trim() || null : null,
+        fabric_scale: hasPattern && fabricScale ? fabricScale : null
+      };
+
+      setStatusText("Creating generation job...");
+      const response = await apiFetch<GenerationCreateResponse>("/generations", accessToken, {
+        method: "POST",
+        body: JSON.stringify({
+          hero_image_id: heroImageId,
+          fabric_image_id: fabricImage.id,
+          fabrics: [fabricAssignment]
+        })
+      });
+
+      void queryClient.invalidateQueries({ queryKey: ["generations"] });
+
+      if (Number.isFinite(response.balance_after)) {
+        queryClient.setQueryData(["me"], (prev: typeof me) =>
+          prev ? { ...prev, credits_balance: response.balance_after } : prev
+        );
+      }
+      void queryClient.invalidateQueries({ queryKey: ["me"] });
+
+      setVisualizingGenerationId(response.id);
+      setStatusText("Generating look...");
+    } catch (err) {
+      setStatusText(`Generate failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setCreatingGeneration(false);
+    }
+  }
+
+  async function handleQuickTryOnSubmit(customerPhotoFile: File): Promise<string> {
+    if (!accessToken) throw new Error("Not authenticated");
+    if (!selectedFabricImageId && !fabricFile) {
+      throw new Error("Please select a fabric first");
+    }
+    if (!selectedGarmentId) {
+      throw new Error("Please select a garment type first");
+    }
+    if (!shopContext) {
+      throw new Error("Shop context is still loading.");
+    }
+
+    let fabricImageId = selectedFabricImageId;
+
+    if (!fabricImageId && fabricFile) {
+      const ext = guessFileExtension(fabricFile.name, fabricFile.type);
+      const path = `${shopContext.shop_id}/${Date.now()}-${makeRandomSuffix()}.${ext}`;
+      await uploadToStorage(
+        "fabric-images",
+        path,
+        fabricFile
+      );
+      const uploaded = await apiFetch<{ id: string }>(
+        "/fabric-images",
+        accessToken,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            storage_path: path,
+            original_filename: fabricFile.name,
+            mime_type: fabricFile.type,
+            file_size_bytes: fabricFile.size,
+          }),
+        }
+      );
+      fabricImageId = uploaded.id;
+    }
+
+    if (!fabricImageId) {
+      throw new Error("Could not resolve fabric image");
+    }
+
+    const compressedPhoto = await compressImage(customerPhotoFile, 1280);
+
+    const formData = new FormData();
+    formData.set("fabric_image_id", fabricImageId);
+    formData.set("folder_id", selectedGarmentId);
+    formData.set("consent_confirmed", "true");
+    formData.set("customer_photo", compressedPhoto);
+
+    const blob = await apiFetchBinary("/tryon/quick/v2", accessToken, {
+      method: "POST",
+      body: formData,
+    });
+
+    return URL.createObjectURL(blob);
+  }
+
+  return (
+    <main className="screen">
+      <section className="page-shell">
+        <header className="page-header">
+          <div>
+            <h1>Sew a New Look</h1>
+          </div>
+        </header>
+
+        <section className="card stack-sm">
+          <p className="tiny muted">{statusText}</p>
+        </section>
+
+        <section className="card stack-sm">
+          <h2>Choose Cloth</h2>
+
+          <div className="fabric-scroll">
+            <div className="fabric-tile">
+              <button
+                className="fabric-thumb-new"
+                type="button"
+                onClick={() => cameraInputRef.current?.click()}
+                disabled={actionBusy}
+                aria-label="Add new cloth"
+                title="Add new cloth"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden focusable="false">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+              <span className="fabric-label">New</span>
+            </div>
+
+            {fabricPreviewUrl ? (
+              <div className="fabric-tile">
+                <div style={{ position: "relative", display: "inline-block" }}>
+                  <img className="fabric-thumb selected" src={fabricPreviewUrl} alt="selected fabric" />
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      clearFabricSelection();
+                    }}
+                    style={{
+                      position: "absolute",
+                      top: "-6px",
+                      right: "-6px",
+                      width: "20px",
+                      height: "20px",
+                      borderRadius: "50%",
+                      background: "#1B1B2F",
+                      border: "2px solid var(--white)",
+                      color: "#C9A84C",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      lineHeight: 1,
+                      padding: 0
+                    }}
+                    aria-label="Remove fabric selection"
+                  >
+                    &times;
+                  </button>
+                </div>
+                <div className="fabric-label">
+                  {existingFabricImage?.original_filename?.trim() || fabricFile?.name || "Selected"}
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="row">
+            <button
+              className="btn btn-light flex-1"
+              type="button"
+              onClick={() => cameraInputRef.current?.click()}
+              disabled={actionBusy}
+            >
+              Capture
+            </button>
+            <button
+              className="btn btn-light flex-1"
+              type="button"
+              onClick={() => galleryInputRef.current?.click()}
+              disabled={actionBusy}
+            >
+              Gallery
+            </button>
+            <button
+              className="btn btn-light flex-1"
+              type="button"
+              onClick={() => navigate("/fabric-silo?picker=true")}
+              disabled={actionBusy}
+            >
+              Fabric Silo
+            </button>
+          </div>
+
+          <label className="silo-toggle-row">
+            <input
+              type="checkbox"
+              checked={saveToSilo}
+              onChange={(event) => setSaveToSilo(event.target.checked)}
+              disabled={actionBusy}
+            />
+            <span>Save new cloth to My Fabrics</span>
+          </label>
+
+          {/* Pattern selector */}
+          <div style={{
+            background: "var(--white)",
+            border: "0.5px solid var(--border)",
+            borderRadius: "12px",
+            padding: "12px"
+          }}>
+            <label style={{
+              display: "flex", alignItems: "center", gap: "10px", cursor: "pointer"
+            }}>
+              <input
+                type="checkbox"
+                checked={hasPattern}
+                onChange={(e) => {
+                  setHasPattern(e.target.checked);
+                  if (!e.target.checked) setFabricScale(null);
+                }}
+                style={{ width: "16px", height: "16px", accentColor: "#1B1B2F" }}
+              />
+              <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-primary)" }}>
+                This fabric has a pattern (checks, stripes, print)
+              </span>
+            </label>
+
+            {hasPattern && (
+              <div style={{ marginTop: "12px", display: "grid", gap: "8px" }}>
+                <span style={{
+                  fontSize: "11px", fontWeight: 600,
+                  color: "var(--text-muted)",
+                  textTransform: "uppercase", letterSpacing: "0.06em"
+                }}>
+                  How large is the pattern?
+                </span>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "8px" }}>
+                  {([
+                    { key: "fine", label: "Fine", hint: "Small, tight" },
+                    { key: "medium", label: "Medium", hint: "Classic size" },
+                    { key: "bold", label: "Bold", hint: "Large, wide" },
+                  ] as const).map((opt) => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => setFabricScale(opt.key)}
+                      style={{
+                        border: fabricScale === opt.key
+                          ? "2px solid #C9A84C"
+                          : "1px solid var(--border)",
+                        borderRadius: "12px",
+                        padding: "8px 6px",
+                        background: fabricScale === opt.key ? "#FDF6E8" : "var(--white)",
+                        cursor: "pointer",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}
+                    >
+                      <div style={{
+                        width: "56px", height: "56px", borderRadius: "8px",
+                        overflow: "hidden", border: "0.5px solid var(--border)"
+                      }}
+                        dangerouslySetInnerHTML={{
+                          __html:
+                            opt.key === "fine" ? FINE_CHECKS_SVG :
+                              opt.key === "medium" ? MEDIUM_CHECKS_SVG :
+                                BOLD_CHECKS_SVG
+                        }}
+                      />
+                      <span style={{
+                        fontSize: "12px", fontWeight: 600,
+                        color: fabricScale === opt.key ? "#8B6914" : "var(--text-primary)"
+                      }}>{opt.label}</span>
+                      <span style={{
+                        fontSize: "10px",
+                        color: "var(--text-muted)"
+                      }}>{opt.hint}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {saveToSilo ? (
+            <>
+              <label className="field">
+                <span>Fabric Code <strong>*</strong></span>
+                <input
+                  type="text"
+                  value={fabricCode}
+                  onChange={(event) => setFabricCode(event.target.value)}
+                  placeholder="e.g. F123"
+                  disabled={actionBusy}
+                />
+              </label>
+              <label className="field">
+                <span>Fabric Color (optional)</span>
+                <input
+                  type="text"
+                  value={fabricColor}
+                  onChange={(event) => setFabricColor(event.target.value)}
+                  placeholder="e.g. Navy Blue"
+                  disabled={actionBusy}
+                />
+              </label>
+            </>
+          ) : null}
+
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            hidden
+            onChange={onFabricCameraChange}
+          />
+          <input
+            ref={galleryInputRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={onFabricGalleryChange}
+          />
+        </section>
+
+        <section className="card stack-sm">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+            <span className="section-label">Select Style</span>
+            <button
+              onClick={() => void refetchGarmentTypes()}
+              style={{
+                width: "32px",
+                height: "32px",
+                borderRadius: "50%",
+                border: "0.5px solid var(--border)",
+                background: "var(--white)",
+                cursor: "pointer",
+                display: "grid",
+                placeItems: "center",
+                color: "var(--text-muted)"
+              }}
+              aria-label="Refresh garment types"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              >
+                <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+                <path d="M21 3v5h-5" />
+              </svg>
+            </button>
+          </div>
+
+          <div className="pill-row">
+            {garmentTypes.map((garment) => (
+              <button
+                key={garment.id}
+                className={`style-pill ${selectedGarmentId === garment.id ? "active" : ""}`}
+                type="button"
+                onClick={() => {
+                  setSelectedGarmentId(garment.id);
+                  setHeroChangeOpen(false);
+                  setHeroReplacementFile(null);
+                  setHeroReplacementPreviewUrl(null);
+                }}
+                disabled={actionBusy || loadingGarmentTypes}
+              >
+                {garment.name}
+              </button>
+            ))}
+          </div>
+
+          {loadingGarmentTypes ? <p className="tiny muted">Loading garment types...</p> : null}
+
+          {selectedGarment ? (
+            <>
+              <div className="model-preview-box">
+                {selectedHeroPreviewUrl ? (
+                  <img className="model-preview-img" src={selectedHeroPreviewUrl} alt={`${selectedGarment.name} hero`} />
+                ) : (
+                  <div className="model-preview-placeholder">No hero preview available</div>
+                )}
+                <button
+                  className="model-change-btn"
+                  type="button"
+                  onClick={() => setHeroChangeOpen((prev) => !prev)}
+                  disabled={actionBusy}
+                >
+                  Change
+                </button>
+              </div>
+
+              {heroChangeOpen ? (
+                <label className="field">
+                  <span>Replacement Hero Image</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={onHeroReplacementChange}
+                    disabled={actionBusy}
+                  />
+                </label>
+              ) : null}
+            </>
+          ) : null}
+        </section>
+
+        <section className="card stack-sm">
+          <button
+            className="btn-primary"
+            type="button"
+            disabled={!canGenerate}
+            onClick={() => void handleCreateGeneration()}
+          >
+            {creatingGeneration ? (
+              "Sewing..."
+            ) : (
+              <>
+                <svg viewBox="0 0 24 24" aria-hidden focusable="false">
+                  <circle cx="6" cy="6" r="3" />
+                  <circle cx="6" cy="18" r="3" />
+                  <path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12" />
+                </svg>
+                Sew this Look
+              </>
+            )}
+          </button>
+
+          <button
+            onClick={() => {
+              if (!selectedFabricImageId && !fabricFile) {
+                alert("Please select a fabric first");
+                return;
+              }
+              if (!selectedGarmentId) {
+                alert("Please select a garment type first");
+                return;
+              }
+              setShowConsentModal(true);
+            }}
+            style={{
+              width: "100%",
+              minHeight: "48px",
+              background: "transparent",
+              color: "#1B1B2F",
+              border: "1.5px solid #1B1B2F",
+              borderRadius: "14px",
+              fontSize: "14px",
+              fontWeight: 700,
+              cursor: "pointer",
+              fontFamily: "inherit",
+              marginTop: "8px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "8px",
+            }}
+          >
+            ðŸ‘¤ Try On Customer
+          </button>
+
+          {visualizingGenerationId ? (
+            <div className="loading-box">
+              <div className="spinner" />
+              <p className="tiny muted">Generating look...</p>
+            </div>
+          ) : null}
+        </section>
+      </section>
+
+      {showConsentModal && (
+        <CustomerConsentModal
+          onConsent={() => {
+            setShowConsentModal(false);
+            setShowTryOnFlow(true);
+          }}
+          onCancel={() => setShowConsentModal(false)}
+        />
+      )}
+
+      {showTryOnFlow && (
+        <TryOnFlow
+          onClose={() => setShowTryOnFlow(false)}
+          onSubmit={handleQuickTryOnSubmit}
+        />
+      )}
+    </main>
+  );
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\pages\HomePage.tsx ===
+import { Navigate } from "react-router-dom";
+
+export function HomePage() {
+  return <Navigate to="/generate" replace />;
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\pages\LoginPage.tsx ===
+import { FormEvent, useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+
+import { useAuth } from "../lib/auth";
+import { supabase } from "../lib/supabase";
+
+type AuthMode = "login" | "signup";
+
+export function LoginPage() {
+  const { session, loading } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const [mode, setMode] = useState<AuthMode>("login");
+  const [shopName, setShopName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>("");
+  const [notice, setNotice] = useState<string>("");
+
+  useEffect(() => {
+    if (!loading && session) {
+      const from = (location.state as { from?: string } | null)?.from || "/";
+      navigate(from, { replace: true });
+    }
+  }, [loading, session, navigate, location.state]);
+
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+
+    if (!email.trim() || !password) {
+      setError("Email and password are required.");
+      return;
+    }
+
+    if (mode === "signup" && !shopName.trim()) {
+      setError("Shop name is required for signup.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      if (mode === "login") {
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password
+        });
+
+        if (signInError) {
+          throw signInError;
+        }
+
+        navigate("/", { replace: true });
+        return;
+      }
+
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          data: {
+            shop_name: shopName.trim()
+          }
+        }
+      });
+
+      if (signUpError) {
+        throw signUpError;
+      }
+
+      if (data.session) {
+        navigate("/", { replace: true });
+        return;
+      }
+
+      setMode("login");
+      setNotice("Signup successful. Login to continue.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Auth failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="auth-screen">
+      <div className="login-hero">
+        <div
+          style={{
+            fontSize: "12px",
+            color: "rgba(201,168,76,0.5)",
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+            lineHeight: 1
+          }}
+        >
+          Powered by
+        </div>
+        <div className="login-wordmark">AI VASTRA</div>
+        <div className="login-tagline">Craft Your Collection</div>
+        <div className="login-divider" />
+      </div>
+      <div className="login-sheet">
+        <h2>Welcome back</h2>
+
+        <form className="stack-sm" onSubmit={onSubmit}>
+          <label className="field">
+            <span>Email</span>
+            <input
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="shop@example.com"
+              disabled={busy}
+            />
+          </label>
+
+          <label className="field">
+            <span>Password</span>
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Enter password"
+              disabled={busy}
+            />
+          </label>
+
+          {notice ? <p className="tiny notice-text">{notice}</p> : null}
+          {error ? <p className="error-text">{error}</p> : null}
+
+          <button className="btn-primary" type="submit" disabled={busy}>
+            {busy ? "Please wait..." : mode === "login" ? "Login" : "Create Shop Account"}
+          </button>
+        </form>
+
+        <p className="tiny muted" style={{ textAlign: "center" }}>
+          Shop account access only
+        </p>
+      </div>
+    </main>
+  );
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\pages\MatchColorPage.tsx ===
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+
+import { apiFetch } from "../lib/api";
+import { useAuth } from "../lib/auth";
+import {
+  applyLivePreviewAdjustment,
+  emptySwatchAdjustment,
+  extractProminentSwatches,
+  hexToHsl01,
+  isZeroAdjustment,
+  resizeImageToCanvas,
+  type SwatchAdjustment
+} from "../lib/matchColor";
+import { createSignedUrl } from "../lib/storage";
+import type { GenerationRow, MatchColorSaveResponse } from "../lib/types";
+import { MatchColorWebGLRenderer, type MatchColorDrawOptions } from "../lib/webglMatchColor";
+
+const NAVY = "#1B1B2F";
+const GOLD = "#C9A84C";
+const MAX_SWATCHES = 8;
+
+type AdjustmentKey = keyof SwatchAdjustment;
+
+async function loadImageFromUrl(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Image fetch failed (HTTP ${response.status})`);
+  }
+
+  const objectUrl = URL.createObjectURL(await response.blob());
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const element = new Image();
+    element.onload = () => resolve(element);
+    element.onerror = () => reject(new Error("Image load failed"));
+    element.src = objectUrl;
+  });
+
+  return { image, objectUrl };
+}
+
+export function MatchColorPage() {
+  const { accessToken } = useAuth();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  const generationId = searchParams.get("generationId") ?? "";
+
+  const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const sourceCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const rendererRef = useRef<MatchColorWebGLRenderer | null>(null);
+  const rafIdRef = useRef<number | null>(null);
+  const pendingDrawRef = useRef<MatchColorDrawOptions | null>(null);
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [errorText, setErrorText] = useState<string | null>(null);
+  const [outputPath, setOutputPath] = useState<string | null>(null);
+  const [outputImageUrl, setOutputImageUrl] = useState<string | null>(null);
+  const [sourceImageData, setSourceImageData] = useState<ImageData | null>(null);
+  const [swatches, setSwatches] = useState<string[]>([]);
+  const [selectedHex, setSelectedHex] = useState<string | null>(null);
+  const [adjustmentsByHex, setAdjustmentsByHex] = useState<Record<string, SwatchAdjustment>>({});
+  const [savedHexes, setSavedHexes] = useState<Set<string>>(new Set());
+
+  const currentAdjustment = useMemo(
+    () => (selectedHex ? adjustmentsByHex[selectedHex] ?? emptySwatchAdjustment() : emptySwatchAdjustment()),
+    [selectedHex, adjustmentsByHex]
+  );
+
+  async function loadMatchColorData() {
+    if (!generationId || !accessToken) return;
+
+    setLoading(true);
+    setErrorText(null);
+
+    try {
+      const generation = await apiFetch<GenerationRow>(`/generations/${generationId}`, accessToken, {
+        method: "GET"
+      });
+
+      if (!generation.output_path) {
+        throw new Error(generation.error || "Output image is not ready yet");
+      }
+
+      const signedUrl = await createSignedUrl("generated-outputs", generation.output_path);
+      setOutputPath(generation.output_path);
+
+      const loaded = await loadImageFromUrl(signedUrl);
+      setOutputImageUrl(loaded.objectUrl);
+
+      const canvas = resizeImageToCanvas(loaded.image, 680);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        throw new Error("Canvas context unavailable");
+      }
+
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      sourceCanvasRef.current = canvas;
+      setSourceImageData(imageData);
+
+      const nextSwatches = extractProminentSwatches(imageData, MAX_SWATCHES);
+      setSwatches(nextSwatches);
+      setAdjustmentsByHex({});
+      setSavedHexes(new Set());
+      setSelectedHex(nextSwatches[0] ?? null);
+    } catch (err) {
+      setErrorText(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadMatchColorData();
+  }, [accessToken, generationId]);
+
+  useEffect(() => {
+    if (!outputImageUrl?.startsWith("blob:")) return;
+    return () => URL.revokeObjectURL(outputImageUrl);
+  }, [outputImageUrl]);
+
+  useEffect(() => {
+    const canvas = previewCanvasRef.current;
+    const sourceCanvas = sourceCanvasRef.current;
+    if (!canvas || !sourceCanvas || !sourceImageData) return;
+
+    let renderer: MatchColorWebGLRenderer | null = null;
+    try {
+      renderer = new MatchColorWebGLRenderer(canvas);
+      renderer.setSource(sourceCanvas, sourceCanvas.width, sourceCanvas.height);
+    } catch {
+      renderer = null;
+    }
+    rendererRef.current = renderer;
+
+    return () => {
+      renderer?.dispose();
+      if (rendererRef.current === renderer) {
+        rendererRef.current = null;
+      }
+    };
+  }, [sourceImageData]);
+
+  useEffect(() => {
+    return () => {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+    };
+  }, []);
+
+  function scheduleDraw(options: MatchColorDrawOptions) {
+    pendingDrawRef.current = options;
+    if (rafIdRef.current !== null) return;
+
+    rafIdRef.current = requestAnimationFrame(() => {
+      rafIdRef.current = null;
+      const pending = pendingDrawRef.current;
+      pendingDrawRef.current = null;
+      const renderer = rendererRef.current;
+      if (renderer && pending) {
+        renderer.draw(pending);
+      }
+    });
+  }
+
+  useEffect(() => {
+    const canvas = previewCanvasRef.current;
+    if (!canvas) return;
+
+    const renderer = rendererRef.current;
+    if (renderer) {
+      const targetHsl = (selectedHex && hexToHsl01(selectedHex)) || { h: 0, s: 0, l: 0 };
+      scheduleDraw({
+        targetHsl,
+        hueShift: currentAdjustment.hueShiftDeg / 360,
+        satDelta: currentAdjustment.satDeltaPct / 100,
+        lightDelta: currentAdjustment.lightDeltaPct / 100
+      });
+      return;
+    }
+
+    if (!sourceImageData) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const rendered = applyLivePreviewAdjustment(sourceImageData, selectedHex, currentAdjustment);
+    canvas.width = rendered.width;
+    canvas.height = rendered.height;
+    ctx.putImageData(rendered, 0, 0);
+  }, [sourceImageData, selectedHex, currentAdjustment]);
+
+  function handleSliderInput(event: FormEvent<HTMLInputElement>, key: AdjustmentKey) {
+    if (!selectedHex) return;
+    const value = Number((event.currentTarget as HTMLInputElement).value);
+
+    setAdjustmentsByHex((prev) => ({
+      ...prev,
+      [selectedHex]: {
+        ...(prev[selectedHex] ?? emptySwatchAdjustment()),
+        [key]: value
+      }
+    }));
+  }
+
+  function handleResetSelected() {
+    if (!selectedHex) return;
+    setAdjustmentsByHex((prev) => ({
+      ...prev,
+      [selectedHex]: emptySwatchAdjustment()
+    }));
+  }
+
+  async function handleSave() {
+    if (!accessToken || !generationId || !selectedHex) return;
+
+    setSaving(true);
+    setErrorText(null);
+
+    try {
+      const adjustment = adjustmentsByHex[selectedHex] ?? emptySwatchAdjustment();
+      const response = await apiFetch<MatchColorSaveResponse>(
+        `/generations/${generationId}/match-color`,
+        accessToken,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            edits: [
+              {
+                selected_hex: selectedHex,
+                hue_shift_degrees: adjustment.hueShiftDeg,
+                saturation_delta_percent: adjustment.satDeltaPct,
+                lightness_delta_percent: adjustment.lightDeltaPct
+              }
+            ]
+          })
+        }
+      );
+
+      const nextPath = response.output_path || outputPath;
+      if (nextPath) {
+        const signedUrl = await createSignedUrl("generated-outputs", nextPath);
+        setOutputPath(nextPath);
+        setOutputImageUrl(signedUrl);
+      }
+
+      setSavedHexes((prev) => {
+        const next = new Set(prev);
+        next.add(selectedHex);
+        return next;
+      });
+    } catch (err) {
+      setErrorText(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleBack() {
+    navigate(`/output-viewer?generationId=${encodeURIComponent(generationId)}`);
+  }
+
+  const ready = !loading && !!outputImageUrl && swatches.length > 0;
+
+  return (
+    <main className="screen" style={{ background: "var(--surface)" }}>
+      <section className="page-shell">
+        <header className="page-header">
+          <div className="row" style={{ flexWrap: "nowrap" }}>
+            <button
+              className="btn btn-light"
+              onClick={handleBack}
+              aria-label="Back to output viewer"
+              style={{ width: 44, padding: 0, fontSize: 20, color: NAVY }}
+            >
+              &larr;
+            </button>
+            <h1 style={{ color: NAVY }}>Match Color</h1>
+          </div>
+        </header>
+
+        {loading ? (
+          <section className="card" style={{ minHeight: 240, display: "grid", placeItems: "center" }}>
+            <div className="stack-sm" style={{ placeItems: "center" }}>
+              <div className="spinner" />
+              <p className="tiny muted">Loading image and colors...</p>
+            </div>
+          </section>
+        ) : null}
+
+        {!loading && errorText && !ready ? (
+          <section className="card stack-sm">
+            <p className="error-text">{errorText}</p>
+            <button className="btn btn-dark" onClick={loadMatchColorData} disabled={!accessToken}>
+              Retry
+            </button>
+          </section>
+        ) : null}
+
+        {ready ? (
+          <>
+            {outputImageUrl ? (
+              <img src={outputImageUrl} alt="Generated output" style={{ width: "100%", borderRadius: 14 }} />
+            ) : null}
+
+            <p className="tiny muted">Tap image to set inspect focus.</p>
+
+            <section className="card stack-sm">
+              <div className="between">
+                <h2>Adjust Colors</h2>
+                <span className="chip">{savedHexes.size}/{MAX_SWATCHES} edited</span>
+              </div>
+
+              <div className="swatch-row" style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                {swatches.map((hex) => {
+                  const isSelected = hex === selectedHex;
+                  const isSaved = savedHexes.has(hex);
+
+                  return (
+                    <button
+                      key={hex}
+                      type="button"
+                      onClick={() => setSelectedHex(hex)}
+                      title={hex}
+                      style={{
+                        position: "relative",
+                        width: 44,
+                        height: 44,
+                        borderRadius: "50%",
+                        padding: 0,
+                        cursor: "pointer",
+                        background: hex,
+                        border: isSelected ? "3px solid #FFFFFF" : "2px solid var(--border)",
+                        boxShadow: isSelected
+                          ? `0 0 0 2px ${NAVY}`
+                          : isSaved
+                          ? `0 0 0 2px ${GOLD}`
+                          : "none"
+                      }}
+                    >
+                      {isSaved ? (
+                        <span
+                          aria-hidden
+                          style={{
+                            position: "absolute",
+                            top: -4,
+                            right: -4,
+                            width: 16,
+                            height: 16,
+                            borderRadius: "50%",
+                            background: GOLD,
+                            color: NAVY,
+                            fontSize: 10,
+                            lineHeight: "16px",
+                            fontWeight: 700
+                          }}
+                        >
+                          &#10003;
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {selectedHex ? (
+                <p className="tiny muted">
+                  Selected: {selectedHex} (same-color areas may also change)
+                </p>
+              ) : null}
+
+              <div className="match-preview-wrap">
+                <canvas ref={previewCanvasRef} className="match-preview-canvas" />
+              </div>
+
+              <label className="range-field">
+                <span>Hue: {currentAdjustment.hueShiftDeg} deg</span>
+                <input
+                  className="range-input"
+                  type="range"
+                  min={-180}
+                  max={180}
+                  step={1}
+                  value={currentAdjustment.hueShiftDeg}
+                  onInput={(event) => handleSliderInput(event, "hueShiftDeg")}
+                  disabled={!selectedHex}
+                />
+              </label>
+
+              <label className="range-field">
+                <span>Saturation: {currentAdjustment.satDeltaPct}%</span>
+                <input
+                  className="range-input"
+                  type="range"
+                  min={-100}
+                  max={100}
+                  step={1}
+                  value={currentAdjustment.satDeltaPct}
+                  onInput={(event) => handleSliderInput(event, "satDeltaPct")}
+                  disabled={!selectedHex}
+                />
+              </label>
+
+              <label className="range-field">
+                <span>Lightness: {currentAdjustment.lightDeltaPct}%</span>
+                <input
+                  className="range-input"
+                  type="range"
+                  min={-100}
+                  max={100}
+                  step={1}
+                  value={currentAdjustment.lightDeltaPct}
+                  onInput={(event) => handleSliderInput(event, "lightDeltaPct")}
+                  disabled={!selectedHex}
+                />
+              </label>
+
+              {errorText ? <p className="error-text">{errorText}</p> : null}
+
+              <footer className="row">
+                <button
+                  className="btn btn-light flex-1"
+                  onClick={handleResetSelected}
+                  disabled={!selectedHex || saving}
+                >
+                  Reset Selected
+                </button>
+                <button
+                  className="btn btn-dark flex-1"
+                  onClick={handleSave}
+                  disabled={!selectedHex || saving || isZeroAdjustment(currentAdjustment)}
+                >
+                  {saving ? "Saving..." : "Save"}
+                </button>
+              </footer>
+            </section>
+          </>
+        ) : null}
+      </section>
+    </main>
+  );
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\pages\OutputHistoryPage.tsx ===
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+
+import { apiFetch } from "../lib/api";
+import { useAuth } from "../lib/auth";
+import { buildGenerationDownloadFilename, triggerBrowserDownload } from "../lib/download";
+import { useGenerations } from "../lib/queries";
+import type { GenerationRow } from "../lib/types";
+
+type HistoryFilters = {
+  fabricCode: string;
+  fabricColor: string;
+};
+
+function RefreshIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden focusable="false">
+      <path
+        d="M20 11a8 8 0 1 1-2.34-5.66M20 4v6h-6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function FilterIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden focusable="false">
+      <path
+        d="M4 6h16M7 12h10M10 18h4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function DeleteIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden focusable="false">
+      <path
+        d="M5 7h14M9 7V5h6v2M8 7v12h8V7"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden focusable="false">
+      <path
+        d="M12 4v10m0 0 4-4m-4 4-4-4M5 20h14"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function summarizeFilters(filters: HistoryFilters) {
+  const parts: string[] = [];
+  if (filters.fabricCode) parts.push(`code: ${filters.fabricCode}`);
+  if (filters.fabricColor) parts.push(`color: ${filters.fabricColor}`);
+  return parts.join(", ");
+}
+
+export function OutputHistoryPage() {
+  const { accessToken } = useAuth();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const [statusText, setStatusText] = useState("Loading output history...");
+  const [downloadingGenerationId, setDownloadingGenerationId] = useState<string | null>(null);
+  const [deletingGenerationId, setDeletingGenerationId] = useState<string | null>(null);
+
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [fabricCodeInput, setFabricCodeInput] = useState("");
+  const [fabricColorInput, setFabricColorInput] = useState("");
+  const [appliedFilters, setAppliedFilters] = useState<HistoryFilters>({ fabricCode: "", fabricColor: "" });
+  const skipStatusUpdateRef = useRef(false);
+
+  const {
+    data: rowsData,
+    isFetching: loading,
+    error: loadError,
+    refetch: refetchHistory
+  } = useGenerations({
+    status: "done",
+    fabric_code: appliedFilters.fabricCode,
+    fabric_color: appliedFilters.fabricColor,
+    limit: 100,
+    include_urls: true
+  });
+  const rows = rowsData ?? [];
+
+  const visibleRows = useMemo(
+    () => rows.filter((row) => row.status === "done" && !!row.output_path),
+    [rows]
+  );
+
+  useEffect(() => {
+    function handleExternalToggle() {
+      setFiltersOpen((prev) => !prev);
+    }
+
+    window.addEventListener("aivastra:toggle-fabric-filters", handleExternalToggle);
+    return () => {
+      window.removeEventListener("aivastra:toggle-fabric-filters", handleExternalToggle);
+    };
+  }, []);
+
+  function getFabricSummaryLabel(row: GenerationRow) {
+    const label = row.fabric_summary_label?.trim();
+    return label || "Garment";
+  }
+
+  useEffect(() => {
+    if (loading) return;
+    if (skipStatusUpdateRef.current) {
+      skipStatusUpdateRef.current = false;
+      return;
+    }
+
+    if (loadError) {
+      setStatusText(`Failed to load output history: ${loadError instanceof Error ? loadError.message : "Unknown error"}`);
+      return;
+    }
+
+    const filterSummary = summarizeFilters(appliedFilters);
+    if (!rows.length) {
+      setStatusText(filterSummary ? `No outputs found for ${filterSummary}.` : "No outputs yet.");
+    } else {
+      setStatusText(
+        filterSummary
+          ? `Loaded ${rows.length} output image(s) for ${filterSummary}.`
+          : `Loaded ${rows.length} output image(s)`
+      );
+    }
+  }, [loading, loadError, rows.length, appliedFilters]);
+
+  function applyFilters() {
+    setAppliedFilters({
+      fabricCode: fabricCodeInput.trim(),
+      fabricColor: fabricColorInput.trim()
+    });
+  }
+
+  function clearFilters() {
+    setFabricCodeInput("");
+    setFabricColorInput("");
+    setAppliedFilters({ fabricCode: "", fabricColor: "" });
+  }
+
+  function toggleFilters() {
+    setFiltersOpen((prev) => !prev);
+  }
+
+  async function handleQuickDownload(row: GenerationRow) {
+    if (!row.output_path || !row.download_url) return;
+    setDownloadingGenerationId(row.id);
+    try {
+      const url = row.download_url;
+      triggerBrowserDownload(url, buildGenerationDownloadFilename(row.id, row.output_path, url));
+      setStatusText("Download started");
+    } catch (err) {
+      setStatusText(`Download failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setDownloadingGenerationId(null);
+    }
+  }
+
+  async function handleDeleteGeneration(row: GenerationRow) {
+    if (!accessToken) return;
+
+    const confirmed = window.confirm("Delete this saved output image?");
+    if (!confirmed) return;
+
+    setDeletingGenerationId(row.id);
+    try {
+      const response = await apiFetch<{
+        deleted: boolean;
+        generation_id: string;
+        output_path?: string | null;
+        warning?: string;
+      }>(`/generations/${row.id}`, accessToken, {
+        method: "DELETE"
+      });
+
+      skipStatusUpdateRef.current = true;
+      void queryClient.invalidateQueries({ queryKey: ["generations"] });
+
+      const base = `Deleted output ${response.generation_id}.`;
+      setStatusText(response.warning ? `${base} Warning: ${response.warning}` : base);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setStatusText(`Delete failed: ${message}`);
+      window.alert(`Delete failed: ${message}`);
+    } finally {
+      setDeletingGenerationId(null);
+    }
+  }
+
+  return (
+    <main className="screen catalog-screen">
+      <section className="catalog-shell">
+        <header className="catalog-header">
+          <div className="catalog-header-left">
+            <div className="catalog-brand-mark" aria-hidden>
+              AV
+            </div>
+
+            <div className="catalog-title-wrap">
+              <h1 className="catalog-title">Garments</h1>
+              <p className="catalog-subtitle">{visibleRows.length} items</p>
+            </div>
+          </div>
+
+          <div className="catalog-header-actions">
+            <button
+              className="catalog-icon-btn"
+              onClick={() => void refetchHistory()}
+              disabled={loading}
+              aria-label="Refresh"
+              title="Refresh"
+            >
+              <RefreshIcon />
+            </button>
+            <button
+              className={`catalog-icon-btn ${filtersOpen ? "catalog-icon-btn-active" : ""}`}
+              onClick={toggleFilters}
+              disabled={loading}
+              aria-label="Fabric filters"
+              title="Fabric Filters"
+            >
+              <FilterIcon />
+            </button>
+          </div>
+        </header>
+
+        <section className="card stack-sm">
+          <div className="between">
+            <h2>Filters</h2>
+            <button className="btn btn-light" onClick={toggleFilters} disabled={loading}>
+              {filtersOpen ? "Hide Filters" : "Show Filters"}
+            </button>
+          </div>
+
+          {filtersOpen ? (
+            <>
+              <div className="row">
+                <label className="field flex-1">
+                  <span>Fabric Code</span>
+                  <input
+                    type="text"
+                    value={fabricCodeInput}
+                    onChange={(event) => setFabricCodeInput(event.target.value)}
+                    placeholder="e.g. LAX123"
+                    disabled={loading}
+                  />
+                </label>
+                <label className="field flex-1">
+                  <span>Fabric Color</span>
+                  <input
+                    type="text"
+                    value={fabricColorInput}
+                    onChange={(event) => setFabricColorInput(event.target.value)}
+                    placeholder="e.g. White"
+                    disabled={loading}
+                  />
+                </label>
+              </div>
+              <div className="row">
+                <button className="btn btn-dark" onClick={applyFilters} disabled={loading}>
+                  Apply Filters
+                </button>
+                <button className="btn btn-light" onClick={clearFilters} disabled={loading}>
+                  Clear
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="tiny muted">Open filters to search by fabric code and fabric color.</p>
+          )}
+
+          <p className="tiny muted">{statusText}</p>
+        </section>
+
+        {loading ? (
+          <div className="loading-box">
+            <div className="spinner" />
+          </div>
+        ) : visibleRows.length === 0 ? (
+          <div className="empty-box">{statusText || "No output images yet."}</div>
+        ) : (
+          <section className="catalog-grid">
+            {visibleRows.map((row) => (
+              <article className="catalog-tile" key={row.id}>
+                <button
+                  className="catalog-image-btn"
+                  onClick={() => navigate(`/output-viewer?generationId=${encodeURIComponent(row.id)}`)}
+                >
+                  {row.thumb_url ? (
+                    <img
+                      className="catalog-image"
+                      src={row.thumb_url}
+                      alt={`Output ${row.id}`}
+                      loading="lazy"
+                      decoding="async"
+                      style={{ aspectRatio: "3/4", objectFit: "cover" }}
+                    />
+                  ) : (
+                    <div className="image-placeholder">
+                      <div className="spinner spinner-small" />
+                    </div>
+                  )}
+                </button>
+
+                <div className="catalog-meta-row">
+                  <p className="catalog-garment-label">{getFabricSummaryLabel(row)}</p>
+                  <div className="catalog-action-row">
+                    <button
+                      className="catalog-chip-btn catalog-chip-delete"
+                      onClick={() => void handleDeleteGeneration(row)}
+                      disabled={deletingGenerationId === row.id || downloadingGenerationId === row.id}
+                      aria-label="Delete output"
+                    >
+                      {deletingGenerationId === row.id ? "..." : <DeleteIcon />}
+                    </button>
+                    <button
+                      className="catalog-chip-btn catalog-chip-download"
+                      onClick={() => void handleQuickDownload(row)}
+                      disabled={downloadingGenerationId === row.id || deletingGenerationId === row.id}
+                      aria-label="Download output"
+                    >
+                      {downloadingGenerationId === row.id ? "..." : <DownloadIcon />}
+                    </button>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </section>
+        )}
+      </section>
+    </main>
+  );
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\pages\OutputViewerPage.tsx ===
+import { useEffect, useMemo, useRef, useState, type TouchEvent } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+
+import { CustomerConsentModal } from "../components/CustomerConsentModal";
+import { TryOnFlow } from "../components/TryOnFlow";
+import { apiFetch, apiFetchBinary } from "../lib/api";
+import { useAuth } from "../lib/auth";
+import { subscribeToGeneration } from "../lib/realtime";
+import type {
+  CatalogImageDownloadUrlResponse,
+  CatalogImageRow,
+  DownloadUrlResponse,
+  GenerationRow,
+} from "../lib/types";
+import { isPendingStatus } from "../lib/utils";
+
+export function OutputViewerPage() {
+  const { accessToken } = useAuth();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  const generationId = searchParams.get("generationId") ?? "";
+  const catalogImageId = searchParams.get("catalogImageId") ?? "";
+  const externalImageUrl = searchParams.get("imageUrl") ?? "";
+  const externalTitle = searchParams.get("title") ?? "Image Viewer";
+  const refreshNonce = searchParams.get("refreshNonce") ?? "";
+  const viewMode = searchParams.get("mode") ?? "";
+  const catalogFolderId = searchParams.get("catalogFolderId") ?? "";
+  const catalogFolderName = searchParams.get("catalogFolderName") ?? "Catalog";
+
+  const [generation, setGeneration] = useState<GenerationRow | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(externalImageUrl || null);
+  const [loading, setLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [statusText, setStatusText] = useState("Loading image...");
+  const [catalogGenerationRows, setCatalogGenerationRows] = useState<GenerationRow[]>([]);
+  const [catalogImageRows, setCatalogImageRows] = useState<CatalogImageRow[]>([]);
+  const [showConsentModal, setShowConsentModal] = useState(false);
+  const [showTryOnFlow, setShowTryOnFlow] = useState(false);
+
+  const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  const generationMode = !!generationId;
+  const catalogImageMode = !!catalogImageId;
+  const dataMode = generationMode || catalogImageMode;
+  const catalogMode = dataMode && viewMode === "catalog";
+  const generationReady = !!generation && generation.status === "done" && !!generation.output_path;
+
+  const generationCatalogVisibleRows = useMemo(
+    () => catalogGenerationRows.filter((row) => row.status === "done" && !!row.output_path),
+    [catalogGenerationRows]
+  );
+
+  const catalogImageVisibleRows = useMemo(
+    () => catalogImageRows.filter((row) => row.is_active !== false && !!row.storage_path),
+    [catalogImageRows]
+  );
+
+  const activeCatalogCount = generationMode ? generationCatalogVisibleRows.length : catalogImageVisibleRows.length;
+
+  const activeCatalogIndex = useMemo(() => {
+    if (!catalogMode) return -1;
+    if (generationMode) {
+      return generationCatalogVisibleRows.findIndex((row) => row.id === generationId);
+    }
+    if (catalogImageMode) {
+      return catalogImageVisibleRows.findIndex((row) => row.id === catalogImageId);
+    }
+    return -1;
+  }, [
+    catalogMode,
+    generationMode,
+    generationCatalogVisibleRows,
+    generationId,
+    catalogImageMode,
+    catalogImageVisibleRows,
+    catalogImageId,
+  ]);
+
+  const canNavigateCatalog = catalogMode && activeCatalogCount > 1 && activeCatalogIndex >= 0;
+
+  const title = useMemo(() => {
+    if (catalogMode) return catalogFolderName || "Catalog";
+    if (generationMode) return "Output Viewer";
+    if (catalogImageMode) return "Catalog Viewer";
+    return externalTitle;
+  }, [catalogMode, catalogFolderName, generationMode, catalogImageMode, externalTitle]);
+
+  async function fetchGenerationDownloadUrl(id: string) {
+    if (!accessToken) throw new Error("Missing access token");
+    const response = await apiFetch<DownloadUrlResponse>(`/generations/${id}/download-url`, accessToken, {
+      method: "GET",
+    });
+    return response.download_url;
+  }
+
+  async function fetchCatalogImageDownloadUrl(id: string) {
+    if (!accessToken) throw new Error("Missing access token");
+    const response = await apiFetch<CatalogImageDownloadUrlResponse>(`/catalog-images/${id}/download-url`, accessToken, {
+      method: "GET",
+    });
+    return response.download_url;
+  }
+
+  async function loadGenerationView() {
+    if (!accessToken || !generationId) return;
+
+    setLoading(true);
+    try {
+      const row = await apiFetch<GenerationRow>(`/generations/${generationId}`, accessToken, {
+        method: "GET",
+      });
+      setGeneration(row);
+
+      if (row.status === "done" && row.output_path) {
+        const signed = await fetchGenerationDownloadUrl(generationId);
+        setImageUrl(signed);
+        setStatusText(catalogMode ? "Catalog image" : "Output ready");
+      } else if (isPendingStatus(row.status)) {
+        setImageUrl(null);
+        setStatusText("Visualizing...");
+      } else {
+        setImageUrl(null);
+        setStatusText(row.error || "Output not available");
+      }
+    } catch (err) {
+      setStatusText(`Load failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadCatalogImageView() {
+    if (!catalogImageMode || !accessToken || !catalogImageId) return;
+
+    setLoading(true);
+    try {
+      const signed = await fetchCatalogImageDownloadUrl(catalogImageId);
+      setImageUrl(signed);
+      setStatusText("Catalog image");
+    } catch (err) {
+      setImageUrl(null);
+      setStatusText(`Load failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadCatalogRows() {
+    if (!catalogMode || !accessToken || !catalogFolderId) {
+      setCatalogGenerationRows([]);
+      setCatalogImageRows([]);
+      return;
+    }
+
+    try {
+      if (generationMode) {
+        const rows = await apiFetch<GenerationRow[]>(
+          `/generations?status=done&folder_id=${encodeURIComponent(catalogFolderId)}&limit=100&include_urls=true`,
+          accessToken,
+          { method: "GET" }
+        );
+        setCatalogGenerationRows(rows);
+        setCatalogImageRows([]);
+        return;
+      }
+
+      const rows = await apiFetch<CatalogImageRow[]>(
+        `/catalog-images?folder_id=${encodeURIComponent(catalogFolderId)}&limit=200`,
+        accessToken,
+        { method: "GET" }
+      );
+      setCatalogImageRows(rows);
+      setCatalogGenerationRows([]);
+    } catch {
+      setCatalogGenerationRows([]);
+      setCatalogImageRows([]);
+    }
+  }
+
+  useEffect(() => {
+    if (generationMode) {
+      if (catalogMode) {
+        const cachedRow = generationCatalogVisibleRows.find((row) => row.id === generationId);
+        if (cachedRow) {
+          setGeneration(cachedRow);
+          setImageUrl(cachedRow.download_url ?? null);
+          setStatusText("Catalog image");
+          return;
+        }
+      }
+      void loadGenerationView();
+      return;
+    }
+
+    if (catalogImageMode) {
+      void loadCatalogImageView();
+      return;
+    }
+
+    setStatusText(externalImageUrl ? "Image loaded" : "No image supplied");
+  }, [
+    generationId,
+    generationMode,
+    catalogImageId,
+    catalogImageMode,
+    accessToken,
+    refreshNonce,
+    catalogMode,
+    generationCatalogVisibleRows,
+  ]);
+
+  useEffect(() => {
+    if (!accessToken || !generationId || !isPendingStatus(generation?.status)) return;
+
+    const handleStatusRow = (row: { status: string }) => {
+      if (row.status === "done" || row.status === "failed") {
+        void loadGenerationView();
+      }
+    };
+
+    const unsubscribe = subscribeToGeneration(generationId, handleStatusRow);
+    const timer = window.setInterval(() => {
+      void loadGenerationView();
+    }, 10000);
+
+    return () => {
+      unsubscribe();
+      window.clearInterval(timer);
+    };
+  }, [accessToken, generationId, generation?.status]);
+
+  useEffect(() => {
+    void loadCatalogRows();
+  }, [catalogMode, accessToken, catalogFolderId, generationMode]);
+
+  async function handleDownload() {
+    if (!imageUrl) return;
+    setDownloading(true);
+    try {
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      const file = new File([blob], "ai-vastra-look.jpg", {
+        type: "image/jpeg",
+      });
+
+      if (navigator.share && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+        });
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "ai-vastra-look.jpg";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    } catch {
+      window.open(imageUrl, "_blank");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  async function handleTryOnSubmit(customerPhotoFile: File): Promise<string> {
+    if (!accessToken) throw new Error("Not authenticated");
+    if (!generationId) throw new Error("No generation selected");
+
+    const formData = new FormData();
+    formData.set("generation_id", generationId);
+    formData.set("consent_confirmed", "true");
+    formData.set("customer_photo", customerPhotoFile);
+
+    const blob = await apiFetchBinary("/tryon/v2", accessToken, {
+      method: "POST",
+      body: formData,
+    });
+
+    return URL.createObjectURL(blob);
+  }
+
+  function handleMatchColor() {
+    if (!generationId) return;
+    navigate(`/match-color?generationId=${encodeURIComponent(generationId)}`);
+  }
+
+  function handleClose() {
+    if (catalogMode && catalogFolderId) {
+      const params = new URLSearchParams({ folderName: catalogFolderName });
+      navigate(`/catalog/folders/${encodeURIComponent(catalogFolderId)}?${params.toString()}`);
+      return;
+    }
+    navigate(-1);
+  }
+
+  function goToCatalogIndex(nextIndex: number) {
+    if (!catalogMode || nextIndex < 0 || nextIndex >= activeCatalogCount) return;
+
+    if (generationMode) {
+      const nextGeneration = generationCatalogVisibleRows[nextIndex];
+      if (!nextGeneration) return;
+
+      const params = new URLSearchParams({
+        generationId: nextGeneration.id,
+        mode: "catalog",
+        catalogFolderId,
+        catalogFolderName,
+      });
+
+      navigate(`/output-viewer?${params.toString()}`, { replace: true });
+      return;
+    }
+
+    if (catalogImageMode) {
+      const nextCatalogImage = catalogImageVisibleRows[nextIndex];
+      if (!nextCatalogImage) return;
+
+      const params = new URLSearchParams({
+        catalogImageId: nextCatalogImage.id,
+        mode: "catalog",
+        catalogFolderId,
+        catalogFolderName,
+      });
+
+      navigate(`/output-viewer?${params.toString()}`, { replace: true });
+    }
+  }
+
+  function handleCatalogPrev() {
+    if (!canNavigateCatalog) return;
+    const nextIndex = (activeCatalogIndex - 1 + activeCatalogCount) % activeCatalogCount;
+    goToCatalogIndex(nextIndex);
+  }
+
+  function handleCatalogNext() {
+    if (!canNavigateCatalog) return;
+    const nextIndex = (activeCatalogIndex + 1) % activeCatalogCount;
+    goToCatalogIndex(nextIndex);
+  }
+
+  function handleTouchStart(event: TouchEvent<HTMLElement>) {
+    if (!catalogMode) return;
+    const touch = event.changedTouches[0];
+    if (!touch) return;
+    swipeStartRef.current = { x: touch.clientX, y: touch.clientY };
+  }
+
+  function handleTouchEnd(event: TouchEvent<HTMLElement>) {
+    if (!catalogMode || !swipeStartRef.current) return;
+
+    const touch = event.changedTouches[0];
+    if (!touch) return;
+
+    const dx = touch.clientX - swipeStartRef.current.x;
+    const dy = touch.clientY - swipeStartRef.current.y;
+    swipeStartRef.current = null;
+
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+
+    if (absDx < 60 || absDx < absDy * 1.2) return;
+
+    if (dx < 0) {
+      handleCatalogNext();
+      return;
+    }
+
+    handleCatalogPrev();
+  }
+
+  return (
+    <main className="screen viewer-screen">
+      <section className="page-shell viewer-shell">
+        <header className="page-header">
+          <h1>{title}</h1>
+        </header>
+
+        <p className="tiny muted">{statusText}</p>
+
+        <section className="viewer-card" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+          {loading ? (
+            <div className="loading-box dark">
+              <div className="spinner" />
+            </div>
+          ) : imageUrl ? (
+            <img src={imageUrl} alt={title} />
+          ) : (
+            <div className="loading-box dark">
+              {isPendingStatus(generation?.status) ? <div className="spinner" /> : null}
+              <p className="tiny muted-light">
+                {isPendingStatus(generation?.status)
+                  ? "Visualizing..."
+                  : generation?.error || "No image available"}
+              </p>
+            </div>
+          )}
+        </section>
+
+        {catalogMode ? (
+          <div style={{
+            display: 'grid',
+            gap: '10px',
+            marginBottom: '12px',
+          }}>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                className="btn-primary"
+                onClick={handleDownload}
+                disabled={downloading || !imageUrl}
+                style={{ flex: 1 }}
+              >
+                {downloading ? 'Preparing...' : 'â†‘ Share / Save'}
+              </button>
+
+              <button
+                className="btn-primary"
+                onClick={() => navigate(
+                  `/match-color?generationId=${generationId}`
+                )}
+                disabled={!imageUrl}
+                style={{
+                  flex: 1,
+                  background: 'var(--white)',
+                  color: '#1B1B2F',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                Match Color
+              </button>
+            </div>
+
+            {generationMode && !catalogImageMode ? (
+              <button
+                onClick={() => setShowConsentModal(true)}
+                disabled={!imageUrl}
+                style={{
+                  width: "100%",
+                  minHeight: "48px",
+                  background: "transparent",
+                  color: "#1B1B2F",
+                  border: "1.5px solid #1B1B2F",
+                  borderRadius: "14px",
+                  fontSize: "14px",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px",
+                }}
+              >
+                ðŸ‘¤ Try On Customer
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {generationMode && generationReady && !catalogMode ? (
+          <div style={{ display: 'grid', gap: '10px', marginBottom: '12px' }}>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                className="btn-primary"
+                onClick={handleDownload}
+                disabled={downloading || !imageUrl}
+                style={{ flex: 1 }}
+              >
+                {downloading ? "Preparing..." : "â†‘ Share / Save"}
+              </button>
+              <button
+                className="btn-primary"
+                onClick={handleMatchColor}
+                disabled={!imageUrl}
+                style={{
+                  flex: 1,
+                  background: "var(--white)",
+                  color: "#1B1B2F",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                Match Color
+              </button>
+            </div>
+            <button
+              onClick={() => setShowConsentModal(true)}
+              disabled={!imageUrl}
+              style={{
+                width: "100%",
+                minHeight: "48px",
+                background: "transparent",
+                color: "#1B1B2F",
+                border: "1.5px solid #1B1B2F",
+                borderRadius: "14px",
+                fontSize: "14px",
+                fontWeight: 700,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+              }}
+            >
+              ðŸ‘¤ Try On Customer
+            </button>
+          </div>
+        ) : null}
+
+        <footer className="row">
+          {catalogMode ? (
+            <button className="btn btn-light flex-1" onClick={handleCatalogPrev} disabled={!canNavigateCatalog}>
+              Previous
+            </button>
+          ) : null}
+
+          {generationMode && !generationReady ? (
+            <button className="btn btn-light flex-1" onClick={loadGenerationView} disabled={loading || downloading}>
+              {loading ? "Refreshing..." : "Refresh"}
+            </button>
+          ) : null}
+
+          {!dataMode ? (
+            <button className="btn btn-light flex-1" onClick={handleClose}>
+              Close
+            </button>
+          ) : null}
+
+          {dataMode && catalogMode ? (
+            <button className="btn btn-light flex-1" onClick={handleClose}>
+              Back to Folder
+            </button>
+          ) : null}
+
+          {catalogMode ? (
+            <button className="btn btn-light flex-1" onClick={handleCatalogNext} disabled={!canNavigateCatalog}>
+              Next
+            </button>
+          ) : null}
+        </footer>
+
+        {catalogMode ? (
+          <p className="tiny muted">
+            {canNavigateCatalog
+              ? `Swipe left/right or use Previous/Next (${activeCatalogIndex + 1}/${activeCatalogCount})`
+              : "Swipe navigation is available when this folder has multiple images."}
+          </p>
+        ) : null}
+      </section>
+
+      {showConsentModal && (
+        <CustomerConsentModal
+          onConsent={() => {
+            setShowConsentModal(false);
+            setShowTryOnFlow(true);
+          }}
+          onCancel={() => setShowConsentModal(false)}
+        />
+      )}
+
+      {showTryOnFlow && (
+        <TryOnFlow onClose={() => setShowTryOnFlow(false)} onSubmit={handleTryOnSubmit} />
+      )}
+    </main>
+  );
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\pages\VisualizePage.tsx ===
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+
+import { apiFetch } from "../lib/api";
+import { useAuth } from "../lib/auth";
+import { compressImage } from "../lib/compressImage";
+import { subscribeToGeneration } from "../lib/realtime";
+import { createSignedUrl, uploadToStorage } from "../lib/storage";
+import type {
+  ApplyToTarget,
+  FabricImageRow,
+  FolderRow,
+  GenerationCreateResponse,
+  GenerationFabricAssignmentPayload,
+  GenerationRow,
+  HeroImageRow,
+  ShopContext
+} from "../lib/types";
+import { guessFileExtension, isPendingStatus, makeRandomSuffix } from "../lib/utils";
+
+type FabricDraft = {
+  draftId: string;
+  fabricImage: FabricImageRow | null;
+  previewUrl: string | null;
+  applyTo: ApplyToTarget | "";
+  fabricCode: string;
+  fabricColor: string;
+};
+
+const APPLY_TO_OPTIONS: Array<{ value: ApplyToTarget; label: string }> = [
+  { value: "shirt", label: "Shirt" },
+  { value: "pant", label: "Pant" },
+  { value: "suit_full_body", label: "Suit-Full Body" },
+  { value: "suit_upper", label: "Suit-Upper" },
+  { value: "koti", label: "Koti" }
+];
+
+function createEmptyFabricDraft(): FabricDraft {
+  return {
+    draftId: makeRandomSuffix(),
+    fabricImage: null,
+    previewUrl: null,
+    applyTo: "",
+    fabricCode: "",
+    fabricColor: ""
+  };
+}
+
+export function VisualizePage() {
+  const { accessToken } = useAuth();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [shopContext, setShopContext] = useState<ShopContext | null>(null);
+  const [folders, setFolders] = useState<FolderRow[]>([]);
+  const [heroImages, setHeroImages] = useState<HeroImageRow[]>([]);
+
+  const [selectedFolderId, setSelectedFolderId] = useState("");
+  const [selectedHeroImageId, setSelectedHeroImageId] = useState("");
+  const [selectedHeroPreviewUrl, setSelectedHeroPreviewUrl] = useState<string | null>(null);
+
+  const [fabricDrafts, setFabricDrafts] = useState<FabricDraft[]>([createEmptyFabricDraft()]);
+  const [activeFabricDraftId, setActiveFabricDraftId] = useState<string | null>(null);
+
+  const [loading, setLoading] = useState(false);
+  const [uploadingFabric, setUploadingFabric] = useState(false);
+  const [creatingGeneration, setCreatingGeneration] = useState(false);
+  const [visualizingGenerationId, setVisualizingGenerationId] = useState<string | null>(null);
+  const [statusText, setStatusText] = useState("Preparing Visualize screen...");
+
+  const selectedFolder = useMemo(
+    () => folders.find((folder) => folder.id === selectedFolderId) ?? null,
+    [folders, selectedFolderId]
+  );
+
+  const selectedHero = useMemo(
+    () => heroImages.find((hero) => hero.id === selectedHeroImageId) ?? null,
+    [heroImages, selectedHeroImageId]
+  );
+
+  const configuredFabricCount = useMemo(
+    () => fabricDrafts.filter((item) => item.fabricImage && item.applyTo && item.fabricCode.trim()).length,
+    [fabricDrafts]
+  );
+
+  const actionBusy = loading || uploadingFabric || creatingGeneration || !!visualizingGenerationId;
+
+  async function loadInitialData() {
+    if (!accessToken) return;
+    setLoading(true);
+    try {
+      const [me, folderRows] = await Promise.all([
+        apiFetch<ShopContext>("/me", accessToken, { method: "GET" }),
+        apiFetch<FolderRow[]>("/folders?include_inactive=true", accessToken, { method: "GET" })
+      ]);
+
+      setShopContext(me);
+      setFolders(folderRows);
+      setStatusText("Ready to visualize.");
+    } catch (err) {
+      setStatusText(`Load failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadHeroImagesForFolder(folderId: string) {
+    if (!accessToken || !folderId) {
+      setHeroImages([]);
+      return;
+    }
+    try {
+      const rows = await apiFetch<HeroImageRow[]>(
+        `/hero-images?folder_id=${encodeURIComponent(folderId)}&limit=100`,
+        accessToken,
+        { method: "GET" }
+      );
+      setHeroImages(rows);
+    } catch (err) {
+      setStatusText(`Failed to load hero images: ${err instanceof Error ? err.message : "Unknown error"}`);
+    }
+  }
+
+  useEffect(() => {
+    loadInitialData();
+  }, [accessToken]);
+
+  useEffect(() => {
+    const pickedFolderId = searchParams.get("pickedHeroFolderId") ?? "";
+    const pickedHeroId = searchParams.get("pickedHeroImageId") ?? "";
+    if (!pickedFolderId || !pickedHeroId) return;
+
+    setSelectedFolderId(pickedFolderId);
+    setSelectedHeroImageId(pickedHeroId);
+    setStatusText("Hero image selected.");
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!selectedFolderId) return;
+    void loadHeroImagesForFolder(selectedFolderId);
+  }, [selectedFolderId, accessToken]);
+
+  useEffect(() => {
+    if (!selectedHero?.storage_path) {
+      setSelectedHeroPreviewUrl(null);
+      return;
+    }
+    createSignedUrl("hero-images", selectedHero.storage_path, 3600)
+      .then((signed) => setSelectedHeroPreviewUrl(signed))
+      .catch(() => setSelectedHeroPreviewUrl(null));
+  }, [selectedHero?.id, selectedHero?.storage_path]);
+
+  useEffect(() => {
+    if (!accessToken || !visualizingGenerationId) return;
+    let cancelled = false;
+
+    const handleStatusRow = (row: { id: string; status: string; error: string | null }) => {
+      if (cancelled) return;
+
+      if (row.status === "done") {
+        setVisualizingGenerationId(null);
+        setStatusText("Visualization ready.");
+        navigate(`/output-viewer?generationId=${encodeURIComponent(row.id)}`);
+        return;
+      }
+
+      if (row.status === "failed") {
+        setVisualizingGenerationId(null);
+        setStatusText(row.error || "Generation failed.");
+        return;
+      }
+
+      if (isPendingStatus(row.status)) {
+        setStatusText("Visualizing...");
+      }
+    };
+
+    const poll = async () => {
+      try {
+        const row = await apiFetch<GenerationRow>(`/generations/${visualizingGenerationId}`, accessToken, {
+          method: "GET"
+        });
+        handleStatusRow(row);
+      } catch (err) {
+        if (cancelled) return;
+        setStatusText(`Generation status failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+      }
+    };
+
+    void poll();
+    const unsubscribe = subscribeToGeneration(visualizingGenerationId, handleStatusRow);
+    const timer = window.setInterval(poll, 10000);
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      window.clearInterval(timer);
+    };
+  }, [visualizingGenerationId, accessToken, navigate]);
+
+  async function handleFabricPicked(file: File | null, draftId: string | null) {
+    if (!file || !accessToken || !shopContext || !draftId) return;
+    setUploadingFabric(true);
+    try {
+      const compressedFile = await compressImage(file, 1600);
+      const ext = guessFileExtension(compressedFile.name, compressedFile.type);
+      const filename = `${Date.now()}-${makeRandomSuffix()}.${ext}`;
+      const storagePath = `${shopContext.shop_id}/${filename}`;
+
+      setStatusText("Uploading fabric image...");
+      await uploadToStorage("fabric-images", storagePath, compressedFile);
+
+      const row = await apiFetch<FabricImageRow>("/fabric-images", accessToken, {
+        method: "POST",
+        body: JSON.stringify({
+          storage_path: storagePath,
+          original_filename: compressedFile.name || filename,
+          mime_type: compressedFile.type || "image/jpeg",
+          file_size_bytes: compressedFile.size,
+          width: null,
+          height: null
+        })
+      });
+
+      const preview = await createSignedUrl("fabric-images", row.storage_path, 3600).catch(() => null);
+
+      setFabricDrafts((prev) =>
+        prev.map((item) =>
+          item.draftId === draftId
+            ? {
+                ...item,
+                fabricImage: row,
+                previewUrl: preview
+              }
+            : item
+        )
+      );
+
+      setStatusText("Fabric image selected.");
+    } catch (err) {
+      setStatusText(`Fabric upload failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setUploadingFabric(false);
+      setActiveFabricDraftId(null);
+      if (galleryInputRef.current) galleryInputRef.current.value = "";
+      if (cameraInputRef.current) cameraInputRef.current.value = "";
+    }
+  }
+
+  function onFabricGalleryChange(event: ChangeEvent<HTMLInputElement>) {
+    void handleFabricPicked(event.target.files?.[0] ?? null, activeFabricDraftId);
+  }
+
+  function onFabricCameraChange(event: ChangeEvent<HTMLInputElement>) {
+    void handleFabricPicked(event.target.files?.[0] ?? null, activeFabricDraftId);
+  }
+
+  function openFabricPicker(draftId: string, mode: "camera" | "gallery") {
+    if (actionBusy) return;
+    setActiveFabricDraftId(draftId);
+    if (mode === "camera") {
+      cameraInputRef.current?.click();
+      return;
+    }
+    galleryInputRef.current?.click();
+  }
+
+  function handleApplyToChange(draftId: string, value: string) {
+    const normalized = value as ApplyToTarget | "";
+    setFabricDrafts((prev) =>
+      prev.map((item) =>
+        item.draftId === draftId
+          ? {
+              ...item,
+              applyTo: normalized
+            }
+          : item
+      )
+    );
+  }
+
+  function handleFabricCodeChange(draftId: string, value: string) {
+    setFabricDrafts((prev) =>
+      prev.map((item) =>
+        item.draftId === draftId
+          ? {
+              ...item,
+              fabricCode: value
+            }
+          : item
+      )
+    );
+  }
+
+  function handleFabricColorChange(draftId: string, value: string) {
+    setFabricDrafts((prev) =>
+      prev.map((item) =>
+        item.draftId === draftId
+          ? {
+              ...item,
+              fabricColor: value
+            }
+          : item
+      )
+    );
+  }
+
+  function handleAddFabric() {
+    if (fabricDrafts.length >= 3) {
+      setStatusText("Maximum 3 fabrics allowed in one generation.");
+      return;
+    }
+    setFabricDrafts((prev) => [...prev, createEmptyFabricDraft()]);
+  }
+
+  function handleRemoveFabric(draftId: string) {
+    setFabricDrafts((prev) => {
+      if (prev.length <= 1) {
+        return [createEmptyFabricDraft()];
+      }
+      return prev.filter((item) => item.draftId !== draftId);
+    });
+  }
+
+  function buildGenerationFabrics(): GenerationFabricAssignmentPayload[] | null {
+    const touched = fabricDrafts.filter((item) => item.fabricImage || item.applyTo || item.fabricCode.trim() || item.fabricColor.trim());
+
+    if (!touched.length) {
+      setStatusText("Upload at least one fabric image.");
+      return null;
+    }
+
+    const payload: GenerationFabricAssignmentPayload[] = [];
+
+    for (const [index, item] of touched.entries()) {
+      if (!item.fabricImage?.id) {
+        setStatusText(`Fabric image missing in slot ${index + 1}.`);
+        return null;
+      }
+      if (!item.applyTo) {
+        setStatusText(`Select Apply to for fabric slot ${index + 1}.`);
+        return null;
+      }
+      const fabricCode = item.fabricCode.trim();
+      if (!fabricCode) {
+        setStatusText(`Enter Fabric Code for slot ${index + 1}.`);
+        return null;
+      }
+
+      payload.push({
+        fabric_image_id: item.fabricImage.id,
+        apply_to: item.applyTo,
+        fabric_code: fabricCode,
+        fabric_color: item.fabricColor.trim() || null
+      });
+    }
+
+    const targets = payload.map((item) => item.apply_to);
+    const uniqueTargets = new Set(targets);
+    if (uniqueTargets.size !== targets.length) {
+      setStatusText("Duplicate Apply to values are not allowed.");
+      return null;
+    }
+
+    if (payload.length > 1 && targets.includes("suit_full_body")) {
+      setStatusText("Suit-Full Body cannot be combined with other Apply to values.");
+      return null;
+    }
+
+    return payload;
+  }
+
+  async function handleCreateGeneration() {
+    if (!accessToken) return;
+    if (!selectedHeroImageId) {
+      setStatusText("Select a hero image first.");
+      return;
+    }
+
+    const generationFabrics = buildGenerationFabrics();
+    if (!generationFabrics?.length) {
+      return;
+    }
+
+    const primaryFabric = generationFabrics[0];
+    if (!primaryFabric) {
+      setStatusText("Upload at least one fabric image.");
+      return;
+    }
+
+    setCreatingGeneration(true);
+    try {
+      setStatusText("Creating generation job...");
+      const response = await apiFetch<GenerationCreateResponse>("/generations", accessToken, {
+        method: "POST",
+        body: JSON.stringify({
+          hero_image_id: selectedHeroImageId,
+          // Keep legacy field for backward-compatible backend paths.
+          fabric_image_id: primaryFabric.fabric_image_id,
+          fabrics: generationFabrics
+        })
+      });
+
+      setVisualizingGenerationId(response.id);
+      setStatusText("Visualizing...");
+    } catch (err) {
+      setStatusText(`Generate failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setCreatingGeneration(false);
+    }
+  }
+
+  return (
+    <main className="screen">
+      <section className="page-shell">
+        <header className="page-header">
+          <div>
+            <h1>Visualize</h1>
+            <p className="muted">Select hero image + one or more fabrics, then generate.</p>
+          </div>
+          </header>
+
+        <section className="card stack-sm">
+          <p className="tiny">{statusText}</p>
+        </section>
+
+        <section className="card stack-sm">
+          <div className="between">
+            <h2>Hero Image Selection</h2>
+            <button
+              className="btn btn-dark"
+              onClick={() => navigate("/hero-folders?picker=1")}
+              disabled={actionBusy}
+            >
+              Select Hero Image
+            </button>
+          </div>
+
+          {selectedHeroPreviewUrl ? (
+            <img className="preview-image" src={selectedHeroPreviewUrl} alt="Selected hero" />
+          ) : (
+            <div className="preview-placeholder">No hero image selected yet</div>
+          )}
+          {selectedFolder?.name ? <p className="tiny muted">Folder: {selectedFolder.name}</p> : null}
+        </section>
+
+        <section className="card stack-sm">
+          <div className="between">
+            <h2>Fabric Image Selection</h2>
+            <span className="chip">{configuredFabricCount}/{fabricDrafts.length} configured</span>
+          </div>
+
+          {fabricDrafts.map((item, index) => (
+            <article className="fabric-draft-card stack-sm" key={item.draftId}>
+              <div className="between">
+                <p className="tiny"><strong>Fabric {index + 1}</strong></p>
+                {fabricDrafts.length > 1 ? (
+                  <button
+                    className="btn btn-light"
+                    type="button"
+                    onClick={() => handleRemoveFabric(item.draftId)}
+                    disabled={actionBusy}
+                  >
+                    Remove
+                  </button>
+                ) : null}
+              </div>
+
+              {item.previewUrl ? (
+                <img className="preview-image" src={item.previewUrl} alt={`Fabric ${index + 1}`} />
+              ) : (
+                <div className="preview-placeholder">Capture or choose a fabric image</div>
+              )}
+
+              <label className="field">
+                <span>Apply to</span>
+                <select
+                  className="select-input"
+                  value={item.applyTo}
+                  onChange={(event) => handleApplyToChange(item.draftId, event.target.value)}
+                  disabled={actionBusy}
+                >
+                  <option value="">Select target garment</option>
+                  {APPLY_TO_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field">
+                <span>Fabric Code <strong>*</strong></span>
+                <input
+                  type="text"
+                  value={item.fabricCode}
+                  onChange={(event) => handleFabricCodeChange(item.draftId, event.target.value)}
+                  disabled={actionBusy}
+                  placeholder="e.g. F123"
+                />
+              </label>
+
+              <label className="field">
+                <span>Fabric Color (optional)</span>
+                <input
+                  type="text"
+                  value={item.fabricColor}
+                  onChange={(event) => handleFabricColorChange(item.draftId, event.target.value)}
+                  disabled={actionBusy}
+                  placeholder="e.g. Navy Blue"
+                />
+              </label>
+
+              <div className="row">
+                <button
+                  className="btn btn-light flex-1"
+                  onClick={() => openFabricPicker(item.draftId, "camera")}
+                  disabled={actionBusy}
+                >
+                  Capture
+                </button>
+                <button
+                  className="btn btn-light flex-1"
+                  onClick={() => openFabricPicker(item.draftId, "gallery")}
+                  disabled={actionBusy}
+                >
+                  Gallery
+                </button>
+              </div>
+            </article>
+          ))}
+
+          <button className="btn btn-light" onClick={handleAddFabric} disabled={actionBusy || fabricDrafts.length >= 3}>
+            Add Fabric
+          </button>
+
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            hidden
+            onChange={onFabricCameraChange}
+          />
+          <input
+            ref={galleryInputRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={onFabricGalleryChange}
+          />
+        </section>
+
+        <section className="card stack-sm">
+          <h2>Generate</h2>
+          <button
+            className="btn btn-dark"
+            disabled={actionBusy || !selectedHeroImageId || configuredFabricCount === 0}
+            onClick={handleCreateGeneration}
+          >
+            {creatingGeneration ? "Starting..." : "Generate"}
+          </button>
+
+          {visualizingGenerationId ? (
+            <div className="loading-box">
+              <div className="spinner" />
+              <p className="tiny muted">Visualizing...</p>
+            </div>
+          ) : null}
+        </section>
+      </section>
+    </main>
+  );
+}
+
+
+
+
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\main.tsx ===
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import React from "react";
+import ReactDOM from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
+
+import { AppRouter } from "./router";
+import { AuthProvider } from "./lib/auth";
+import "./styles.css";
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 60_000,
+      gcTime: 300_000,
+      retry: 1,
+      refetchOnWindowFocus: false
+    }
+  }
+});
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <BrowserRouter>
+      <AuthProvider>
+        <QueryClientProvider client={queryClient}>
+          <AppRouter />
+        </QueryClientProvider>
+      </AuthProvider>
+    </BrowserRouter>
+  </React.StrictMode>
+);
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\router.tsx ===
+import { lazy, Suspense } from "react";
+import { Navigate, Route, Routes } from "react-router-dom";
+
+import { AppShell } from "./components/AppShell";
+import { ProtectedRoute } from "./components/ProtectedRoute";
+
+const CatalogPage = lazy(() => import("./pages/CatalogPage").then((m) => ({ default: m.CatalogPage })));
+const CarouselPage = lazy(() => import("./pages/CarouselPage").then((m) => ({ default: m.CarouselPage })));
+const FabricSiloPage = lazy(() => import("./pages/FabricSiloPage").then((m) => ({ default: m.FabricSiloPage })));
+const GeneratePage = lazy(() => import("./pages/GeneratePage").then((m) => ({ default: m.GeneratePage })));
+const HomePage = lazy(() => import("./pages/HomePage").then((m) => ({ default: m.HomePage })));
+const LoginPage = lazy(() => import("./pages/LoginPage").then((m) => ({ default: m.LoginPage })));
+const MatchColorPage = lazy(() => import("./pages/MatchColorPage").then((m) => ({ default: m.MatchColorPage })));
+const OutputHistoryPage = lazy(() =>
+  import("./pages/OutputHistoryPage").then((m) => ({ default: m.OutputHistoryPage }))
+);
+const OutputViewerPage = lazy(() =>
+  import("./pages/OutputViewerPage").then((m) => ({ default: m.OutputViewerPage }))
+);
+
+function RouteFallback() {
+  return (
+    <main className="screen screen-centered">
+      <div className="spinner" aria-label="Loading" />
+    </main>
+  );
+}
+
+export function AppRouter() {
+  return (
+    <Suspense fallback={<RouteFallback />}>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+
+        <Route element={<ProtectedRoute />}>
+          <Route element={<AppShell />}>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/create-looks" element={<HomePage />} />
+            <Route path="/generate" element={<GeneratePage />} />
+            <Route path="/catalog" element={<CatalogPage />} />
+            <Route path="/fabric-silo" element={<FabricSiloPage />} />
+            <Route path="/output-history" element={<OutputHistoryPage />} />
+            <Route path="/output-viewer" element={<OutputViewerPage />} />
+            <Route path="/match-color" element={<MatchColorPage />} />
+            <Route path="/carousel" element={<CarouselPage />} />
+          </Route>
+        </Route>
+
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
+  );
+}
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\src\vite-env.d.ts ===
+/// <reference types="vite/client" />
+
+=== D:\AiVastraReactJSDemo 2.2 Codex\vite.config.ts ===
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { VitePWA } from "vite-plugin-pwa";
+
+export default defineConfig({
+  plugins: [
+    react(),
+    VitePWA({
+      registerType: "autoUpdate",
+      workbox: {
+        globPatterns: ["**/*.{js,css,html,ico,png,svg,webp,woff,woff2}"],
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/[^/]+\.supabase\.co\/storage\/.*/i,
+            handler: "CacheFirst",
+            options: {
+              cacheName: "supabase-images",
+              expiration: {
+                maxAgeSeconds: 3000,
+                maxEntries: 200
+              }
+            }
+          }
+        ]
+      }
+    })
+  ],
+  server: {
+    host: true,
+    port: 5173
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ["react", "react-dom", "react-router-dom"],
+          supabase: ["@supabase/supabase-js"]
+        }
+      }
+    }
+  }
+});
+
