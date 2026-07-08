@@ -15,12 +15,20 @@ export type FolderRow = {
   updated_at: string;
 };
 
+export type GarmentFabricSlot = {
+  id: string;
+  label: string;
+  apply_to: ApplyToTarget | string;
+  sort_order: number;
+};
+
 export type GarmentType = {
   id: string;
   name: string;
   prompt_template: string;
   default_hero_image_id: string | null;
   hero_image_signed_url: string | null;
+  fabric_slots?: GarmentFabricSlot[];
 };
 
 export type HeroImageRow = {
