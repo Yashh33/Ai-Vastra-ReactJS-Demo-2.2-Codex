@@ -241,6 +241,16 @@ export function FabricSiloPage() {
   }
 
   function selectFabric(row: FabricImageRow) {
+    const returnTab = searchParams.get("returnTab");
+    const slotId = searchParams.get("slotId");
+
+    if (returnTab === "multi" && slotId) {
+      navigate(
+        `/generate?tab=multi&slot_id=${encodeURIComponent(slotId)}&fabric_image_id=${encodeURIComponent(row.id)}`
+      );
+      return;
+    }
+
     navigate(`/generate?fabric_image_id=${encodeURIComponent(row.id)}`);
   }
 
