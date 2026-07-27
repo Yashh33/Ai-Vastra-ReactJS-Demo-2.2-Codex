@@ -2,7 +2,15 @@ import { useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { useMe } from "../lib/queries";
+import {
+  loadRazorpayCheckoutScript,
+  openRazorpayCheckout,
+  useCreateCreditOrder,
+  useRefreshCreditsAfterPayment
+} from "../lib/payments";
 import { supabase } from "../lib/supabase";
+
+const STARTER_PACK_ID = "starter";
 
 function formatCredits(value: number | null | undefined) {
   if (value === null || value === undefined) return "?";
@@ -52,8 +60,12 @@ export function AppShell() {
   const location = useLocation();
 
   const [loggingOut, setLoggingOut] = useState(false);
+  const [buyCreditsBusy, setBuyCreditsBusy] = useState(false);
+  const [buyCreditsMessage, setBuyCreditsMessage] = useState<string | null>(null);
 
   const { data: me, isError: meError } = useMe();
+  const createOrder = useCreateCreditOrder();
+  const refreshCreditsAfterPayment = useRefreshCreditsAfterPayment();
 
   const shopHeaderText = meError
     ? "Ai Vastra"
@@ -81,12 +93,51 @@ export function AppShell() {
     }
   };
 
+  const handleBuyCredits = async () => {
+    if (buyCreditsBusy) return;
+    setBuyCreditsBusy(true);
+    setBuyCreditsMessage(null);
+    try {
+      const order = await createOrder.mutateAsync(STARTER_PACK_ID);
+      await loadRazorpayCheckoutScript();
+      openRazorpayCheckout({
+        order,
+        onSuccess: () => {
+          setBuyCreditsMessage("Payment received! Credits add ho rahe hain...");
+          refreshCreditsAfterPayment();
+          setBuyCreditsBusy(false);
+          setTimeout(() => setBuyCreditsMessage(null), 12000);
+        },
+        onDismiss: () => {
+          setBuyCreditsBusy(false);
+        },
+        onFailure: (description) => {
+          setBuyCreditsMessage(description);
+          setBuyCreditsBusy(false);
+          setTimeout(() => setBuyCreditsMessage(null), 6000);
+        }
+      });
+    } catch (err) {
+      setBuyCreditsMessage(err instanceof Error ? err.message : "Could not start payment. Please try again.");
+      setBuyCreditsBusy(false);
+      setTimeout(() => setBuyCreditsMessage(null), 6000);
+    }
+  };
+
   return (
     <div className="app-shell">
       <header className="app-shell-header">
         <span className="app-brand-text">{shopHeaderText}</span>
-        <div className="row" style={{ flexWrap: "nowrap" }}>
+        <div className="row">
           <span className="credits-chip">{creditBalance} credits</span>
+          <button
+            className="buy-credits-btn"
+            type="button"
+            onClick={() => void handleBuyCredits()}
+            disabled={buyCreditsBusy}
+          >
+            {buyCreditsBusy ? "Starting..." : "Buy 5 looks - Rs.70"}
+          </button>
           <button
             className="catalog-icon-btn"
             type="button"
@@ -99,6 +150,8 @@ export function AppShell() {
           </button>
         </div>
       </header>
+
+      {buyCreditsMessage ? <div className="buy-credits-toast">{buyCreditsMessage}</div> : null}
 
       <div className="app-shell-content">
         <Outlet />
