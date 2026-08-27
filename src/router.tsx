@@ -17,6 +17,7 @@ const OutputHistoryPage = lazy(() =>
 const OutputViewerPage = lazy(() =>
   import("./pages/OutputViewerPage").then((m) => ({ default: m.OutputViewerPage }))
 );
+const ScreenPage = lazy(() => import("./pages/ScreenPage").then((m) => ({ default: m.ScreenPage })));
 
 function RouteFallback() {
   return (
@@ -31,6 +32,7 @@ export function AppRouter() {
     <Suspense fallback={<RouteFallback />}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/screen/:shopId" element={<ScreenPage />} />
 
         <Route element={<ProtectedRoute />}>
           <Route element={<AppShell />}>
