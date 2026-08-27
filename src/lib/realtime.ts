@@ -42,6 +42,7 @@ export type ShopScreenGenerationRow = {
   output_path: string | null;
   status: string;
   show_on_screen: boolean;
+  generation_type: string;
   created_at: string;
 };
 

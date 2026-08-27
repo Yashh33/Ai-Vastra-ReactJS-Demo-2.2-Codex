@@ -79,6 +79,7 @@ export function ScreenPage() {
         .select("id,output_path,created_at")
         .eq("shop_id", shopId)
         .eq("show_on_screen", true)
+        .eq("generation_type", "look")
         .order("created_at", { ascending: false })
         .limit(CAROUSEL_LIMIT);
 
@@ -127,7 +128,7 @@ export function ScreenPage() {
     });
 
     const unsubscribeGenerations = subscribeToShopGenerations(shopId, (row: ShopScreenGenerationRow) => {
-      if (cancelled || !row.show_on_screen || !row.output_path) return;
+      if (cancelled || !row.show_on_screen || !row.output_path || row.generation_type !== "look") return;
       const outputPath = row.output_path;
       void (async () => {
         try {
