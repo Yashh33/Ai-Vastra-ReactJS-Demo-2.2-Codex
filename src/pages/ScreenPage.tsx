@@ -68,7 +68,8 @@ export function ScreenPage() {
         if (cancelled) return;
         setLiveUrl(url);
         setScreenState("live");
-      } catch {
+      } catch (err) {
+        console.error("ScreenPage: failed to sign live generation URL", err);
         if (!cancelled) setScreenState("carousel");
       }
     }
@@ -91,7 +92,8 @@ export function ScreenPage() {
           .map(async (row: { id: string; output_path: string }) => {
             try {
               return { id: row.id, url: await createSignedUrl("generated-outputs", row.output_path, SIGNED_URL_TTL_SECONDS) };
-            } catch {
+            } catch (err) {
+              console.error("ScreenPage: failed to sign carousel item", row.id, err);
               return null;
             }
           })
@@ -117,6 +119,10 @@ export function ScreenPage() {
 
     void loadInitial();
 
+    const pollTimer = window.setInterval(() => {
+      void loadInitial();
+    }, 20000);
+
     const unsubscribeState = subscribeToShopScreenState(shopId, (row: ShopScreenStateRow) => {
       if (cancelled) return;
       if (row.live_generation_id) {
@@ -135,14 +141,15 @@ export function ScreenPage() {
           const url = await createSignedUrl("generated-outputs", outputPath, SIGNED_URL_TTL_SECONDS);
           if (cancelled) return;
           setCarousel((prev) => (prev.some((item) => item.id === row.id) ? prev : [{ id: row.id, url }, ...prev]));
-        } catch {
-          // ignore signing failures for a single realtime update
+        } catch (err) {
+          console.error("ScreenPage: failed to sign realtime generation", row.id, err);
         }
       })();
     });
 
     return () => {
       cancelled = true;
+      window.clearInterval(pollTimer);
       unsubscribeState();
       unsubscribeGenerations();
     };
