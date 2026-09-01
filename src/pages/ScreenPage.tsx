@@ -13,13 +13,14 @@ import {
 const SIGNED_URL_TTL_SECONDS = 6 * 60 * 60;
 const CAROUSEL_LIMIT = 30;
 const CAROUSEL_INTERVAL_MS = 6000;
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type CarouselItem = {
   id: string;
   url: string;
 };
 
-type ScreenState = "loading" | "live" | "carousel";
+type ScreenState = "loading" | "live" | "carousel" | "not-found";
 
 function useStageSize() {
   const [size, setSize] = useState(() => ({ width: window.innerHeight, height: window.innerWidth }));
@@ -43,9 +44,42 @@ export function ScreenPage() {
   const [liveUrl, setLiveUrl] = useState<string | null>(null);
   const [carousel, setCarousel] = useState<CarouselItem[]>([]);
   const [carouselIndex, setCarouselIndex] = useState(0);
+  const [resolvedShopId, setResolvedShopId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!shopId) return;
+    const routeParam = shopId;
+    let cancelled = false;
+    setResolvedShopId(null);
+    setScreenState("loading");
+
+    async function resolveShopId() {
+      if (UUID_REGEX.test(routeParam)) {
+        if (!cancelled) setResolvedShopId(routeParam);
+        return;
+      }
+
+      const { data, error } = await supabase.from("shops").select("id").eq("screen_slug", routeParam).single();
+
+      if (cancelled) return;
+
+      if (error || !data?.id) {
+        setScreenState("not-found");
+        return;
+      }
+
+      setResolvedShopId(data.id);
+    }
+
+    void resolveShopId();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [shopId]);
+
+  useEffect(() => {
+    if (!resolvedShopId) return;
     let cancelled = false;
 
     async function activateLive(generationId: string) {
@@ -78,7 +112,7 @@ export function ScreenPage() {
       const { data: approvedRows } = await supabase
         .from("generations")
         .select("id,output_path,created_at")
-        .eq("shop_id", shopId)
+        .eq("shop_id", resolvedShopId)
         .eq("show_on_screen", true)
         .eq("generation_type", "look")
         .order("created_at", { ascending: false })
@@ -105,7 +139,7 @@ export function ScreenPage() {
       const { data: stateRow } = await supabase
         .from("shop_screen_state")
         .select("live_generation_id")
-        .eq("shop_id", shopId)
+        .eq("shop_id", resolvedShopId)
         .maybeSingle();
 
       if (cancelled) return;
@@ -123,7 +157,7 @@ export function ScreenPage() {
       void loadInitial();
     }, 20000);
 
-    const unsubscribeState = subscribeToShopScreenState(shopId, (row: ShopScreenStateRow) => {
+    const unsubscribeState = subscribeToShopScreenState(resolvedShopId, (row: ShopScreenStateRow) => {
       if (cancelled) return;
       if (row.live_generation_id) {
         void activateLive(row.live_generation_id);
@@ -133,7 +167,7 @@ export function ScreenPage() {
       }
     });
 
-    const unsubscribeGenerations = subscribeToShopGenerations(shopId, (row: ShopScreenGenerationRow) => {
+    const unsubscribeGenerations = subscribeToShopGenerations(resolvedShopId, (row: ShopScreenGenerationRow) => {
       if (cancelled || !row.show_on_screen || !row.output_path || row.generation_type !== "look") return;
       const outputPath = row.output_path;
       void (async () => {
@@ -153,7 +187,7 @@ export function ScreenPage() {
       unsubscribeState();
       unsubscribeGenerations();
     };
-  }, [shopId]);
+  }, [resolvedShopId]);
 
   useEffect(() => {
     if (screenState !== "carousel" || carousel.length <= 1) return;
@@ -176,7 +210,9 @@ export function ScreenPage() {
   return (
     <main className="tv-screen">
       <div id="stage" className="tv-stage" style={stageStyle}>
-        {screenState === "live" && liveUrl ? (
+        {screenState === "not-found" ? (
+          <div className="tv-idle">Shop not found</div>
+        ) : screenState === "live" && liveUrl ? (
           <div className="tv-media">
             <img key={liveUrl} src={liveUrl} alt="Your generated look" />
             <div className="tv-banner">Looks good on you! 😍</div>
