@@ -227,7 +227,6 @@ export function ScreenPage() {
         .from("generations")
         .select("id,output_path,created_at")
         .eq("shop_id", resolvedShopId)
-        .eq("show_on_screen", true)
         .eq("generation_type", "look")
         .order("created_at", { ascending: false })
         .limit(CAROUSEL_LIMIT);
@@ -269,7 +268,7 @@ export function ScreenPage() {
     });
 
     const unsubscribeGenerations = subscribeToShopGenerations(resolvedShopId, (row: ShopScreenGenerationRow) => {
-      if (cancelled || !row.show_on_screen || !row.output_path || row.generation_type !== "look") return;
+      if (cancelled || !row.output_path || row.generation_type !== "look") return;
       const outputPath = row.output_path;
       setCarouselRows((prev) => {
         if (prev.some((item) => item.id === row.id)) return prev;
@@ -348,18 +347,13 @@ export function ScreenPage() {
     return () => window.clearInterval(timer);
   }, [mode, carouselRows.length]);
 
-  async function upsertShopScreenState(nextMode: "catalog" | "live") {
+  async function setScreenMode(nextMode: "catalog" | "live") {
     if (!resolvedShopId) return;
     try {
-      const { error } = await supabase.from("shop_screen_state").upsert({
-        shop_id: resolvedShopId,
-        mode: nextMode,
-        live_generation_id: null,
-        updated_at: new Date().toISOString()
-      });
-      if (error) console.error("ScreenPage: failed to update shop_screen_state", error);
+      const { error } = await supabase.rpc("set_screen_mode", { p_shop_id: resolvedShopId, p_mode: nextMode });
+      if (error) console.error("ScreenPage: failed to set screen mode", error);
     } catch (err) {
-      console.error("ScreenPage: failed to update shop_screen_state", err);
+      console.error("ScreenPage: failed to set screen mode", err);
     }
   }
 
@@ -401,7 +395,7 @@ export function ScreenPage() {
                 type="button"
                 className="tv-choice-btn"
                 tabIndex={0}
-                onClick={() => void upsertShopScreenState("catalog")}
+                onClick={() => void setScreenMode("catalog")}
               >
                 Catalog
               </button>
@@ -409,7 +403,7 @@ export function ScreenPage() {
                 type="button"
                 className="tv-choice-btn"
                 tabIndex={0}
-                onClick={() => void upsertShopScreenState("live")}
+                onClick={() => void setScreenMode("live")}
               >
                 Live TV
               </button>
