@@ -32,6 +32,7 @@ export function subscribeToGeneration(
 
 export type ShopScreenStateRow = {
   shop_id: string;
+  mode: string;
   live_generation_id: string | null;
   updated_at: string;
 };

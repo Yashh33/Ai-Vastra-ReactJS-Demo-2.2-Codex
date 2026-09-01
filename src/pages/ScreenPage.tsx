@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { supabase } from "../lib/supabase";
@@ -13,6 +13,7 @@ import {
 const SIGNED_URL_TTL_SECONDS = 6 * 60 * 60;
 const CAROUSEL_LIMIT = 30;
 const CAROUSEL_INTERVAL_MS = 6000;
+const POLL_INTERVAL_MS = 5000;
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type CarouselItem = {
@@ -20,15 +21,27 @@ type CarouselItem = {
   url: string;
 };
 
-type ScreenState = "loading" | "live" | "carousel" | "not-found";
+type CarouselRow = {
+  id: string;
+  output_path: string;
+  created_at: string;
+};
 
-function carouselArraysEqual(a: CarouselItem[], b: CarouselItem[]) {
+type ScreenMode = "idle" | "catalog" | "live";
+
+type ScreenState = "loading" | "live" | "carousel" | "idle" | "not-found";
+
+function normalizeMode(rawMode: string | null | undefined): ScreenMode {
+  return rawMode === "idle" || rawMode === "live" ? rawMode : "catalog";
+}
+
+function carouselRowsEqual(a: CarouselRow[], b: CarouselRow[]) {
   if (a === b) return true;
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
-    const itemA = a[i];
-    const itemB = b[i];
-    if (!itemA || !itemB || itemA.id !== itemB.id || itemA.url !== itemB.url) return false;
+    const x = a[i];
+    const y = b[i];
+    if (!x || !y || x.id !== y.id) return false;
   }
   return true;
 }
@@ -52,18 +65,26 @@ export function ScreenPage() {
   const stageSize = useStageSize();
 
   const [screenState, setScreenState] = useState<ScreenState>("loading");
+  const [mode, setMode] = useState<ScreenMode | null>(null);
   const [liveUrl, setLiveUrl] = useState<string | null>(null);
-  const [carousel, setCarousel] = useState<CarouselItem[]>([]);
+  const [liveHasBanner, setLiveHasBanner] = useState(false);
+  const [carouselRows, setCarouselRows] = useState<CarouselRow[]>([]);
   const [carouselIndex, setCarouselIndex] = useState(0);
+  const [currentCarouselImage, setCurrentCarouselImage] = useState<CarouselItem | null>(null);
   const [resolvedShopId, setResolvedShopId] = useState<string | null>(null);
+
   const liveGenerationIdRef = useRef<string | null>(null);
+  const liveIsRealRef = useRef(false);
   const carouselUrlMapRef = useRef<Map<string, string>>(new Map());
+  const carouselRowsRef = useRef<CarouselRow[]>([]);
+  const appliedModeRef = useRef<ScreenMode | null>(null);
 
   useEffect(() => {
     if (!shopId) return;
     const routeParam = shopId;
     let cancelled = false;
     setResolvedShopId(null);
+    setMode(null);
     setScreenState("loading");
 
     async function resolveShopId() {
@@ -94,19 +115,55 @@ export function ScreenPage() {
   useEffect(() => {
     if (!resolvedShopId) return;
     let cancelled = false;
-    liveGenerationIdRef.current = null;
-    carouselUrlMapRef.current = new Map();
 
-    function clearLive() {
+    liveGenerationIdRef.current = null;
+    liveIsRealRef.current = false;
+    carouselUrlMapRef.current = new Map();
+    carouselRowsRef.current = [];
+    appliedModeRef.current = null;
+
+    function clearLiveTracking() {
       if (liveGenerationIdRef.current !== null) {
         liveGenerationIdRef.current = null;
+        liveIsRealRef.current = false;
         setLiveUrl(null);
+        setLiveHasBanner(false);
       }
-      setScreenState("carousel");
+    }
+
+    async function activateLiveFallback() {
+      const newest = carouselRowsRef.current[0];
+
+      if (!newest) {
+        clearLiveTracking();
+        setScreenState("loading");
+        return;
+      }
+
+      if (liveGenerationIdRef.current === newest.id && !liveIsRealRef.current) return;
+
+      let url = carouselUrlMapRef.current.get(newest.id);
+      if (!url) {
+        try {
+          url = await createSignedUrl("generated-outputs", newest.output_path, SIGNED_URL_TTL_SECONDS);
+          carouselUrlMapRef.current.set(newest.id, url);
+        } catch (err) {
+          console.error("ScreenPage: failed to sign fallback live image", newest.id, err);
+          return;
+        }
+      }
+
+      if (cancelled) return;
+
+      liveGenerationIdRef.current = newest.id;
+      liveIsRealRef.current = false;
+      setLiveUrl(url);
+      setLiveHasBanner(false);
+      setScreenState("live");
     }
 
     async function activateLive(generationId: string) {
-      if (liveGenerationIdRef.current === generationId) return;
+      if (liveGenerationIdRef.current === generationId && liveIsRealRef.current) return;
 
       const { data: genRow } = await supabase
         .from("generations")
@@ -117,7 +174,7 @@ export function ScreenPage() {
       if (cancelled) return;
 
       if (!genRow?.output_path) {
-        clearLive();
+        await activateLiveFallback();
         return;
       }
 
@@ -125,11 +182,43 @@ export function ScreenPage() {
         const url = await createSignedUrl("generated-outputs", genRow.output_path, SIGNED_URL_TTL_SECONDS);
         if (cancelled) return;
         liveGenerationIdRef.current = generationId;
+        liveIsRealRef.current = true;
         setLiveUrl(url);
+        setLiveHasBanner(true);
         setScreenState("live");
       } catch (err) {
         console.error("ScreenPage: failed to sign live generation URL", err);
-        if (!cancelled) clearLive();
+      }
+    }
+
+    function applyState(rawMode: string | null | undefined, liveGenId: string | null) {
+      const normalizedMode = normalizeMode(rawMode);
+      const modeChanged = appliedModeRef.current !== normalizedMode;
+      appliedModeRef.current = normalizedMode;
+      setMode(normalizedMode);
+
+      if (normalizedMode !== "live") {
+        clearLiveTracking();
+      }
+
+      if (normalizedMode === "idle") {
+        setScreenState("idle");
+        return;
+      }
+
+      if (normalizedMode === "live") {
+        if (modeChanged) setScreenState("loading");
+        if (liveGenId) {
+          void activateLive(liveGenId);
+        } else {
+          void activateLiveFallback();
+        }
+        return;
+      }
+
+      if (modeChanged) {
+        setCarouselIndex(0);
+        setScreenState("loading");
       }
     }
 
@@ -145,88 +234,49 @@ export function ScreenPage() {
 
       if (cancelled) return;
 
-      const rows = (approvedRows ?? [])
+      const rows: CarouselRow[] = (approvedRows ?? [])
         .filter((row: { output_path: string | null }) => !!row.output_path)
-        .map((row: { id: string; output_path: string }) => row);
+        .map((row: { id: string; output_path: string; created_at: string }) => row);
 
       const currentIds = new Set(rows.map((row) => row.id));
       for (const id of Array.from(carouselUrlMapRef.current.keys())) {
         if (!currentIds.has(id)) carouselUrlMapRef.current.delete(id);
       }
 
-      const rowsToSign = rows.filter((row) => !carouselUrlMapRef.current.has(row.id));
-
-      const signedNew = await Promise.all(
-        rowsToSign.map(async (row) => {
-          try {
-            return { id: row.id, url: await createSignedUrl("generated-outputs", row.output_path, SIGNED_URL_TTL_SECONDS) };
-          } catch (err) {
-            console.error("ScreenPage: failed to sign carousel item", row.id, err);
-            return null;
-          }
-        })
-      );
-
-      if (cancelled) return;
-
-      for (const item of signedNew) {
-        if (item) carouselUrlMapRef.current.set(item.id, item.url);
-      }
-
-      const nextCarousel = rows
-        .map((row) => {
-          const url = carouselUrlMapRef.current.get(row.id);
-          return url ? { id: row.id, url } : null;
-        })
-        .filter((item): item is CarouselItem => item !== null);
-
-      setCarousel((prev) => (carouselArraysEqual(prev, nextCarousel) ? prev : nextCarousel));
+      carouselRowsRef.current = rows;
+      setCarouselRows((prev) => (carouselRowsEqual(prev, rows) ? prev : rows));
 
       const { data: stateRow } = await supabase
         .from("shop_screen_state")
-        .select("live_generation_id")
+        .select("mode,live_generation_id")
         .eq("shop_id", resolvedShopId)
         .maybeSingle();
 
       if (cancelled) return;
 
-      if (stateRow?.live_generation_id) {
-        await activateLive(stateRow.live_generation_id);
-      } else {
-        clearLive();
-      }
+      applyState(stateRow?.mode ?? null, stateRow?.live_generation_id ?? null);
     }
 
     void loadInitial();
 
     const pollTimer = window.setInterval(() => {
       void loadInitial();
-    }, 20000);
+    }, POLL_INTERVAL_MS);
 
     const unsubscribeState = subscribeToShopScreenState(resolvedShopId, (row: ShopScreenStateRow) => {
       if (cancelled) return;
-      if (row.live_generation_id) {
-        void activateLive(row.live_generation_id);
-      } else {
-        clearLive();
-      }
+      applyState(row.mode, row.live_generation_id);
     });
 
     const unsubscribeGenerations = subscribeToShopGenerations(resolvedShopId, (row: ShopScreenGenerationRow) => {
       if (cancelled || !row.show_on_screen || !row.output_path || row.generation_type !== "look") return;
-      if (carouselUrlMapRef.current.has(row.id)) return;
       const outputPath = row.output_path;
-      void (async () => {
-        try {
-          const url = await createSignedUrl("generated-outputs", outputPath, SIGNED_URL_TTL_SECONDS);
-          if (cancelled) return;
-          if (carouselUrlMapRef.current.has(row.id)) return;
-          carouselUrlMapRef.current.set(row.id, url);
-          setCarousel((prev) => (prev.some((item) => item.id === row.id) ? prev : [{ id: row.id, url }, ...prev]));
-        } catch (err) {
-          console.error("ScreenPage: failed to sign realtime generation", row.id, err);
-        }
-      })();
+      setCarouselRows((prev) => {
+        if (prev.some((item) => item.id === row.id)) return prev;
+        const next = [{ id: row.id, output_path: outputPath, created_at: row.created_at }, ...prev];
+        carouselRowsRef.current = next;
+        return next;
+      });
     });
 
     return () => {
@@ -238,17 +288,80 @@ export function ScreenPage() {
   }, [resolvedShopId]);
 
   useEffect(() => {
-    if (screenState !== "carousel" || carousel.length <= 1) return;
+    if (mode !== "catalog") return;
+
+    if (!carouselRows.length) {
+      setCurrentCarouselImage(null);
+      return;
+    }
+
+    let cancelled = false;
+    const length = carouselRows.length;
+    const idx = ((carouselIndex % length) + length) % length;
+    const row = carouselRows[idx];
+    if (!row) return;
+
+    async function showFrame() {
+      if (!row) return;
+      let resolvedUrl = carouselUrlMapRef.current.get(row.id);
+
+      if (!resolvedUrl) {
+        try {
+          resolvedUrl = await createSignedUrl("generated-outputs", row.output_path, SIGNED_URL_TTL_SECONDS);
+          carouselUrlMapRef.current.set(row.id, resolvedUrl);
+        } catch (err) {
+          console.error("ScreenPage: failed to sign carousel item", row.id, err);
+          return;
+        }
+      }
+
+      if (cancelled) return;
+
+      const url = resolvedUrl;
+      const rowId = row.id;
+      setCurrentCarouselImage((prev) => (prev && prev.id === rowId && prev.url === url ? prev : { id: rowId, url }));
+      setScreenState("carousel");
+
+      const nextRow = carouselRows[(idx + 1) % length];
+      if (nextRow && nextRow.id !== row.id && !carouselUrlMapRef.current.has(nextRow.id)) {
+        try {
+          const nextUrl = await createSignedUrl("generated-outputs", nextRow.output_path, SIGNED_URL_TTL_SECONDS);
+          if (!cancelled) carouselUrlMapRef.current.set(nextRow.id, nextUrl);
+        } catch (err) {
+          console.error("ScreenPage: failed to prefetch carousel item", nextRow.id, err);
+        }
+      }
+    }
+
+    void showFrame();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, carouselRows, carouselIndex]);
+
+  useEffect(() => {
+    if (mode !== "catalog" || carouselRows.length <= 1) return;
     const timer = window.setInterval(() => {
-      setCarouselIndex((prev) => (prev + 1) % carousel.length);
+      setCarouselIndex((prev) => (prev + 1) % carouselRows.length);
     }, CAROUSEL_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [screenState, carousel.length]);
+  }, [mode, carouselRows.length]);
 
-  const currentCarouselItem = useMemo(() => {
-    if (!carousel.length) return null;
-    return carousel[carouselIndex % carousel.length] ?? null;
-  }, [carousel, carouselIndex]);
+  async function upsertShopScreenState(nextMode: "catalog" | "live") {
+    if (!resolvedShopId) return;
+    try {
+      const { error } = await supabase.from("shop_screen_state").upsert({
+        shop_id: resolvedShopId,
+        mode: nextMode,
+        live_generation_id: null,
+        updated_at: new Date().toISOString()
+      });
+      if (error) console.error("ScreenPage: failed to update shop_screen_state", error);
+    } catch (err) {
+      console.error("ScreenPage: failed to update shop_screen_state", err);
+    }
+  }
 
   const stageStyle = {
     width: `${stageSize.width}px`,
@@ -257,17 +370,59 @@ export function ScreenPage() {
 
   return (
     <main className="tv-screen">
+      <style>{`
+        .tv-chooser { flex-direction: column; gap: clamp(24px, 4vw, 48px); }
+        .tv-chooser-title { font-size: clamp(1.75rem, 4vw, 3rem); font-weight: 700; letter-spacing: 0.04em; color: #f8fafc; }
+        .tv-chooser-buttons { display: flex; gap: clamp(16px, 3vw, 32px); }
+        .tv-choice-btn {
+          font: inherit;
+          font-size: clamp(1.25rem, 2.4vw, 2rem);
+          font-weight: 700;
+          letter-spacing: 0.02em;
+          color: #1B1B2F;
+          background: #C9A84C;
+          border: none;
+          border-radius: 18px;
+          padding: clamp(20px, 3vw, 36px) clamp(36px, 5vw, 64px);
+          cursor: pointer;
+          transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        .tv-choice-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(201, 168, 76, 0.35); }
+        .tv-choice-btn:focus-visible { outline: 4px solid #f8fafc; outline-offset: 4px; }
+      `}</style>
       <div id="stage" className="tv-stage" style={stageStyle}>
         {screenState === "not-found" ? (
           <div className="tv-idle">Shop not found</div>
+        ) : screenState === "idle" ? (
+          <div className="tv-idle tv-chooser">
+            <div className="tv-chooser-title">AI Vastra</div>
+            <div className="tv-chooser-buttons">
+              <button
+                type="button"
+                className="tv-choice-btn"
+                tabIndex={0}
+                onClick={() => void upsertShopScreenState("catalog")}
+              >
+                Catalog
+              </button>
+              <button
+                type="button"
+                className="tv-choice-btn"
+                tabIndex={0}
+                onClick={() => void upsertShopScreenState("live")}
+              >
+                Live TV
+              </button>
+            </div>
+          </div>
         ) : screenState === "live" && liveUrl ? (
           <div className="tv-media">
             <img key={liveUrl} src={liveUrl} alt="Your generated look" />
-            <div className="tv-banner">Looks good on you! 😍</div>
+            {liveHasBanner ? <div className="tv-banner">Looks good on you! 😍</div> : null}
           </div>
-        ) : currentCarouselItem ? (
+        ) : screenState === "carousel" && currentCarouselImage ? (
           <div className="tv-media">
-            <img key={currentCarouselItem.id} src={currentCarouselItem.url} alt="Approved look" />
+            <img key={currentCarouselImage.id} src={currentCarouselImage.url} alt="Approved look" />
           </div>
         ) : (
           <div className="tv-idle">AI Vastra</div>
