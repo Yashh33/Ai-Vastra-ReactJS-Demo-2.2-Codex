@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { supabase } from "../lib/supabase";
@@ -21,6 +21,17 @@ type CarouselItem = {
 };
 
 type ScreenState = "loading" | "live" | "carousel" | "not-found";
+
+function carouselArraysEqual(a: CarouselItem[], b: CarouselItem[]) {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const itemA = a[i];
+    const itemB = b[i];
+    if (!itemA || !itemB || itemA.id !== itemB.id || itemA.url !== itemB.url) return false;
+  }
+  return true;
+}
 
 function useStageSize() {
   const [size, setSize] = useState(() => ({ width: window.innerHeight, height: window.innerWidth }));
@@ -45,6 +56,8 @@ export function ScreenPage() {
   const [carousel, setCarousel] = useState<CarouselItem[]>([]);
   const [carouselIndex, setCarouselIndex] = useState(0);
   const [resolvedShopId, setResolvedShopId] = useState<string | null>(null);
+  const liveGenerationIdRef = useRef<string | null>(null);
+  const carouselUrlMapRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     if (!shopId) return;
@@ -59,16 +72,16 @@ export function ScreenPage() {
         return;
       }
 
-      const { data, error } = await supabase.from("shops").select("id").eq("screen_slug", routeParam).single();
+      const { data, error } = await supabase.rpc("resolve_shop_by_slug", { p_slug: routeParam });
 
       if (cancelled) return;
 
-      if (error || !data?.id) {
+      if (error || !data) {
         setScreenState("not-found");
         return;
       }
 
-      setResolvedShopId(data.id);
+      setResolvedShopId(data);
     }
 
     void resolveShopId();
@@ -81,8 +94,20 @@ export function ScreenPage() {
   useEffect(() => {
     if (!resolvedShopId) return;
     let cancelled = false;
+    liveGenerationIdRef.current = null;
+    carouselUrlMapRef.current = new Map();
+
+    function clearLive() {
+      if (liveGenerationIdRef.current !== null) {
+        liveGenerationIdRef.current = null;
+        setLiveUrl(null);
+      }
+      setScreenState("carousel");
+    }
 
     async function activateLive(generationId: string) {
+      if (liveGenerationIdRef.current === generationId) return;
+
       const { data: genRow } = await supabase
         .from("generations")
         .select("id,output_path")
@@ -92,19 +117,19 @@ export function ScreenPage() {
       if (cancelled) return;
 
       if (!genRow?.output_path) {
-        setLiveUrl(null);
-        setScreenState("carousel");
+        clearLive();
         return;
       }
 
       try {
         const url = await createSignedUrl("generated-outputs", genRow.output_path, SIGNED_URL_TTL_SECONDS);
         if (cancelled) return;
+        liveGenerationIdRef.current = generationId;
         setLiveUrl(url);
         setScreenState("live");
       } catch (err) {
         console.error("ScreenPage: failed to sign live generation URL", err);
-        if (!cancelled) setScreenState("carousel");
+        if (!cancelled) clearLive();
       }
     }
 
@@ -120,21 +145,42 @@ export function ScreenPage() {
 
       if (cancelled) return;
 
-      const signed = await Promise.all(
-        (approvedRows ?? [])
-          .filter((row: { output_path: string | null }) => !!row.output_path)
-          .map(async (row: { id: string; output_path: string }) => {
-            try {
-              return { id: row.id, url: await createSignedUrl("generated-outputs", row.output_path, SIGNED_URL_TTL_SECONDS) };
-            } catch (err) {
-              console.error("ScreenPage: failed to sign carousel item", row.id, err);
-              return null;
-            }
-          })
+      const rows = (approvedRows ?? [])
+        .filter((row: { output_path: string | null }) => !!row.output_path)
+        .map((row: { id: string; output_path: string }) => row);
+
+      const currentIds = new Set(rows.map((row) => row.id));
+      for (const id of Array.from(carouselUrlMapRef.current.keys())) {
+        if (!currentIds.has(id)) carouselUrlMapRef.current.delete(id);
+      }
+
+      const rowsToSign = rows.filter((row) => !carouselUrlMapRef.current.has(row.id));
+
+      const signedNew = await Promise.all(
+        rowsToSign.map(async (row) => {
+          try {
+            return { id: row.id, url: await createSignedUrl("generated-outputs", row.output_path, SIGNED_URL_TTL_SECONDS) };
+          } catch (err) {
+            console.error("ScreenPage: failed to sign carousel item", row.id, err);
+            return null;
+          }
+        })
       );
 
       if (cancelled) return;
-      setCarousel(signed.filter((item): item is CarouselItem => item !== null));
+
+      for (const item of signedNew) {
+        if (item) carouselUrlMapRef.current.set(item.id, item.url);
+      }
+
+      const nextCarousel = rows
+        .map((row) => {
+          const url = carouselUrlMapRef.current.get(row.id);
+          return url ? { id: row.id, url } : null;
+        })
+        .filter((item): item is CarouselItem => item !== null);
+
+      setCarousel((prev) => (carouselArraysEqual(prev, nextCarousel) ? prev : nextCarousel));
 
       const { data: stateRow } = await supabase
         .from("shop_screen_state")
@@ -147,7 +193,7 @@ export function ScreenPage() {
       if (stateRow?.live_generation_id) {
         await activateLive(stateRow.live_generation_id);
       } else {
-        setScreenState("carousel");
+        clearLive();
       }
     }
 
@@ -162,18 +208,20 @@ export function ScreenPage() {
       if (row.live_generation_id) {
         void activateLive(row.live_generation_id);
       } else {
-        setLiveUrl(null);
-        setScreenState("carousel");
+        clearLive();
       }
     });
 
     const unsubscribeGenerations = subscribeToShopGenerations(resolvedShopId, (row: ShopScreenGenerationRow) => {
       if (cancelled || !row.show_on_screen || !row.output_path || row.generation_type !== "look") return;
+      if (carouselUrlMapRef.current.has(row.id)) return;
       const outputPath = row.output_path;
       void (async () => {
         try {
           const url = await createSignedUrl("generated-outputs", outputPath, SIGNED_URL_TTL_SECONDS);
           if (cancelled) return;
+          if (carouselUrlMapRef.current.has(row.id)) return;
+          carouselUrlMapRef.current.set(row.id, url);
           setCarousel((prev) => (prev.some((item) => item.id === row.id) ? prev : [{ id: row.id, url }, ...prev]));
         } catch (err) {
           console.error("ScreenPage: failed to sign realtime generation", row.id, err);
