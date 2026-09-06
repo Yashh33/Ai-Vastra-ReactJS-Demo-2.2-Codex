@@ -550,7 +550,7 @@ export function ScreenPage() {
     }
   }
 
-  async function setScreenMode(nextMode: "catalog" | "live") {
+  async function setScreenMode(nextMode: ScreenMode) {
     if (!resolvedShopId) return;
     try {
       const { error } = await supabase.rpc("set_screen_mode", { p_shop_id: resolvedShopId, p_mode: nextMode });
@@ -558,6 +558,10 @@ export function ScreenPage() {
     } catch (err) {
       console.error("ScreenPage: failed to set screen mode", err);
     }
+  }
+
+  function navButtonClass(target: ScreenMode) {
+    return `tv-nav-btn${mode === target ? " tv-nav-btn-active" : ""}`;
   }
 
   const stageStyle = {
@@ -568,16 +572,83 @@ export function ScreenPage() {
   return (
     <main className="tv-screen">
       <style>{`
+        :root {
+          --navy: #1B1B2F;
+          --gold: #C9A84C;
+          --page: #F5F4F1;
+          --card: #FFFFFF;
+          --border: #E6E4DE;
+          --muted: #6B6B72;
+        }
+
+        .tv-screen { background: var(--page); }
+        .tv-stage { background: var(--page); }
+        .tv-media { background: var(--page); }
+        .tv-idle { color: var(--navy); }
+        .tv-banner {
+          left: 50%;
+          right: auto;
+          bottom: 6%;
+          transform: translateX(-50%);
+          text-align: center;
+          color: var(--navy);
+          background: rgba(255, 255, 255, 0.92);
+          border: 1px solid var(--border);
+          font-size: clamp(1.1rem, 2.6vw, 2rem);
+          font-weight: 700;
+          text-shadow: none;
+          padding: clamp(10px, 1.5vw, 18px) clamp(20px, 3vw, 36px);
+          border-radius: 999px;
+          box-shadow: 0 10px 30px rgba(27, 27, 47, 0.18);
+          white-space: nowrap;
+        }
+
+        .tv-shell { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--page); color: var(--navy); overflow: hidden; }
+
+        .tv-mode-nav {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          flex-shrink: 0;
+          flex-wrap: wrap;
+          gap: clamp(12px, 2vw, 24px);
+          padding: clamp(12px, 1.8vw, 22px) clamp(16px, 2.5vw, 32px);
+          background: var(--card);
+          border-bottom: 1px solid var(--border);
+        }
+        .tv-wordmark { font-size: clamp(1.1rem, 2vw, 1.75rem); font-weight: 800; letter-spacing: 0.02em; white-space: nowrap; }
+        .tv-wordmark-primary { color: var(--navy); }
+        .tv-wordmark-accent { color: var(--gold); }
+        .tv-mode-nav-buttons { display: flex; gap: clamp(8px, 1.2vw, 14px); flex-wrap: wrap; }
+        .tv-nav-btn {
+          font: inherit;
+          font-size: clamp(0.85rem, 1.3vw, 1.15rem);
+          font-weight: 700;
+          color: var(--navy);
+          background: var(--page);
+          border: 1px solid var(--border);
+          border-radius: 999px;
+          padding: 8px 18px;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: background 0.15s ease, transform 0.15s ease;
+        }
+        .tv-nav-btn:hover { background: #EFEDE8; }
+        .tv-nav-btn:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+        .tv-nav-btn-active { background: var(--navy); color: var(--gold); border-color: var(--navy); }
+
+        .tv-mode-content { position: relative; flex: 1; overflow: hidden; }
+
         .tv-chooser { flex-direction: column; gap: clamp(24px, 4vw, 48px); }
-        .tv-chooser-title { font-size: clamp(1.75rem, 4vw, 3rem); font-weight: 700; letter-spacing: 0.04em; color: #f8fafc; }
+        .tv-chooser-title { font-size: clamp(1.75rem, 4vw, 3rem); font-weight: 800; letter-spacing: 0.04em; }
         .tv-chooser-buttons { display: flex; gap: clamp(16px, 3vw, 32px); }
         .tv-choice-btn {
           font: inherit;
           font-size: clamp(1.25rem, 2.4vw, 2rem);
           font-weight: 700;
           letter-spacing: 0.02em;
-          color: #1B1B2F;
-          background: #C9A84C;
+          color: var(--navy);
+          background: var(--gold);
           border: none;
           border-radius: 18px;
           padding: clamp(20px, 3vw, 36px) clamp(36px, 5vw, 64px);
@@ -585,21 +656,17 @@ export function ScreenPage() {
           transition: transform 0.15s ease, box-shadow 0.15s ease;
         }
         .tv-choice-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(201, 168, 76, 0.35); }
-        .tv-choice-btn:focus-visible { outline: 4px solid #f8fafc; outline-offset: 4px; }
+        .tv-choice-btn:focus-visible { outline: 4px solid var(--navy); outline-offset: 4px; }
 
-        .tv-browse { position: absolute; inset: 0; display: flex; flex-direction: column; background: #F5F4F1; color: #1B1B2F; overflow: hidden; }
-        .tv-browse-header { display: flex; align-items: center; flex-shrink: 0; padding: clamp(16px, 2.5vw, 32px) clamp(16px, 2.5vw, 32px) 0; }
-        .tv-browse-wordmark { font-size: clamp(1.25rem, 2.2vw, 2rem); font-weight: 800; letter-spacing: 0.02em; }
-        .tv-browse-wordmark-ai { color: #1B1B2F; }
-        .tv-browse-wordmark-vastra { color: #C9A84C; }
+        .tv-browse { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--page); color: var(--navy); overflow: hidden; }
         .tv-browse-tabs { display: flex; gap: 12px; overflow-x: auto; flex-shrink: 0; padding: clamp(16px, 2.5vw, 32px); }
         .tv-browse-tab {
           font: inherit;
           font-size: clamp(1rem, 1.8vw, 1.5rem);
           font-weight: 600;
-          color: #1B1B2F;
-          background: #FFFFFF;
-          border: 1px solid #E6E4DE;
+          color: var(--navy);
+          background: var(--card);
+          border: 1px solid var(--border);
           border-radius: 999px;
           padding: 10px 24px;
           cursor: pointer;
@@ -607,8 +674,8 @@ export function ScreenPage() {
           transition: background 0.15s ease, border-color 0.15s ease;
         }
         .tv-browse-tab:hover { background: #EFEDE8; }
-        .tv-browse-tab:focus-visible { outline: 3px solid #C9A84C; outline-offset: 2px; }
-        .tv-browse-tab-active { background: #1B1B2F; color: #C9A84C; border-color: #1B1B2F; }
+        .tv-browse-tab:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+        .tv-browse-tab-active { background: var(--navy); color: var(--gold); border-color: var(--navy); }
 
         .tv-browse-grid {
           flex: 1;
@@ -622,17 +689,17 @@ export function ScreenPage() {
         .tv-browse-tile {
           position: relative;
           aspect-ratio: 3 / 4;
-          border: 1px solid #E6E4DE;
+          border: 1px solid var(--border);
           border-radius: 14px;
           overflow: hidden;
           padding: 0;
           cursor: pointer;
-          background: #FFFFFF;
+          background: var(--card);
         }
         .tv-browse-tile img { width: 100%; height: 100%; object-fit: cover; display: block; animation: tv-fade-in 0.4s ease; }
-        .tv-browse-tile-placeholder { width: 100%; height: 100%; background: linear-gradient(135deg, #F5F4F1, #EFEDE8); }
-        .tv-browse-tile:hover { outline: 3px solid #C9A84C; outline-offset: -3px; }
-        .tv-browse-tile:focus-visible { outline: 4px solid #C9A84C; outline-offset: -4px; }
+        .tv-browse-tile-placeholder { width: 100%; height: 100%; background: linear-gradient(135deg, var(--page), #EFEDE8); }
+        .tv-browse-tile:hover { outline: 3px solid var(--gold); outline-offset: -3px; }
+        .tv-browse-tile:focus-visible { outline: 4px solid var(--gold); outline-offset: -4px; }
 
         .tv-browse-hero-badge {
           position: absolute;
@@ -643,17 +710,17 @@ export function ScreenPage() {
           display: flex;
           align-items: center;
           justify-content: center;
-          background: #C9A84C;
-          color: #1B1B2F;
+          background: var(--gold);
+          color: var(--navy);
           border-radius: 50%;
           font-size: clamp(0.75rem, 1.4vw, 1.1rem);
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
         }
         .tv-browse-hero-badge-lg { top: 5%; right: 5%; width: clamp(36px, 4vw, 56px); height: clamp(36px, 4vw, 56px); font-size: clamp(1.1rem, 2vw, 1.6rem); }
 
-        .tv-browse-empty { display: flex; align-items: center; justify-content: center; flex: 1; font-size: clamp(1.25rem, 2.5vw, 2rem); color: #6B6B72; }
+        .tv-browse-empty { display: flex; align-items: center; justify-content: center; flex: 1; font-size: clamp(1.25rem, 2.5vw, 2rem); color: var(--muted); }
 
-        .tv-browse-detail { position: absolute; inset: 0; display: flex; flex-direction: column; background: #F5F4F1; }
+        .tv-browse-detail { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--page); }
         .tv-browse-detail-header {
           display: flex;
           align-items: center;
@@ -666,8 +733,8 @@ export function ScreenPage() {
           font: inherit;
           font-size: clamp(1rem, 1.8vw, 1.5rem);
           font-weight: 700;
-          color: #1B1B2F;
-          background: #C9A84C;
+          color: var(--navy);
+          background: var(--gold);
           border: none;
           border-radius: 12px;
           padding: 10px 24px;
@@ -675,23 +742,23 @@ export function ScreenPage() {
           transition: transform 0.15s ease;
         }
         .tv-browse-back:hover { transform: translateY(-2px); }
-        .tv-browse-back:focus-visible { outline: 4px solid #f8fafc; outline-offset: 2px; }
+        .tv-browse-back:focus-visible { outline: 4px solid var(--navy); outline-offset: 2px; }
         .tv-browse-hero-toggle {
           font: inherit;
           font-size: clamp(1rem, 1.8vw, 1.5rem);
           font-weight: 700;
-          color: #1B1B2F;
-          background: #FFFFFF;
-          border: 2px solid #C9A84C;
+          color: var(--navy);
+          background: var(--card);
+          border: 2px solid var(--gold);
           border-radius: 12px;
           padding: 10px 24px;
           cursor: pointer;
           transition: background 0.15s ease, transform 0.15s ease;
         }
         .tv-browse-hero-toggle:hover { background: #EFEDE8; transform: translateY(-2px); }
-        .tv-browse-hero-toggle:focus-visible { outline: 4px solid #C9A84C; outline-offset: 2px; }
+        .tv-browse-hero-toggle:focus-visible { outline: 4px solid var(--gold); outline-offset: 2px; }
         .tv-browse-hero-toggle:disabled { opacity: 0.6; cursor: default; transform: none; }
-        .tv-browse-hero-toggle-active { background: #C9A84C; color: #1B1B2F; border-color: #C9A84C; }
+        .tv-browse-hero-toggle-active { background: var(--gold); color: var(--navy); border-color: var(--gold); }
         .tv-browse-hero-error {
           text-align: center;
           color: #B3261E;
@@ -704,124 +771,167 @@ export function ScreenPage() {
       <div id="stage" className="tv-stage" style={stageStyle}>
         {screenState === "not-found" ? (
           <div className="tv-idle">Shop not found</div>
-        ) : screenState === "idle" ? (
-          <div className="tv-idle tv-chooser">
-            <div className="tv-chooser-title">AI Vastra</div>
-            <div className="tv-chooser-buttons">
-              <button
-                type="button"
-                className="tv-choice-btn"
-                tabIndex={0}
-                onClick={() => void setScreenMode("catalog")}
-              >
-                Catalog
-              </button>
-              <button
-                type="button"
-                className="tv-choice-btn"
-                tabIndex={0}
-                onClick={() => void setScreenMode("live")}
-              >
-                Live TV
-              </button>
-            </div>
-          </div>
-        ) : screenState === "live" && liveUrl ? (
-          <div className="tv-media">
-            <img key={liveUrl} src={liveUrl} alt="Your generated look" />
-            {liveHasBanner ? <div className="tv-banner">Looks good on you! 😍</div> : null}
-          </div>
-        ) : screenState === "carousel" && currentCarouselImage ? (
-          <div className="tv-media">
-            <img key={currentCarouselImage.id} src={currentCarouselImage.url} alt="Approved look" />
-          </div>
-        ) : screenState === "browse" ? (
-          <div className="tv-browse">
-            <div className="tv-browse-header">
-              <div className="tv-browse-wordmark">
-                <span className="tv-browse-wordmark-ai">Ai</span>{" "}
-                <span className="tv-browse-wordmark-vastra">Vastra</span>
+        ) : (
+          <div className="tv-shell">
+            <nav className="tv-mode-nav">
+              <div className="tv-wordmark">
+                <span className="tv-wordmark-primary">MyTryon</span>
+                <span className="tv-wordmark-accent">Ai</span>
               </div>
-            </div>
-            {browseDetailLook && browseDetailUrl ? (
-              <div className="tv-browse-detail">
-                <div className="tv-browse-detail-header">
-                  <button
-                    type="button"
-                    className="tv-browse-back"
-                    tabIndex={0}
-                    onClick={() => {
-                      setBrowseDetailLook(null);
-                      setBrowseDetailUrl(null);
-                      setBrowseHeroError(null);
-                    }}
-                  >
-                    ← Back
-                  </button>
-                  <button
-                    type="button"
-                    className={`tv-browse-hero-toggle${
-                      browseDetailLook.is_hero ? " tv-browse-hero-toggle-active" : ""
-                    }`}
-                    tabIndex={0}
-                    disabled={browseHeroPending}
-                    onClick={() => void toggleHero(browseDetailLook)}
-                  >
-                    {browseDetailLook.is_hero ? "★ Hero — tap to remove" : "★ Mark as Hero"}
-                  </button>
-                </div>
-                {browseHeroError ? <div className="tv-browse-hero-error">{browseHeroError}</div> : null}
-                <div className="tv-browse-detail-media">
-                  <img src={browseDetailUrl} alt="Look detail" />
-                  {browseDetailLook.is_hero ? (
-                    <span className="tv-browse-hero-badge tv-browse-hero-badge-lg" aria-label="Hero look">
-                      ★
-                    </span>
-                  ) : null}
-                </div>
+              <div className="tv-mode-nav-buttons">
+                <button
+                  type="button"
+                  className={navButtonClass("catalog")}
+                  tabIndex={0}
+                  onClick={() => void setScreenMode("catalog")}
+                >
+                  Carousel
+                </button>
+                <button
+                  type="button"
+                  className={navButtonClass("browse")}
+                  tabIndex={0}
+                  onClick={() => void setScreenMode("browse")}
+                >
+                  Browse
+                </button>
+                <button
+                  type="button"
+                  className={navButtonClass("live")}
+                  tabIndex={0}
+                  onClick={() => void setScreenMode("live")}
+                >
+                  Live
+                </button>
+                <button
+                  type="button"
+                  className={navButtonClass("idle")}
+                  tabIndex={0}
+                  onClick={() => void setScreenMode("idle")}
+                >
+                  Home
+                </button>
               </div>
-            ) : (
-              <>
-                <div className="tv-browse-tabs" role="tablist">
-                  {browseGarmentTypes.map((garmentType) => (
+            </nav>
+            <div className="tv-mode-content">
+              {screenState === "idle" ? (
+                <div className="tv-idle tv-chooser">
+                  <div className="tv-chooser-title">
+                    <span className="tv-wordmark-primary">MyTryon</span>
+                    <span className="tv-wordmark-accent">Ai</span>
+                  </div>
+                  <div className="tv-chooser-buttons">
                     <button
-                      key={garmentType.id}
                       type="button"
-                      role="tab"
-                      aria-selected={garmentType.id === browseSelectedGarmentTypeId}
-                      className={`tv-browse-tab${
-                        garmentType.id === browseSelectedGarmentTypeId ? " tv-browse-tab-active" : ""
-                      }`}
+                      className="tv-choice-btn"
                       tabIndex={0}
-                      onClick={() => setBrowseSelectedGarmentTypeId(garmentType.id)}
+                      onClick={() => void setScreenMode("catalog")}
                     >
-                      {garmentType.name}
+                      Catalog
                     </button>
-                  ))}
+                    <button
+                      type="button"
+                      className="tv-choice-btn"
+                      tabIndex={0}
+                      onClick={() => void setScreenMode("live")}
+                    >
+                      Live TV
+                    </button>
+                  </div>
                 </div>
-                <div className="tv-browse-grid">
-                  {browseLooks.length === 0 ? (
-                    <div className="tv-browse-empty">No looks yet</div>
+              ) : screenState === "live" && liveUrl ? (
+                <div className="tv-media">
+                  <img key={liveUrl} src={liveUrl} alt="Your generated look" />
+                  {liveHasBanner ? <div className="tv-banner">Looks good on you! 😍</div> : null}
+                </div>
+              ) : screenState === "carousel" && currentCarouselImage ? (
+                <div className="tv-media">
+                  <img key={currentCarouselImage.id} src={currentCarouselImage.url} alt="Approved look" />
+                </div>
+              ) : screenState === "browse" ? (
+                <div className="tv-browse">
+                  {browseDetailLook && browseDetailUrl ? (
+                    <div className="tv-browse-detail">
+                      <div className="tv-browse-detail-header">
+                        <button
+                          type="button"
+                          className="tv-browse-back"
+                          tabIndex={0}
+                          onClick={() => {
+                            setBrowseDetailLook(null);
+                            setBrowseDetailUrl(null);
+                            setBrowseHeroError(null);
+                          }}
+                        >
+                          ← Back
+                        </button>
+                        <button
+                          type="button"
+                          className={`tv-browse-hero-toggle${
+                            browseDetailLook.is_hero ? " tv-browse-hero-toggle-active" : ""
+                          }`}
+                          tabIndex={0}
+                          disabled={browseHeroPending}
+                          onClick={() => void toggleHero(browseDetailLook)}
+                        >
+                          {browseDetailLook.is_hero ? "★ Hero — tap to remove" : "★ Mark as Hero"}
+                        </button>
+                      </div>
+                      {browseHeroError ? <div className="tv-browse-hero-error">{browseHeroError}</div> : null}
+                      <div className="tv-browse-detail-media">
+                        <img src={browseDetailUrl} alt="Look detail" />
+                        {browseDetailLook.is_hero ? (
+                          <span className="tv-browse-hero-badge tv-browse-hero-badge-lg" aria-label="Hero look">
+                            ★
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
                   ) : (
-                    browseLooks.map((look) => (
-                      <BrowseTile
-                        key={look.id}
-                        look={look}
-                        urlMapRef={browseUrlMapRef}
-                        onOpen={(openedLook, url) => {
-                          setBrowseHeroError(null);
-                          setBrowseDetailLook(openedLook);
-                          setBrowseDetailUrl(url);
-                        }}
-                      />
-                    ))
+                    <>
+                      <div className="tv-browse-tabs" role="tablist">
+                        {browseGarmentTypes.map((garmentType) => (
+                          <button
+                            key={garmentType.id}
+                            type="button"
+                            role="tab"
+                            aria-selected={garmentType.id === browseSelectedGarmentTypeId}
+                            className={`tv-browse-tab${
+                              garmentType.id === browseSelectedGarmentTypeId ? " tv-browse-tab-active" : ""
+                            }`}
+                            tabIndex={0}
+                            onClick={() => setBrowseSelectedGarmentTypeId(garmentType.id)}
+                          >
+                            {garmentType.name}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="tv-browse-grid">
+                        {browseLooks.length === 0 ? (
+                          <div className="tv-browse-empty">No looks yet</div>
+                        ) : (
+                          browseLooks.map((look) => (
+                            <BrowseTile
+                              key={look.id}
+                              look={look}
+                              urlMapRef={browseUrlMapRef}
+                              onOpen={(openedLook, url) => {
+                                setBrowseHeroError(null);
+                                setBrowseDetailLook(openedLook);
+                                setBrowseDetailUrl(url);
+                              }}
+                            />
+                          ))
+                        )}
+                      </div>
+                    </>
                   )}
                 </div>
-              </>
-            )}
+              ) : (
+                <div className="tv-idle">MyTryonAi</div>
+              )}
+            </div>
           </div>
-        ) : (
-          <div className="tv-idle">AI Vastra</div>
         )}
       </div>
     </main>
