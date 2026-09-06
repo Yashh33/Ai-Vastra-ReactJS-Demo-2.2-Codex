@@ -531,6 +531,47 @@ export function ScreenPage() {
     setBrowseRefreshKey((prev) => prev + 1);
   }
 
+  useEffect(() => {
+    if (!browseDetailLook) return;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "ArrowRight") {
+        void navigateBrowseDetail(1);
+      } else if (event.key === "ArrowLeft") {
+        void navigateBrowseDetail(-1);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [browseDetailLook, browseLooks]);
+
+  async function navigateBrowseDetail(direction: 1 | -1) {
+    if (!browseDetailLook || browseLooks.length <= 1) return;
+
+    const currentIndex = browseLooks.findIndex((look) => look.id === browseDetailLook.id);
+    if (currentIndex === -1) return;
+
+    const nextIndex = (currentIndex + direction + browseLooks.length) % browseLooks.length;
+    const nextLook = browseLooks[nextIndex];
+    if (!nextLook) return;
+
+    let url = browseUrlMapRef.current.get(nextLook.id);
+    if (!url) {
+      try {
+        url = await createSignedUrl("generated-outputs", nextLook.output_path, SIGNED_URL_TTL_SECONDS);
+        browseUrlMapRef.current.set(nextLook.id, url);
+      } catch (err) {
+        console.error("ScreenPage: failed to sign browse detail navigation image", nextLook.id, err);
+        return;
+      }
+    }
+
+    setBrowseHeroError(null);
+    setBrowseDetailLook(nextLook);
+    setBrowseDetailUrl(url);
+  }
+
   async function toggleHero(look: BrowseLookRow) {
     if (browseHeroPending) return;
 
@@ -856,6 +897,30 @@ export function ScreenPage() {
         }
         .tv-browse-detail-media { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; }
         .tv-browse-detail-media img { max-width: 92%; max-height: 92%; object-fit: contain; animation: tv-fade-in 0.4s ease; border-radius: 8px; }
+        .tv-browse-nav-btn {
+          position: absolute;
+          top: 50%;
+          transform: translateY(-50%);
+          width: clamp(40px, 5vw, 56px);
+          height: clamp(40px, 5vw, 56px);
+          flex-shrink: 0;
+          border-radius: 50%;
+          border: none;
+          background: rgba(255, 255, 255, 0.7);
+          color: var(--navy);
+          font-size: clamp(1.25rem, 2.4vw, 1.75rem);
+          line-height: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          box-shadow: 0 6px 18px rgba(27, 27, 47, 0.18);
+          transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+        }
+        .tv-browse-nav-btn:hover { background: var(--gold); color: var(--navy); transform: translateY(-50%) scale(1.08); }
+        .tv-browse-nav-btn:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
+        .tv-browse-nav-prev { left: clamp(8px, 2vw, 20px); }
+        .tv-browse-nav-next { right: clamp(8px, 2vw, 20px); }
       `}</style>
       <div id="stage" className="tv-stage" style={stageStyle}>
         {screenState === "not-found" ? (
@@ -934,11 +999,33 @@ export function ScreenPage() {
                       </div>
                       {browseHeroError ? <div className="tv-browse-hero-error">{browseHeroError}</div> : null}
                       <div className="tv-browse-detail-media">
+                        {browseLooks.length > 1 ? (
+                          <button
+                            type="button"
+                            className="tv-browse-nav-btn tv-browse-nav-prev"
+                            tabIndex={0}
+                            aria-label="Previous look"
+                            onClick={() => void navigateBrowseDetail(-1)}
+                          >
+                            ‹
+                          </button>
+                        ) : null}
                         <img src={browseDetailUrl} alt="Look detail" />
                         {browseDetailLook.is_hero ? (
                           <span className="tv-browse-hero-badge tv-browse-hero-badge-lg" aria-label="Hero look">
                             ★
                           </span>
+                        ) : null}
+                        {browseLooks.length > 1 ? (
+                          <button
+                            type="button"
+                            className="tv-browse-nav-btn tv-browse-nav-next"
+                            tabIndex={0}
+                            aria-label="Next look"
+                            onClick={() => void navigateBrowseDetail(1)}
+                          >
+                            ›
+                          </button>
                         ) : null}
                       </div>
                     </div>
