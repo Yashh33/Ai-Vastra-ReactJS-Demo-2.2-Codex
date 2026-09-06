@@ -149,6 +149,8 @@ export function ScreenPage() {
   const [browseDetailUrl, setBrowseDetailUrl] = useState<string | null>(null);
   const [browseHeroPending, setBrowseHeroPending] = useState(false);
   const [browseHeroError, setBrowseHeroError] = useState<string | null>(null);
+  const [browseRefreshKey, setBrowseRefreshKey] = useState(0);
+  const [browseRefreshing, setBrowseRefreshing] = useState(false);
 
   const liveGenerationIdRef = useRef<string | null>(null);
   const liveIsRealRef = useRef(false);
@@ -439,42 +441,47 @@ export function ScreenPage() {
   useEffect(() => {
     if (mode !== "browse" || !resolvedShopId) return;
     let cancelled = false;
+    setBrowseRefreshing(true);
 
     async function loadBrowseTabs() {
-      const { data: lookRows } = await supabase
-        .from("generations")
-        .select("folder_id,output_path")
-        .eq("shop_id", resolvedShopId)
-        .eq("generation_type", "look")
-        .eq("status", "done");
+      try {
+        const { data: lookRows } = await supabase
+          .from("generations")
+          .select("folder_id,output_path")
+          .eq("shop_id", resolvedShopId)
+          .eq("generation_type", "look")
+          .eq("status", "done");
 
-      if (cancelled) return;
+        if (cancelled) return;
 
-      const folderIdsWithLooks = new Set(
-        (lookRows ?? [])
-          .filter((row: { output_path: string | null }) => !!row.output_path)
-          .map((row: { folder_id: string }) => row.folder_id)
-      );
+        const folderIdsWithLooks = new Set(
+          (lookRows ?? [])
+            .filter((row: { output_path: string | null }) => !!row.output_path)
+            .map((row: { folder_id: string }) => row.folder_id)
+        );
 
-      if (folderIdsWithLooks.size === 0) {
-        setBrowseGarmentTypes([]);
-        setBrowseSelectedGarmentTypeId(null);
-        return;
+        if (folderIdsWithLooks.size === 0) {
+          setBrowseGarmentTypes([]);
+          setBrowseSelectedGarmentTypeId(null);
+          return;
+        }
+
+        const { data: garmentTypeRows } = await supabase
+          .from("garment_types")
+          .select("id,name")
+          .eq("shop_id", resolvedShopId);
+
+        if (cancelled) return;
+
+        const tabs: BrowseGarmentType[] = (garmentTypeRows ?? []).filter((row: { id: string }) =>
+          folderIdsWithLooks.has(row.id)
+        );
+
+        setBrowseGarmentTypes(tabs);
+        setBrowseSelectedGarmentTypeId((prev) => (prev && tabs.some((tab) => tab.id === prev) ? prev : tabs[0]?.id ?? null));
+      } finally {
+        if (!cancelled) setBrowseRefreshing(false);
       }
-
-      const { data: garmentTypeRows } = await supabase
-        .from("garment_types")
-        .select("id,name")
-        .eq("shop_id", resolvedShopId);
-
-      if (cancelled) return;
-
-      const tabs: BrowseGarmentType[] = (garmentTypeRows ?? []).filter((row: { id: string }) =>
-        folderIdsWithLooks.has(row.id)
-      );
-
-      setBrowseGarmentTypes(tabs);
-      setBrowseSelectedGarmentTypeId((prev) => (prev && tabs.some((tab) => tab.id === prev) ? prev : tabs[0]?.id ?? null));
     }
 
     void loadBrowseTabs();
@@ -482,7 +489,7 @@ export function ScreenPage() {
     return () => {
       cancelled = true;
     };
-  }, [mode, resolvedShopId]);
+  }, [mode, resolvedShopId, browseRefreshKey]);
 
   useEffect(() => {
     if (mode !== "browse" || !resolvedShopId || !browseSelectedGarmentTypeId) {
@@ -517,7 +524,11 @@ export function ScreenPage() {
     return () => {
       cancelled = true;
     };
-  }, [mode, resolvedShopId, browseSelectedGarmentTypeId]);
+  }, [mode, resolvedShopId, browseSelectedGarmentTypeId, browseRefreshKey]);
+
+  function handleBrowseRefresh() {
+    setBrowseRefreshKey((prev) => prev + 1);
+  }
 
   async function toggleHero(look: BrowseLookRow) {
     if (browseHeroPending) return;
@@ -659,7 +670,34 @@ export function ScreenPage() {
         .tv-choice-btn:focus-visible { outline: 4px solid var(--navy); outline-offset: 4px; }
 
         .tv-browse { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--page); color: var(--navy); overflow: hidden; }
-        .tv-browse-tabs { display: flex; gap: 12px; overflow-x: auto; flex-shrink: 0; padding: clamp(16px, 2.5vw, 32px); }
+        .tv-browse-tabs-row { display: flex; align-items: center; gap: 12px; flex-shrink: 0; padding: clamp(16px, 2.5vw, 32px); }
+        .tv-browse-tabs { display: flex; gap: 12px; overflow-x: auto; flex: 1; min-width: 0; }
+        .tv-refresh-btn {
+          flex-shrink: 0;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          font: inherit;
+          font-size: clamp(0.9rem, 1.6vw, 1.3rem);
+          font-weight: 700;
+          color: var(--navy);
+          background: var(--card);
+          border: 1px solid var(--border);
+          border-radius: 999px;
+          padding: 10px 20px;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: background 0.15s ease, border-color 0.15s ease;
+        }
+        .tv-refresh-btn:hover { background: #EFEDE8; }
+        .tv-refresh-btn:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+        .tv-refresh-btn:disabled { opacity: 0.6; cursor: default; }
+        .tv-refresh-icon { display: inline-block; }
+        .tv-refresh-icon-spinning { animation: tv-spin 0.8s linear infinite; }
+        @keyframes tv-spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
         .tv-browse-tab {
           font: inherit;
           font-size: clamp(1rem, 1.8vw, 1.5rem);
@@ -889,22 +927,36 @@ export function ScreenPage() {
                     </div>
                   ) : (
                     <>
-                      <div className="tv-browse-tabs" role="tablist">
-                        {browseGarmentTypes.map((garmentType) => (
-                          <button
-                            key={garmentType.id}
-                            type="button"
-                            role="tab"
-                            aria-selected={garmentType.id === browseSelectedGarmentTypeId}
-                            className={`tv-browse-tab${
-                              garmentType.id === browseSelectedGarmentTypeId ? " tv-browse-tab-active" : ""
-                            }`}
-                            tabIndex={0}
-                            onClick={() => setBrowseSelectedGarmentTypeId(garmentType.id)}
-                          >
-                            {garmentType.name}
-                          </button>
-                        ))}
+                      <div className="tv-browse-tabs-row">
+                        <div className="tv-browse-tabs" role="tablist">
+                          {browseGarmentTypes.map((garmentType) => (
+                            <button
+                              key={garmentType.id}
+                              type="button"
+                              role="tab"
+                              aria-selected={garmentType.id === browseSelectedGarmentTypeId}
+                              className={`tv-browse-tab${
+                                garmentType.id === browseSelectedGarmentTypeId ? " tv-browse-tab-active" : ""
+                              }`}
+                              tabIndex={0}
+                              onClick={() => setBrowseSelectedGarmentTypeId(garmentType.id)}
+                            >
+                              {garmentType.name}
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          className="tv-refresh-btn"
+                          tabIndex={0}
+                          disabled={browseRefreshing}
+                          onClick={handleBrowseRefresh}
+                        >
+                          <span className={`tv-refresh-icon${browseRefreshing ? " tv-refresh-icon-spinning" : ""}`}>
+                            ↻
+                          </span>
+                          Refresh
+                        </button>
                       </div>
                       <div className="tv-browse-grid">
                         {browseLooks.length === 0 ? (
