@@ -587,48 +587,52 @@ export function ScreenPage() {
         .tv-choice-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(201, 168, 76, 0.35); }
         .tv-choice-btn:focus-visible { outline: 4px solid #f8fafc; outline-offset: 4px; }
 
-        .tv-browse { position: absolute; inset: 0; display: flex; flex-direction: column; background: #0b0b14; color: #f8fafc; overflow: hidden; }
+        .tv-browse { position: absolute; inset: 0; display: flex; flex-direction: column; background: #F5F4F1; color: #1B1B2F; overflow: hidden; }
+        .tv-browse-header { display: flex; align-items: center; flex-shrink: 0; padding: clamp(16px, 2.5vw, 32px) clamp(16px, 2.5vw, 32px) 0; }
+        .tv-browse-wordmark { font-size: clamp(1.25rem, 2.2vw, 2rem); font-weight: 800; letter-spacing: 0.02em; }
+        .tv-browse-wordmark-ai { color: #1B1B2F; }
+        .tv-browse-wordmark-vastra { color: #C9A84C; }
         .tv-browse-tabs { display: flex; gap: 12px; overflow-x: auto; flex-shrink: 0; padding: clamp(16px, 2.5vw, 32px); }
         .tv-browse-tab {
           font: inherit;
           font-size: clamp(1rem, 1.8vw, 1.5rem);
           font-weight: 600;
-          color: #f8fafc;
-          background: rgba(255, 255, 255, 0.08);
-          border: 2px solid transparent;
+          color: #1B1B2F;
+          background: #FFFFFF;
+          border: 1px solid #E6E4DE;
           border-radius: 999px;
           padding: 10px 24px;
           cursor: pointer;
           white-space: nowrap;
           transition: background 0.15s ease, border-color 0.15s ease;
         }
-        .tv-browse-tab:hover { background: rgba(255, 255, 255, 0.16); }
-        .tv-browse-tab:focus-visible { outline: 3px solid #f8fafc; outline-offset: 2px; }
-        .tv-browse-tab-active { background: #C9A84C; color: #1B1B2F; border-color: #C9A84C; }
+        .tv-browse-tab:hover { background: #EFEDE8; }
+        .tv-browse-tab:focus-visible { outline: 3px solid #C9A84C; outline-offset: 2px; }
+        .tv-browse-tab-active { background: #1B1B2F; color: #C9A84C; border-color: #1B1B2F; }
 
         .tv-browse-grid {
           flex: 1;
           overflow-y: auto;
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-          gap: clamp(12px, 1.5vw, 20px);
+          grid-template-columns: repeat(2, 1fr);
+          gap: clamp(16px, 2vw, 28px);
           padding: 0 clamp(16px, 2.5vw, 32px) clamp(16px, 2.5vw, 32px);
           align-content: start;
         }
         .tv-browse-tile {
           position: relative;
           aspect-ratio: 3 / 4;
-          border: none;
+          border: 1px solid #E6E4DE;
           border-radius: 14px;
           overflow: hidden;
           padding: 0;
           cursor: pointer;
-          background: rgba(255, 255, 255, 0.06);
+          background: #FFFFFF;
         }
         .tv-browse-tile img { width: 100%; height: 100%; object-fit: cover; display: block; animation: tv-fade-in 0.4s ease; }
-        .tv-browse-tile-placeholder { width: 100%; height: 100%; background: linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.12)); }
-        .tv-browse-tile:hover { outline: 3px solid rgba(201, 168, 76, 0.6); outline-offset: -3px; }
-        .tv-browse-tile:focus-visible { outline: 4px solid #f8fafc; outline-offset: -4px; }
+        .tv-browse-tile-placeholder { width: 100%; height: 100%; background: linear-gradient(135deg, #F5F4F1, #EFEDE8); }
+        .tv-browse-tile:hover { outline: 3px solid #C9A84C; outline-offset: -3px; }
+        .tv-browse-tile:focus-visible { outline: 4px solid #C9A84C; outline-offset: -4px; }
 
         .tv-browse-hero-badge {
           position: absolute;
@@ -647,9 +651,9 @@ export function ScreenPage() {
         }
         .tv-browse-hero-badge-lg { top: 5%; right: 5%; width: clamp(36px, 4vw, 56px); height: clamp(36px, 4vw, 56px); font-size: clamp(1.1rem, 2vw, 1.6rem); }
 
-        .tv-browse-empty { display: flex; align-items: center; justify-content: center; flex: 1; font-size: clamp(1.25rem, 2.5vw, 2rem); color: rgba(248, 250, 252, 0.6); }
+        .tv-browse-empty { display: flex; align-items: center; justify-content: center; flex: 1; font-size: clamp(1.25rem, 2.5vw, 2rem); color: #6B6B72; }
 
-        .tv-browse-detail { position: absolute; inset: 0; display: flex; flex-direction: column; }
+        .tv-browse-detail { position: absolute; inset: 0; display: flex; flex-direction: column; background: #F5F4F1; }
         .tv-browse-detail-header {
           display: flex;
           align-items: center;
@@ -676,21 +680,21 @@ export function ScreenPage() {
           font: inherit;
           font-size: clamp(1rem, 1.8vw, 1.5rem);
           font-weight: 700;
-          color: #f8fafc;
-          background: rgba(255, 255, 255, 0.1);
-          border: 2px solid rgba(201, 168, 76, 0.6);
+          color: #1B1B2F;
+          background: #FFFFFF;
+          border: 2px solid #C9A84C;
           border-radius: 12px;
           padding: 10px 24px;
           cursor: pointer;
           transition: background 0.15s ease, transform 0.15s ease;
         }
-        .tv-browse-hero-toggle:hover { background: rgba(255, 255, 255, 0.18); transform: translateY(-2px); }
-        .tv-browse-hero-toggle:focus-visible { outline: 4px solid #f8fafc; outline-offset: 2px; }
+        .tv-browse-hero-toggle:hover { background: #EFEDE8; transform: translateY(-2px); }
+        .tv-browse-hero-toggle:focus-visible { outline: 4px solid #C9A84C; outline-offset: 2px; }
         .tv-browse-hero-toggle:disabled { opacity: 0.6; cursor: default; transform: none; }
         .tv-browse-hero-toggle-active { background: #C9A84C; color: #1B1B2F; border-color: #C9A84C; }
         .tv-browse-hero-error {
           text-align: center;
-          color: #fca5a5;
+          color: #B3261E;
           font-size: clamp(0.9rem, 1.4vw, 1.1rem);
           padding: 8px clamp(16px, 2.5vw, 32px) 0;
         }
@@ -733,6 +737,12 @@ export function ScreenPage() {
           </div>
         ) : screenState === "browse" ? (
           <div className="tv-browse">
+            <div className="tv-browse-header">
+              <div className="tv-browse-wordmark">
+                <span className="tv-browse-wordmark-ai">Ai</span>{" "}
+                <span className="tv-browse-wordmark-vastra">Vastra</span>
+              </div>
+            </div>
             {browseDetailLook && browseDetailUrl ? (
               <div className="tv-browse-detail">
                 <div className="tv-browse-detail-header">
