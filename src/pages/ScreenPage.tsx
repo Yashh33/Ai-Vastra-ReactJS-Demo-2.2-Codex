@@ -159,6 +159,7 @@ export function ScreenPage() {
   const carouselRowsRef = useRef<CarouselRow[]>([]);
   const browseUrlMapRef = useRef<Map<string, string>>(new Map());
   const appliedModeRef = useRef<ScreenMode | null>(null);
+  const loadInitialRef = useRef<(() => Promise<void>) | null>(null);
 
   useEffect(() => {
     if (!shopId) return;
@@ -348,6 +349,7 @@ export function ScreenPage() {
       applyState(stateRow?.mode ?? null, stateRow?.live_generation_id ?? null);
     }
 
+    loadInitialRef.current = loadInitial;
     void loadInitial();
 
     const pollTimer = window.setInterval(() => {
@@ -372,6 +374,7 @@ export function ScreenPage() {
 
     return () => {
       cancelled = true;
+      loadInitialRef.current = null;
       window.clearInterval(pollTimer);
       unsubscribeState();
       unsubscribeGenerations();
@@ -387,6 +390,7 @@ export function ScreenPage() {
     }
 
     let cancelled = false;
+    let skipTimer: number | undefined;
     const length = carouselRows.length;
     const idx = ((carouselIndex % length) + length) % length;
     const row = carouselRows[idx];
@@ -402,6 +406,12 @@ export function ScreenPage() {
           carouselUrlMapRef.current.set(row.id, resolvedUrl);
         } catch (err) {
           console.error("ScreenPage: failed to sign carousel item", row.id, err);
+          if (!cancelled) {
+            // Don't let one bad frame hold the screen for a full interval — hop past it quickly.
+            skipTimer = window.setTimeout(() => {
+              setCarouselIndex((prev) => (prev + 1) % length);
+            }, 1500);
+          }
           return;
         }
       }
@@ -428,6 +438,7 @@ export function ScreenPage() {
 
     return () => {
       cancelled = true;
+      if (skipTimer !== undefined) window.clearTimeout(skipTimer);
     };
   }, [mode, carouselRows, carouselIndex]);
 
@@ -529,6 +540,14 @@ export function ScreenPage() {
 
   function handleBrowseRefresh() {
     setBrowseRefreshKey((prev) => prev + 1);
+  }
+
+  function handleRefresh() {
+    if (mode === "browse") {
+      handleBrowseRefresh();
+    } else {
+      void loadInitialRef.current?.();
+    }
   }
 
   useEffect(() => {
@@ -689,6 +708,31 @@ export function ScreenPage() {
         .tv-nav-btn:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
         .tv-nav-btn-active { background: var(--navy); color: var(--gold); border-color: var(--navy); }
 
+        .tv-header-refresh-btn {
+          flex-shrink: 0;
+          width: clamp(38px, 5vw, 52px);
+          height: clamp(38px, 5vw, 52px);
+          border-radius: 50%;
+          border: 1px solid var(--border);
+          background: var(--page);
+          color: var(--navy);
+          font-size: clamp(1.1rem, 2vw, 1.5rem);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: background 0.15s ease, transform 0.15s ease;
+        }
+        .tv-header-refresh-btn:hover { background: #EFEDE8; }
+        .tv-header-refresh-btn:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+        .tv-header-refresh-btn:disabled { opacity: 0.6; cursor: default; }
+        .tv-refresh-icon { display: inline-block; }
+        .tv-refresh-icon-spinning { animation: tv-spin 0.8s linear infinite; }
+        @keyframes tv-spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+
         .tv-mode-content { position: relative; flex: 1; overflow: hidden; }
 
         .tv-mode-fab-wrap { position: absolute; bottom: clamp(16px, 3vw, 32px); right: clamp(16px, 3vw, 32px); z-index: 20; display: flex; flex-direction: column; align-items: flex-end; }
@@ -746,33 +790,6 @@ export function ScreenPage() {
         .tv-choice-btn:focus-visible { outline: 4px solid var(--navy); outline-offset: 4px; }
 
         .tv-browse { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--page); color: var(--navy); overflow: hidden; }
-        .tv-refresh-btn {
-          flex-shrink: 0;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          font: inherit;
-          font-size: clamp(0.9rem, 1.6vw, 1.3rem);
-          font-weight: 700;
-          color: var(--navy);
-          background: var(--card);
-          border: 1px solid var(--border);
-          border-radius: 999px;
-          padding: 10px 20px;
-          cursor: pointer;
-          white-space: nowrap;
-          transition: background 0.15s ease, border-color 0.15s ease;
-        }
-        .tv-refresh-btn:hover { background: #EFEDE8; }
-        .tv-refresh-btn:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
-        .tv-refresh-btn:disabled { opacity: 0.6; cursor: default; }
-        .tv-refresh-icon { display: inline-block; }
-        .tv-refresh-icon-spinning { animation: tv-spin 0.8s linear infinite; }
-        @keyframes tv-spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
 
         .tv-browse-body { flex: 1; display: flex; min-height: 0; }
         .tv-browse-rail {
@@ -786,7 +803,6 @@ export function ScreenPage() {
           background: var(--card);
           border-right: 1px solid var(--border);
         }
-        .tv-browse-rail .tv-refresh-btn { width: 100%; margin-bottom: 4px; }
         .tv-browse-rail-list { display: flex; flex-direction: column; gap: 8px; }
         .tv-browse-rail-item {
           width: 100%;
@@ -932,6 +948,18 @@ export function ScreenPage() {
                 <span className="tv-wordmark-primary">MyTryon</span>
                 <span className="tv-wordmark-accent">Ai</span>
               </div>
+              <button
+                type="button"
+                className="tv-header-refresh-btn"
+                tabIndex={0}
+                aria-label="Refresh"
+                disabled={mode === "browse" && browseRefreshing}
+                onClick={handleRefresh}
+              >
+                <span className={`tv-refresh-icon${mode === "browse" && browseRefreshing ? " tv-refresh-icon-spinning" : ""}`}>
+                  ↻
+                </span>
+              </button>
             </nav>
             <div className="tv-mode-content">
               {screenState === "idle" ? (
@@ -1032,18 +1060,6 @@ export function ScreenPage() {
                   ) : (
                     <div className="tv-browse-body">
                       <div className="tv-browse-rail">
-                        <button
-                          type="button"
-                          className="tv-refresh-btn"
-                          tabIndex={0}
-                          disabled={browseRefreshing}
-                          onClick={handleBrowseRefresh}
-                        >
-                          <span className={`tv-refresh-icon${browseRefreshing ? " tv-refresh-icon-spinning" : ""}`}>
-                            ↻
-                          </span>
-                          Refresh
-                        </button>
                         <div className="tv-browse-rail-list" role="tablist">
                           {browseGarmentTypes.map((garmentType) => (
                             <button
