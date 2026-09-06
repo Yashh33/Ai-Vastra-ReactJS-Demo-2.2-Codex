@@ -151,6 +151,7 @@ export function ScreenPage() {
   const [browseHeroError, setBrowseHeroError] = useState<string | null>(null);
   const [browseRefreshKey, setBrowseRefreshKey] = useState(0);
   const [browseRefreshing, setBrowseRefreshing] = useState(false);
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
 
   const liveGenerationIdRef = useRef<string | null>(null);
   const liveIsRealRef = useRef(false);
@@ -630,7 +631,6 @@ export function ScreenPage() {
         .tv-wordmark { font-size: clamp(1.1rem, 2vw, 1.75rem); font-weight: 800; letter-spacing: 0.02em; white-space: nowrap; }
         .tv-wordmark-primary { color: var(--navy); }
         .tv-wordmark-accent { color: var(--gold); }
-        .tv-mode-nav-buttons { display: flex; gap: clamp(8px, 1.2vw, 14px); flex-wrap: wrap; }
         .tv-nav-btn {
           font: inherit;
           font-size: clamp(0.85rem, 1.3vw, 1.15rem);
@@ -649,6 +649,41 @@ export function ScreenPage() {
         .tv-nav-btn-active { background: var(--navy); color: var(--gold); border-color: var(--navy); }
 
         .tv-mode-content { position: relative; flex: 1; overflow: hidden; }
+
+        .tv-mode-fab-wrap { position: absolute; bottom: clamp(16px, 3vw, 32px); right: clamp(16px, 3vw, 32px); z-index: 20; display: flex; flex-direction: column; align-items: flex-end; }
+        .tv-mode-fab {
+          width: clamp(44px, 6vw, 64px);
+          height: clamp(44px, 6vw, 64px);
+          flex-shrink: 0;
+          border-radius: 50%;
+          border: none;
+          background: var(--navy);
+          color: var(--gold);
+          font-size: clamp(1.25rem, 2.5vw, 1.75rem);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          box-shadow: 0 8px 24px rgba(27, 27, 47, 0.35);
+          transition: transform 0.15s ease;
+        }
+        .tv-mode-fab:hover { transform: scale(1.05); }
+        .tv-mode-fab:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
+        .tv-mode-popover {
+          position: absolute;
+          bottom: calc(100% + 12px);
+          right: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          background: var(--card);
+          border: 1px solid var(--border);
+          border-radius: 14px;
+          padding: 12px;
+          box-shadow: 0 12px 32px rgba(27, 27, 47, 0.22);
+          min-width: clamp(140px, 20vw, 200px);
+        }
+        .tv-mode-popover .tv-nav-btn { width: 100%; }
 
         .tv-chooser { flex-direction: column; gap: clamp(24px, 4vw, 48px); }
         .tv-chooser-title { font-size: clamp(1.75rem, 4vw, 3rem); font-weight: 800; letter-spacing: 0.04em; }
@@ -670,12 +705,11 @@ export function ScreenPage() {
         .tv-choice-btn:focus-visible { outline: 4px solid var(--navy); outline-offset: 4px; }
 
         .tv-browse { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--page); color: var(--navy); overflow: hidden; }
-        .tv-browse-tabs-row { display: flex; align-items: center; gap: 12px; flex-shrink: 0; padding: clamp(16px, 2.5vw, 32px); }
-        .tv-browse-tabs { display: flex; gap: 12px; overflow-x: auto; flex: 1; min-width: 0; }
         .tv-refresh-btn {
           flex-shrink: 0;
           display: inline-flex;
           align-items: center;
+          justify-content: center;
           gap: 8px;
           font: inherit;
           font-size: clamp(0.9rem, 1.6vw, 1.3rem);
@@ -698,30 +732,47 @@ export function ScreenPage() {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
-        .tv-browse-tab {
+
+        .tv-browse-body { flex: 1; display: flex; min-height: 0; }
+        .tv-browse-rail {
+          width: clamp(120px, 16vw, 200px);
+          flex-shrink: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          overflow-y: auto;
+          padding: clamp(14px, 1.8vw, 22px) 10px;
+          background: var(--card);
+          border-right: 1px solid var(--border);
+        }
+        .tv-browse-rail .tv-refresh-btn { width: 100%; margin-bottom: 4px; }
+        .tv-browse-rail-list { display: flex; flex-direction: column; gap: 8px; }
+        .tv-browse-rail-item {
+          width: 100%;
+          text-align: left;
           font: inherit;
-          font-size: clamp(1rem, 1.8vw, 1.5rem);
+          font-size: clamp(0.95rem, 1.4vw, 1.2rem);
           font-weight: 600;
           color: var(--navy);
           background: var(--card);
           border: 1px solid var(--border);
-          border-radius: 999px;
-          padding: 10px 24px;
+          border-radius: 10px;
+          padding: 14px 16px;
           cursor: pointer;
-          white-space: nowrap;
           transition: background 0.15s ease, border-color 0.15s ease;
         }
-        .tv-browse-tab:hover { background: #EFEDE8; }
-        .tv-browse-tab:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
-        .tv-browse-tab-active { background: var(--navy); color: var(--gold); border-color: var(--navy); }
+        .tv-browse-rail-item:hover { background: #EFEDE8; }
+        .tv-browse-rail-item:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+        .tv-browse-rail-item-active { background: var(--navy); color: var(--gold); border-color: var(--navy); }
 
         .tv-browse-grid {
           flex: 1;
+          min-width: 0;
           overflow-y: auto;
           display: grid;
           grid-template-columns: repeat(2, 1fr);
           gap: clamp(16px, 2vw, 28px);
-          padding: 0 clamp(16px, 2.5vw, 32px) clamp(16px, 2.5vw, 32px);
+          padding: clamp(16px, 2.5vw, 32px);
           align-content: start;
         }
         .tv-browse-tile {
@@ -816,40 +867,6 @@ export function ScreenPage() {
                 <span className="tv-wordmark-primary">MyTryon</span>
                 <span className="tv-wordmark-accent">Ai</span>
               </div>
-              <div className="tv-mode-nav-buttons">
-                <button
-                  type="button"
-                  className={navButtonClass("catalog")}
-                  tabIndex={0}
-                  onClick={() => void setScreenMode("catalog")}
-                >
-                  Carousel
-                </button>
-                <button
-                  type="button"
-                  className={navButtonClass("browse")}
-                  tabIndex={0}
-                  onClick={() => void setScreenMode("browse")}
-                >
-                  Browse
-                </button>
-                <button
-                  type="button"
-                  className={navButtonClass("live")}
-                  tabIndex={0}
-                  onClick={() => void setScreenMode("live")}
-                >
-                  Live
-                </button>
-                <button
-                  type="button"
-                  className={navButtonClass("idle")}
-                  tabIndex={0}
-                  onClick={() => void setScreenMode("idle")}
-                >
-                  Home
-                </button>
-              </div>
             </nav>
             <div className="tv-mode-content">
               {screenState === "idle" ? (
@@ -926,25 +943,8 @@ export function ScreenPage() {
                       </div>
                     </div>
                   ) : (
-                    <>
-                      <div className="tv-browse-tabs-row">
-                        <div className="tv-browse-tabs" role="tablist">
-                          {browseGarmentTypes.map((garmentType) => (
-                            <button
-                              key={garmentType.id}
-                              type="button"
-                              role="tab"
-                              aria-selected={garmentType.id === browseSelectedGarmentTypeId}
-                              className={`tv-browse-tab${
-                                garmentType.id === browseSelectedGarmentTypeId ? " tv-browse-tab-active" : ""
-                              }`}
-                              tabIndex={0}
-                              onClick={() => setBrowseSelectedGarmentTypeId(garmentType.id)}
-                            >
-                              {garmentType.name}
-                            </button>
-                          ))}
-                        </div>
+                    <div className="tv-browse-body">
+                      <div className="tv-browse-rail">
                         <button
                           type="button"
                           className="tv-refresh-btn"
@@ -957,6 +957,23 @@ export function ScreenPage() {
                           </span>
                           Refresh
                         </button>
+                        <div className="tv-browse-rail-list" role="tablist">
+                          {browseGarmentTypes.map((garmentType) => (
+                            <button
+                              key={garmentType.id}
+                              type="button"
+                              role="tab"
+                              aria-selected={garmentType.id === browseSelectedGarmentTypeId}
+                              className={`tv-browse-rail-item${
+                                garmentType.id === browseSelectedGarmentTypeId ? " tv-browse-rail-item-active" : ""
+                              }`}
+                              tabIndex={0}
+                              onClick={() => setBrowseSelectedGarmentTypeId(garmentType.id)}
+                            >
+                              {garmentType.name}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                       <div className="tv-browse-grid">
                         {browseLooks.length === 0 ? (
@@ -976,12 +993,76 @@ export function ScreenPage() {
                           ))
                         )}
                       </div>
-                    </>
+                    </div>
                   )}
                 </div>
               ) : (
                 <div className="tv-idle">MyTryonAi</div>
               )}
+            </div>
+            <div className="tv-mode-fab-wrap">
+              {modeMenuOpen ? (
+                <div className="tv-mode-popover" role="menu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={navButtonClass("catalog")}
+                    tabIndex={0}
+                    onClick={() => {
+                      void setScreenMode("catalog");
+                      setModeMenuOpen(false);
+                    }}
+                  >
+                    Carousel
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={navButtonClass("browse")}
+                    tabIndex={0}
+                    onClick={() => {
+                      void setScreenMode("browse");
+                      setModeMenuOpen(false);
+                    }}
+                  >
+                    Browse
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={navButtonClass("live")}
+                    tabIndex={0}
+                    onClick={() => {
+                      void setScreenMode("live");
+                      setModeMenuOpen(false);
+                    }}
+                  >
+                    Live
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={navButtonClass("idle")}
+                    tabIndex={0}
+                    onClick={() => {
+                      void setScreenMode("idle");
+                      setModeMenuOpen(false);
+                    }}
+                  >
+                    Home
+                  </button>
+                </div>
+              ) : null}
+              <button
+                type="button"
+                className="tv-mode-fab"
+                tabIndex={0}
+                aria-label="Screen mode menu"
+                aria-expanded={modeMenuOpen}
+                onClick={() => setModeMenuOpen((prev) => !prev)}
+              >
+                ⚙
+              </button>
             </div>
           </div>
         )}
