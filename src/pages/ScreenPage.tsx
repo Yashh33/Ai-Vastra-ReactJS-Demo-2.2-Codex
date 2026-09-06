@@ -49,6 +49,13 @@ function normalizeMode(rawMode: string | null | undefined): ScreenMode {
   return "catalog";
 }
 
+function sortBrowseLooks(rows: BrowseLookRow[]): BrowseLookRow[] {
+  return [...rows].sort((a, b) => {
+    if (a.is_hero !== b.is_hero) return a.is_hero ? -1 : 1;
+    return b.created_at.localeCompare(a.created_at);
+  });
+}
+
 function carouselRowsEqual(a: CarouselRow[], b: CarouselRow[]) {
   if (a === b) return true;
   if (a.length !== b.length) return false;
@@ -140,6 +147,8 @@ export function ScreenPage() {
   const [browseLooks, setBrowseLooks] = useState<BrowseLookRow[]>([]);
   const [browseDetailLook, setBrowseDetailLook] = useState<BrowseLookRow | null>(null);
   const [browseDetailUrl, setBrowseDetailUrl] = useState<string | null>(null);
+  const [browseHeroPending, setBrowseHeroPending] = useState(false);
+  const [browseHeroError, setBrowseHeroError] = useState<string | null>(null);
 
   const liveGenerationIdRef = useRef<string | null>(null);
   const liveIsRealRef = useRef(false);
@@ -290,6 +299,7 @@ export function ScreenPage() {
         if (modeChanged) {
           setBrowseDetailLook(null);
           setBrowseDetailUrl(null);
+          setBrowseHeroError(null);
         }
         setScreenState("browse");
         return;
@@ -509,6 +519,37 @@ export function ScreenPage() {
     };
   }, [mode, resolvedShopId, browseSelectedGarmentTypeId]);
 
+  async function toggleHero(look: BrowseLookRow) {
+    if (browseHeroPending) return;
+
+    const previousIsHero = look.is_hero;
+    const nextIsHero = !previousIsHero;
+
+    setBrowseHeroError(null);
+    setBrowseHeroPending(true);
+    setBrowseDetailLook((prev) => (prev && prev.id === look.id ? { ...prev, is_hero: nextIsHero } : prev));
+    setBrowseLooks((prev) =>
+      sortBrowseLooks(prev.map((row) => (row.id === look.id ? { ...row, is_hero: nextIsHero } : row)))
+    );
+
+    try {
+      const { error } = await supabase.rpc("set_generation_hero", {
+        p_generation_id: look.id,
+        p_is_hero: nextIsHero
+      });
+      if (error) throw error;
+    } catch (err) {
+      console.error("ScreenPage: failed to update hero flag", look.id, err);
+      setBrowseDetailLook((prev) => (prev && prev.id === look.id ? { ...prev, is_hero: previousIsHero } : prev));
+      setBrowseLooks((prev) =>
+        sortBrowseLooks(prev.map((row) => (row.id === look.id ? { ...row, is_hero: previousIsHero } : row)))
+      );
+      setBrowseHeroError("Couldn't update hero. Try again.");
+    } finally {
+      setBrowseHeroPending(false);
+    }
+  }
+
   async function setScreenMode(nextMode: "catalog" | "live") {
     if (!resolvedShopId) return;
     try {
@@ -609,9 +650,15 @@ export function ScreenPage() {
         .tv-browse-empty { display: flex; align-items: center; justify-content: center; flex: 1; font-size: clamp(1.25rem, 2.5vw, 2rem); color: rgba(248, 250, 252, 0.6); }
 
         .tv-browse-detail { position: absolute; inset: 0; display: flex; flex-direction: column; }
+        .tv-browse-detail-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          flex-wrap: wrap;
+          gap: clamp(12px, 2vw, 24px);
+          padding: clamp(16px, 2.5vw, 32px) clamp(16px, 2.5vw, 32px) 0;
+        }
         .tv-browse-back {
-          align-self: flex-start;
-          margin: clamp(16px, 2.5vw, 32px);
           font: inherit;
           font-size: clamp(1rem, 1.8vw, 1.5rem);
           font-weight: 700;
@@ -625,6 +672,28 @@ export function ScreenPage() {
         }
         .tv-browse-back:hover { transform: translateY(-2px); }
         .tv-browse-back:focus-visible { outline: 4px solid #f8fafc; outline-offset: 2px; }
+        .tv-browse-hero-toggle {
+          font: inherit;
+          font-size: clamp(1rem, 1.8vw, 1.5rem);
+          font-weight: 700;
+          color: #f8fafc;
+          background: rgba(255, 255, 255, 0.1);
+          border: 2px solid rgba(201, 168, 76, 0.6);
+          border-radius: 12px;
+          padding: 10px 24px;
+          cursor: pointer;
+          transition: background 0.15s ease, transform 0.15s ease;
+        }
+        .tv-browse-hero-toggle:hover { background: rgba(255, 255, 255, 0.18); transform: translateY(-2px); }
+        .tv-browse-hero-toggle:focus-visible { outline: 4px solid #f8fafc; outline-offset: 2px; }
+        .tv-browse-hero-toggle:disabled { opacity: 0.6; cursor: default; transform: none; }
+        .tv-browse-hero-toggle-active { background: #C9A84C; color: #1B1B2F; border-color: #C9A84C; }
+        .tv-browse-hero-error {
+          text-align: center;
+          color: #fca5a5;
+          font-size: clamp(0.9rem, 1.4vw, 1.1rem);
+          padding: 8px clamp(16px, 2.5vw, 32px) 0;
+        }
         .tv-browse-detail-media { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; }
         .tv-browse-detail-media img { max-width: 92%; max-height: 92%; object-fit: contain; animation: tv-fade-in 0.4s ease; border-radius: 8px; }
       `}</style>
@@ -666,17 +735,32 @@ export function ScreenPage() {
           <div className="tv-browse">
             {browseDetailLook && browseDetailUrl ? (
               <div className="tv-browse-detail">
-                <button
-                  type="button"
-                  className="tv-browse-back"
-                  tabIndex={0}
-                  onClick={() => {
-                    setBrowseDetailLook(null);
-                    setBrowseDetailUrl(null);
-                  }}
-                >
-                  ← Back
-                </button>
+                <div className="tv-browse-detail-header">
+                  <button
+                    type="button"
+                    className="tv-browse-back"
+                    tabIndex={0}
+                    onClick={() => {
+                      setBrowseDetailLook(null);
+                      setBrowseDetailUrl(null);
+                      setBrowseHeroError(null);
+                    }}
+                  >
+                    ← Back
+                  </button>
+                  <button
+                    type="button"
+                    className={`tv-browse-hero-toggle${
+                      browseDetailLook.is_hero ? " tv-browse-hero-toggle-active" : ""
+                    }`}
+                    tabIndex={0}
+                    disabled={browseHeroPending}
+                    onClick={() => void toggleHero(browseDetailLook)}
+                  >
+                    {browseDetailLook.is_hero ? "★ Hero — tap to remove" : "★ Mark as Hero"}
+                  </button>
+                </div>
+                {browseHeroError ? <div className="tv-browse-hero-error">{browseHeroError}</div> : null}
                 <div className="tv-browse-detail-media">
                   <img src={browseDetailUrl} alt="Look detail" />
                   {browseDetailLook.is_hero ? (
@@ -715,6 +799,7 @@ export function ScreenPage() {
                         look={look}
                         urlMapRef={browseUrlMapRef}
                         onOpen={(openedLook, url) => {
+                          setBrowseHeroError(null);
                           setBrowseDetailLook(openedLook);
                           setBrowseDetailUrl(url);
                         }}
