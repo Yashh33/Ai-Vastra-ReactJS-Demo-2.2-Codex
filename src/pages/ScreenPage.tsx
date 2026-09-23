@@ -160,6 +160,36 @@ export function ScreenPage() {
   const browseUrlMapRef = useRef<Map<string, string>>(new Map());
   const appliedModeRef = useRef<ScreenMode | null>(null);
   const loadInitialRef = useRef<(() => Promise<void>) | null>(null);
+  const cursorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleMouseMove(e: MouseEvent) {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const cx = w / 2;
+      const cy = h / 2;
+      const dx = e.clientX - cx;
+      const dy = e.clientY - cy;
+      // .tv-stage is rotated 90deg clockwise via CSS. Map the pointer through
+      // the same rotation about the viewport center so the dot tracks the
+      // portrait picture instead of the physical (unrotated) screen.
+      // Clockwise mapping (matches rotate(90deg)): (x', y') = (-dy, dx)
+      const rx = -dy;
+      const ry = dx;
+      // If the dot appears to move in the opposite rotational direction,
+      // flip to the counter-clockwise mapping instead: rx = dy; ry = -dx;
+      const px = cx + rx;
+      const py = cy + ry;
+      if (cursorRef.current) {
+        cursorRef.current.style.left = `${px}px`;
+        cursorRef.current.style.top = `${py}px`;
+        cursorRef.current.classList.add("tv-cursor-visible");
+      }
+    }
+
+    window.addEventListener("mousemove", handleMouseMove);
+    return () => window.removeEventListener("mousemove", handleMouseMove);
+  }, []);
 
   useEffect(() => {
     if (!shopId) return;
@@ -1170,6 +1200,7 @@ export function ScreenPage() {
           </div>
         )}
       </div>
+      <div ref={cursorRef} className="tv-cursor" />
     </main>
   );
 }
