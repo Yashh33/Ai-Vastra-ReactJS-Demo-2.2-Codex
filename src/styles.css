@@ -721,29 +721,12 @@ h2 { font-size: 1rem; font-weight: 700; }
 }
 
 /* TV screen (public /screen/:shopId) */
-.tv-screen { position: fixed; inset: 0; background: #000; overflow: hidden; cursor: none; }
-.tv-cursor {
-  position: fixed;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: #1B1B2F;
-  border: 3px solid #FFFFFF;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
-  pointer-events: none;
-  z-index: 9999;
-  transform: translate(-50%, -50%);
-  left: 0;
-  top: 0;
-  display: none;
-  will-change: left, top;
-}
-.tv-cursor-visible { display: block; }
+.tv-screen { position: fixed; inset: 0; background: #000; overflow: hidden; }
 .tv-stage {
   position: absolute;
   top: 50%;
   left: 50%;
-  transform: translate(-50%, -50%) rotate(90deg);
+  transform: translate(-50%, -50%);
   transform-origin: center center;
   background: #000;
 }
