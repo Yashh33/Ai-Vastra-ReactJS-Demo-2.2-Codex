@@ -5,15 +5,22 @@ import { compressImage } from "../lib/compressImage";
 type Props = {
   onClose: () => void;
   onSubmit: (customerPhotoFile: File) => Promise<string>;
+  onPushToScreen?: (resultBlob: Blob) => Promise<void>;
+  onShowCarousel?: () => Promise<void>;
 };
 
-export function TryOnFlow({ onClose, onSubmit }: Props) {
+export function TryOnFlow({ onClose, onSubmit, onPushToScreen, onShowCarousel }: Props) {
   const [customerPhoto, setCustomerPhoto] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
+  const [pushing, setPushing] = useState(false);
+  const [pushedLive, setPushedLive] = useState(false);
+  const [pushError, setPushError] = useState<string | null>(null);
+  const [showingCarousel, setShowingCarousel] = useState(false);
+  const [carouselShown, setCarouselShown] = useState(false);
   const captureRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
 
@@ -25,6 +32,15 @@ export function TryOnFlow({ onClose, onSubmit }: Props) {
   useEffect(() => {
     if (!resultUrl?.startsWith("blob:")) return;
     return () => URL.revokeObjectURL(resultUrl);
+  }, [resultUrl]);
+
+  // A new result starts a fresh push cycle.
+  useEffect(() => {
+    setPushing(false);
+    setPushedLive(false);
+    setPushError(null);
+    setShowingCarousel(false);
+    setCarouselShown(false);
   }, [resultUrl]);
 
   async function handleFileSelect(file: File) {
@@ -46,6 +62,39 @@ export function TryOnFlow({ onClose, onSubmit }: Props) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handlePushToScreen() {
+    if (!resultUrl || !onPushToScreen || pushing) return;
+    setPushing(true);
+    setPushError(null);
+    setCarouselShown(false);
+    try {
+      const response = await fetch(resultUrl);
+      if (!response.ok) throw new Error("Could not read the try-on image.");
+      const blob = await response.blob();
+      await onPushToScreen(blob);
+      setPushedLive(true);
+    } catch (err) {
+      setPushError(err instanceof Error ? err.message : "Could not push to the big screen.");
+    } finally {
+      setPushing(false);
+    }
+  }
+
+  async function handleShowCarousel() {
+    if (!onShowCarousel || showingCarousel) return;
+    setShowingCarousel(true);
+    setPushError(null);
+    try {
+      await onShowCarousel();
+      setPushedLive(false);
+      setCarouselShown(true);
+    } catch (err) {
+      setPushError(err instanceof Error ? err.message : "Could not switch the TV to the carousel.");
+    } finally {
+      setShowingCarousel(false);
     }
   }
 
@@ -139,6 +188,95 @@ export function TryOnFlow({ onClose, onSubmit }: Props) {
                 display: "block",
               }}
             />
+            {onPushToScreen && (
+              <>
+                <button
+                  onClick={() => void handlePushToScreen()}
+                  disabled={pushing}
+                  style={{
+                    width: "100%",
+                    minHeight: "52px",
+                    background: "#1B1B2F",
+                    color: "#C9A84C",
+                    border: "none",
+                    borderRadius: "14px",
+                    fontSize: "15px",
+                    fontWeight: 700,
+                    cursor: pushing ? "default" : "pointer",
+                    fontFamily: "inherit",
+                    opacity: pushing ? 0.6 : 1,
+                  }}
+                >
+                  {pushing ? "Pushing…" : pushedLive ? "📺 Push again" : "📺 Push to big screen"}
+                </button>
+                {pushedLive && (
+                  <p
+                    style={{
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      color: "#1B1B2F",
+                      background: "#FDF6E8",
+                      border: "1px solid rgba(201,168,76,0.35)",
+                      padding: "10px 12px",
+                      borderRadius: "10px",
+                      margin: 0,
+                      textAlign: "center",
+                    }}
+                  >
+                    Now live on the big screen
+                  </p>
+                )}
+                {carouselShown && (
+                  <p
+                    style={{
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      color: "var(--text-muted)",
+                      padding: "4px 12px",
+                      margin: 0,
+                      textAlign: "center",
+                    }}
+                  >
+                    TV is back on the carousel
+                  </p>
+                )}
+                {pushError && (
+                  <p
+                    style={{
+                      fontSize: "13px",
+                      color: "#991B1B",
+                      background: "#FEF2F2",
+                      padding: "10px 12px",
+                      borderRadius: "10px",
+                      margin: 0,
+                    }}
+                  >
+                    {pushError}
+                  </p>
+                )}
+                {pushedLive && onShowCarousel && (
+                  <button
+                    onClick={() => void handleShowCarousel()}
+                    disabled={showingCarousel}
+                    style={{
+                      width: "100%",
+                      minHeight: "44px",
+                      background: "#FFFFFF",
+                      color: "#1B1B2F",
+                      border: "1px solid rgba(201,168,76,0.35)",
+                      borderRadius: "12px",
+                      fontSize: "14px",
+                      fontWeight: 600,
+                      cursor: showingCarousel ? "default" : "pointer",
+                      fontFamily: "inherit",
+                      opacity: showingCarousel ? 0.6 : 1,
+                    }}
+                  >
+                    {showingCarousel ? "Switching…" : "Show carousel on TV"}
+                  </button>
+                )}
+              </>
+            )}
             <button
               onClick={handleShare}
               disabled={sharing}

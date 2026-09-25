@@ -9,6 +9,7 @@ import { useAuth } from "../lib/auth";
 import { useFabricImages, useGarmentTypes, useMe } from "../lib/queries";
 import { subscribeToGeneration } from "../lib/realtime";
 import { createSignedUrl, uploadToStorage } from "../lib/storage";
+import { supabase } from "../lib/supabase";
 import type {
   ApplyToTarget,
   FabricImageRow,
@@ -713,6 +714,23 @@ export function GeneratePage() {
     } finally {
       setCreatingGeneration(false);
     }
+  }
+
+  async function handlePushToScreen(blob: Blob): Promise<void> {
+    if (!accessToken) throw new Error("Not authenticated");
+    const folderId = generateMode === "multi" ? selectedGarment?.id : selectedGarmentId;
+    if (!folderId) throw new Error("Select a garment type first.");
+    const fd = new FormData();
+    fd.set("result_image", blob, "tryon.jpg");
+    fd.set("folder_id", folderId);
+    if (generateMode !== "multi" && selectedFabricImageId) fd.set("fabric_image_id", selectedFabricImageId);
+    await apiFetch("/tryon/push-to-screen", accessToken, { method: "POST", body: fd });
+  }
+
+  async function handleShowCarousel(): Promise<void> {
+    if (!me?.shop_id) return;
+    const { error } = await supabase.rpc("set_screen_mode", { p_shop_id: me.shop_id, p_mode: "catalog" });
+    if (error) throw new Error(error.message);
   }
 
   async function handleMultiTryOnSubmit(customerPhotoFile: File): Promise<string> {
@@ -1519,6 +1537,8 @@ export function GeneratePage() {
         <TryOnFlow
           onClose={() => setShowTryOnFlow(false)}
           onSubmit={generateMode === "multi" ? handleMultiTryOnSubmit : handleQuickTryOnSubmit}
+          onPushToScreen={handlePushToScreen}
+          onShowCarousel={handleShowCarousel}
         />
       )}
     </main>
