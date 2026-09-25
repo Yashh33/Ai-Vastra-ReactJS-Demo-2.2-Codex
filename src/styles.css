@@ -683,15 +683,9 @@ h2 { font-size: 1rem; font-weight: 700; }
 .login-wordmark {
   font-size: 32px;
   font-weight: 800;
-  letter-spacing: 0.02em;
-  /* Light plate so the navy half of the lockup stays legible on the navy login background. */
-  background: var(--mt-page);
-  border-radius: 14px;
-  padding: 8px 22px;
+  color: #C9A84C;
+  letter-spacing: 0.1em;
 }
-
-.login-wordmark-primary { color: #1B1B2F; }
-.login-wordmark-accent { color: #C9A84C; }
 
 .login-tagline {
   font-size: 11px;

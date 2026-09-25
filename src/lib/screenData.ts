@@ -37,12 +37,14 @@ export async function fetchBrowseGarmentTypes(
   supabase: AnySupabaseClient,
   shopId: string
 ): Promise<BrowseGarmentType[]> {
-  const { data: lookRows } = await supabase
+  const { data: lookRows, error: lookError } = await supabase
     .from("generations")
     .select("folder_id,output_path")
     .eq("shop_id", shopId)
     .eq("generation_type", "look")
     .eq("status", "done");
+
+  if (lookError) console.error("[screenData] browse generations error", lookError);
 
   const folderIdsWithLooks = new Set<string>(
     (lookRows ?? [])
@@ -52,10 +54,13 @@ export async function fetchBrowseGarmentTypes(
 
   if (folderIdsWithLooks.size === 0) return [];
 
-  const { data: garmentTypeRows } = await supabase
+  const { data: garmentTypeRows, error: garmentTypeError } = await supabase
     .from("garment_types")
     .select("id,name")
-    .eq("shop_id", shopId);
+    .eq("shop_id", shopId)
+    .eq("is_active", true);
+
+  if (garmentTypeError) console.error("[screenData] browse garment_types error", garmentTypeError);
 
   return (garmentTypeRows ?? []).filter((row: BrowseGarmentType) => folderIdsWithLooks.has(row.id));
 }
