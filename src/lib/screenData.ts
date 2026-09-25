@@ -37,32 +37,11 @@ export async function fetchBrowseGarmentTypes(
   supabase: AnySupabaseClient,
   shopId: string
 ): Promise<BrowseGarmentType[]> {
-  const { data: lookRows, error: lookError } = await supabase
-    .from("generations")
-    .select("folder_id,output_path")
-    .eq("shop_id", shopId)
-    .eq("generation_type", "look")
-    .eq("status", "done");
-
-  if (lookError) console.error("[screenData] browse generations error", lookError);
-
-  const folderIdsWithLooks = new Set<string>(
-    (lookRows ?? [])
-      .filter((row: { output_path: string | null }) => !!row.output_path)
-      .map((row: { folder_id: string }) => row.folder_id)
-  );
-
-  if (folderIdsWithLooks.size === 0) return [];
-
-  const { data: garmentTypeRows, error: garmentTypeError } = await supabase
-    .from("garment_types")
-    .select("id,name")
-    .eq("shop_id", shopId)
-    .eq("is_active", true);
-
-  if (garmentTypeError) console.error("[screenData] browse garment_types error", garmentTypeError);
-
-  return (garmentTypeRows ?? []).filter((row: BrowseGarmentType) => folderIdsWithLooks.has(row.id));
+  // Security-definer RPC: returns only active garment types with at least one done look that
+  // has an output_path, bypassing anon RLS on garment_types (the TV runs unauthenticated).
+  const { data, error } = await supabase.rpc("get_browse_garment_types", { p_shop_id: shopId });
+  if (error) console.error("[screenData] get_browse_garment_types error", error);
+  return (data ?? []).map((r: { id: string; name: string }) => ({ id: r.id, name: r.name }));
 }
 
 export async function fetchBrowseLooks(
