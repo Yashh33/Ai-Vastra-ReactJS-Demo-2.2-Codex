@@ -20,17 +20,10 @@ export async function fetchCarouselLooks(
   shopId: string,
   limit = 30
 ): Promise<CarouselRow[]> {
-  const { data } = await supabase
-    .from("generations")
-    .select("id,output_path,created_at")
-    .eq("shop_id", shopId)
-    .eq("generation_type", "look")
-    .order("created_at", { ascending: false })
-    .limit(limit);
-
-  return (data ?? [])
-    .filter((row: { output_path: string | null }) => !!row.output_path)
-    .map((row: CarouselRow) => ({ id: row.id, output_path: row.output_path, created_at: row.created_at }));
+  // Security-definer RPC: filters look + non-null output_path, newest first, bypassing anon RLS.
+  const { data, error } = await supabase.rpc("get_carousel_looks", { p_shop_id: shopId, p_limit: limit });
+  if (error) console.error("[screenData] get_carousel_looks error", error);
+  return (data ?? []) as CarouselRow[];
 }
 
 export async function fetchBrowseGarmentTypes(
@@ -49,15 +42,8 @@ export async function fetchBrowseLooks(
   shopId: string,
   folderId: string
 ): Promise<BrowseLookRow[]> {
-  const { data } = await supabase
-    .from("generations")
-    .select("id,output_path,created_at,is_hero,folder_id")
-    .eq("shop_id", shopId)
-    .eq("generation_type", "look")
-    .eq("status", "done")
-    .eq("folder_id", folderId)
-    .order("is_hero", { ascending: false })
-    .order("created_at", { ascending: false });
-
-  return (data ?? []).filter((row: { output_path: string | null }) => !!row.output_path);
+  // Security-definer RPC: filters look/done/output_path and orders is_hero desc, created_at desc.
+  const { data, error } = await supabase.rpc("get_browse_looks", { p_shop_id: shopId, p_folder_id: folderId });
+  if (error) console.error("[screenData] get_browse_looks error", error);
+  return (data ?? []) as BrowseLookRow[];
 }
