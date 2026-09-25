@@ -38,10 +38,11 @@ function GridIcon() {
   );
 }
 
-function StackIcon() {
+function CarouselIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden focusable="false">
-      <path d="m2 17 10 5 10-5M2 12l10 5 10-5M12 2 2 7l10 5 10-5-10-5z" />
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="m10 9 5 3-5 3z" />
     </svg>
   );
 }
@@ -67,18 +68,16 @@ export function AppShell() {
   const createOrder = useCreateCreditOrder();
   const refreshCreditsAfterPayment = useRefreshCreditsAfterPayment();
 
-  const shopHeaderText = meError
-    ? "Ai Vastra"
-    : (me?.header_display_text || me?.shop_name || me?.email || "Ai Vastra").trim() || "Ai Vastra";
+  const shopHeaderText = meError ? "" : (me?.header_display_text || me?.shop_name || "").trim();
   const creditBalance = meError ? "?" : formatCredits(me?.credits_balance);
 
   const activeTab =
     location.pathname === "/" || location.pathname === "/generate"
-      ? "sew"
-      : location.pathname === "/catalog"
-        ? "lookbook"
-        : location.pathname === "/fabric-silo"
-          ? "fabrics"
+      ? "generate"
+      : location.pathname === "/browse"
+        ? "browse"
+        : location.pathname === "/carousel"
+          ? "carousel"
           : "";
 
   const handleLogout = async () => {
@@ -127,7 +126,13 @@ export function AppShell() {
   return (
     <div className="app-shell">
       <header className="app-shell-header">
-        <span className="app-brand-text">{shopHeaderText}</span>
+        <div className="app-brand">
+          <span className="app-wordmark" aria-label="MyTryonAi">
+            <span className="app-wordmark-primary">MyTryon</span>
+            <span className="app-wordmark-accent">Ai</span>
+          </span>
+          {shopHeaderText ? <span className="app-brand-shop">{shopHeaderText}</span> : null}
+        </div>
         <div className="row">
           <span className="credits-chip">{creditBalance} credits</span>
           <button
@@ -159,31 +164,31 @@ export function AppShell() {
 
       <nav className="app-bottom-nav" aria-label="Primary navigation">
         <button
-          className={`nav-tab ${activeTab === "sew" ? "active" : ""}`}
+          className={`nav-tab ${activeTab === "generate" ? "active" : ""}`}
           type="button"
           onClick={() => navigate("/generate")}
         >
           <ScissorsIcon />
-          <span>Sew</span>
-          {activeTab === "sew" ? <span className="nav-dot" /> : null}
+          <span>Generate</span>
+          {activeTab === "generate" ? <span className="nav-dot" /> : null}
         </button>
         <button
-          className={`nav-tab ${activeTab === "lookbook" ? "active" : ""}`}
+          className={`nav-tab ${activeTab === "browse" ? "active" : ""}`}
           type="button"
-          onClick={() => navigate("/catalog")}
+          onClick={() => navigate("/browse")}
         >
           <GridIcon />
-          <span>Lookbook</span>
-          {activeTab === "lookbook" ? <span className="nav-dot" /> : null}
+          <span>Browse</span>
+          {activeTab === "browse" ? <span className="nav-dot" /> : null}
         </button>
         <button
-          className={`nav-tab ${activeTab === "fabrics" ? "active" : ""}`}
+          className={`nav-tab ${activeTab === "carousel" ? "active" : ""}`}
           type="button"
-          onClick={() => navigate("/fabric-silo")}
+          onClick={() => navigate("/carousel")}
         >
-          <StackIcon />
-          <span>My Fabrics</span>
-          {activeTab === "fabrics" ? <span className="nav-dot" /> : null}
+          <CarouselIcon />
+          <span>Carousel</span>
+          {activeTab === "carousel" ? <span className="nav-dot" /> : null}
         </button>
       </nav>
     </div>

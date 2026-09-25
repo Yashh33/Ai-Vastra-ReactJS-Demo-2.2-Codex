@@ -12,6 +12,14 @@
   --text-hint: #9CA3AF;
   --danger: #991B1B;
   --danger-bg: #FEF2F2;
+
+  /* MyTryonAi palette (matches the TV screen) */
+  --mt-navy: #1B1B2F;
+  --mt-gold: #C9A84C;
+  --mt-page: #F5F4F1;
+  --mt-card: #FFFFFF;
+  --mt-border: #E6E4DE;
+  --mt-muted: #6B6B72;
 }
 
 * { box-sizing: border-box; }
@@ -23,8 +31,8 @@ html, body, #root {
 
 body {
   font-family: "Manrope", "Avenir Next", "Segoe UI", sans-serif;
-  color: var(--text-primary);
-  background: var(--surface);
+  color: var(--mt-navy);
+  background: var(--mt-page);
 }
 
 h1, h2, h3, p { margin: 0; }
@@ -36,7 +44,7 @@ h2 { font-size: 1rem; font-weight: 700; }
   min-height: 100svh;
   display: grid;
   grid-template-rows: auto 1fr auto;
-  background: var(--white);
+  background: var(--mt-page);
 }
 
 .app-shell-header {
@@ -45,35 +53,54 @@ h2 { font-size: 1rem; font-weight: 700; }
   z-index: 30;
   min-height: 56px;
   padding: 0 16px;
-  border-bottom: 0.5px solid var(--border);
-  background: var(--white);
+  border-bottom: 1px solid var(--mt-border);
+  background: var(--mt-card);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.app-brand-text {
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--navy);
-  letter-spacing: 0.01em;
+.app-brand {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.1;
+}
+
+.app-wordmark {
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.app-wordmark-primary { color: var(--mt-navy); }
+.app-wordmark-accent { color: var(--mt-gold); }
+
+.app-brand-shop {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--mt-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .credits-chip {
-  background: var(--gold-light);
-  border: 0.5px solid var(--gold-border);
+  background: var(--mt-card);
+  border: 1px solid var(--mt-border);
   border-radius: 20px;
   padding: 4px 10px;
   font-size: 11px;
-  font-weight: 600;
-  color: var(--gold-muted);
+  font-weight: 700;
+  color: var(--mt-navy);
 }
 
 .buy-credits-btn {
-  background: var(--navy);
-  color: var(--gold);
-  border: 0.5px solid var(--navy);
+  background: var(--mt-navy);
+  color: var(--mt-gold);
+  border: 1px solid var(--mt-navy);
   border-radius: 20px;
   padding: 5px 12px;
   font-size: 11px;
@@ -108,7 +135,7 @@ h2 { font-size: 1rem; font-weight: 700; }
 .app-shell-content {
   min-height: 0;
   overflow: auto;
-  background: var(--surface);
+  background: var(--mt-page);
 }
 
 /* Bottom navigation */
@@ -116,8 +143,8 @@ h2 { font-size: 1rem; font-weight: 700; }
   position: sticky;
   bottom: 0;
   z-index: 30;
-  background: var(--white);
-  border-top: 0.5px solid var(--border);
+  background: var(--mt-card);
+  border-top: 1px solid var(--mt-border);
   display: flex;
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
@@ -132,7 +159,7 @@ h2 { font-size: 1rem; font-weight: 700; }
   border: none;
   background: transparent;
   cursor: pointer;
-  color: var(--text-hint);
+  color: var(--mt-navy);
   font-size: 10px;
   font-weight: 600;
   font-family: inherit;
@@ -149,14 +176,15 @@ h2 { font-size: 1rem; font-weight: 700; }
 }
 
 .nav-tab.active {
-  color: var(--navy);
+  color: var(--mt-gold);
+  font-weight: 700;
 }
 
 .nav-dot {
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: var(--gold);
+  background: var(--mt-gold);
   margin-top: -2px;
 }
 
@@ -171,9 +199,9 @@ h2 { font-size: 1rem; font-weight: 700; }
 
 /* Cards */
 .card {
-  background: var(--white);
-  border: 0.5px solid var(--border);
-  border-radius: 16px;
+  background: var(--mt-card);
+  border: 1px solid var(--mt-border);
+  border-radius: 14px;
   padding: 14px;
 }
 
@@ -268,18 +296,20 @@ h2 { font-size: 1rem; font-weight: 700; }
   border-radius: 20px;
   font-size: 13px;
   font-weight: 600;
-  border: 1px solid var(--gold-border);
-  color: var(--gold-muted);
-  background: var(--white);
+  border: 1px solid var(--mt-border);
+  color: var(--mt-navy);
+  background: var(--mt-card);
   cursor: pointer;
   font-family: inherit;
   transition: all 120ms ease;
 }
 
+.style-pill:hover { background: #EFEDE8; }
+
 .style-pill.active {
-  background: var(--navy);
-  color: var(--gold);
-  border-color: var(--navy);
+  background: var(--mt-navy);
+  color: var(--mt-gold);
+  border-color: var(--mt-navy);
 }
 
 /* Model preview */
@@ -315,12 +345,12 @@ h2 { font-size: 1rem; font-weight: 700; }
   top: 10px;
   right: 10px;
   background: rgba(255,255,255,0.9);
-  border: 0.5px solid var(--gold-border);
+  border: 1px solid var(--gold-border);
   border-radius: 8px;
   padding: 4px 10px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--gold-muted);
+  color: var(--mt-navy);
   cursor: pointer;
   font-family: inherit;
 }
@@ -331,25 +361,25 @@ h2 { font-size: 1rem; font-weight: 700; }
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  background: var(--white);
+  background: var(--mt-card);
   border-radius: 12px;
-  border: 0.5px solid var(--border);
+  border: 1px solid var(--mt-border);
 }
 
 .silo-toggle-row span {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--mt-navy);
 }
 
 /* Primary CTA button */
 .btn-primary {
   width: 100%;
   min-height: 52px;
-  background: var(--navy);
-  color: var(--gold);
+  background: var(--mt-navy);
+  color: var(--mt-gold);
   border: none;
-  border-radius: 16px;
+  border-radius: 14px;
   font-size: 15px;
   font-weight: 700;
   font-family: inherit;
@@ -379,9 +409,9 @@ h2 { font-size: 1rem; font-weight: 700; }
 /* Secondary button */
 .btn-secondary {
   min-height: 44px;
-  background: var(--white);
-  color: var(--text-primary);
-  border: 0.5px solid var(--border);
+  background: var(--mt-card);
+  color: var(--mt-navy);
+  border: 1px solid var(--gold-border);
   border-radius: 12px;
   font-size: 13px;
   font-weight: 600;
@@ -391,23 +421,24 @@ h2 { font-size: 1rem; font-weight: 700; }
   transition: background 120ms ease;
 }
 
-.btn-secondary:hover { background: var(--surface); }
+.btn-secondary:hover { background: #EFEDE8; }
 .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Buttons (backward compat) */
-.btn { min-height: 44px; border-radius: 12px; border: 0.5px solid var(--border); padding: 0 16px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: opacity 120ms ease; }
+.btn { min-height: 44px; border-radius: 12px; border: 1px solid var(--mt-border); padding: 0 16px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: opacity 120ms ease; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-dark { background: var(--navy); color: var(--gold); border-color: var(--navy); }
-.btn-light { background: var(--white); color: var(--text-primary); }
+.btn-dark { background: var(--mt-navy); color: var(--mt-gold); border-color: var(--mt-navy); }
+.btn-light { background: var(--mt-card); color: var(--mt-navy); border-color: var(--gold-border); }
+.btn-light:hover:not(:disabled) { background: #EFEDE8; }
 
 /* Catalog / Lookbook grid */
-.catalog-screen { background: var(--surface); }
+.catalog-screen { background: var(--mt-page); }
 .catalog-shell { display: grid; gap: 14px; padding: 14px; }
 
 .catalog-header {
-  background: var(--white);
-  border-radius: 16px;
-  border: 0.5px solid var(--border);
+  background: var(--mt-card);
+  border-radius: 14px;
+  border: 1px solid var(--mt-border);
   padding: 10px 14px;
   display: flex;
   align-items: center;
@@ -437,12 +468,12 @@ h2 { font-size: 1rem; font-weight: 700; }
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  border: 0.5px solid var(--border);
-  background: var(--white);
+  border: 1px solid var(--mt-border);
+  background: var(--mt-card);
   cursor: pointer;
   display: grid;
   place-items: center;
-  color: var(--text-muted);
+  color: var(--mt-navy);
 }
 
 .catalog-grid {
@@ -452,8 +483,8 @@ h2 { font-size: 1rem; font-weight: 700; }
 }
 
 .catalog-tile {
-  background: var(--white);
-  border: 0.5px solid var(--border);
+  background: var(--mt-card);
+  border: 1px solid var(--mt-border);
   border-radius: 14px;
   overflow: hidden;
 }
@@ -667,7 +698,7 @@ h2 { font-size: 1rem; font-weight: 700; }
 
 /* Viewer screens */
 .screen-fill { height: 100%; min-height: 100%; }
-.viewer-screen { background: var(--surface); }
+.viewer-screen { background: var(--mt-page); }
 .viewer-shell { gap: 14px; }
 .viewer-card {
   min-height: 58svh;
