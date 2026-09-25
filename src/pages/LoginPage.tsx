@@ -99,7 +99,10 @@ export function LoginPage() {
         >
           Powered by
         </div>
-        <div className="login-wordmark">AI VASTRA</div>
+        <div className="login-wordmark" aria-label="MyTryonAi">
+          <span className="login-wordmark-primary">MyTryon</span>
+          <span className="login-wordmark-accent">Ai</span>
+        </div>
         <div className="login-tagline">Craft Your Collection</div>
         <div className="login-divider" />
       </div>

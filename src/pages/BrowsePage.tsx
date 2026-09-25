@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+import { apiFetch } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { useMe } from "../lib/queries";
 import {
   fetchBrowseGarmentTypes,
@@ -67,6 +69,7 @@ function BrowseTile({
 }
 
 export function BrowsePage() {
+  const { accessToken } = useAuth();
   const { data: me, isLoading: meLoading, isError: meError } = useMe();
   const shopId = me?.shop_id ?? null;
 
@@ -80,6 +83,8 @@ export function BrowsePage() {
   const [detailUrl, setDetailUrl] = useState<string | null>(null);
   const [heroPending, setHeroPending] = useState(false);
   const [heroError, setHeroError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const urlMapRef = useRef<Map<string, string>>(new Map());
 
@@ -159,6 +164,7 @@ export function BrowsePage() {
     setDetailLook(null);
     setDetailUrl(null);
     setHeroError(null);
+    setDeleteError(null);
   }
 
   async function navigateDetail(direction: 1 | -1) {
@@ -183,8 +189,35 @@ export function BrowsePage() {
     }
 
     setHeroError(null);
+    setDeleteError(null);
     setDetailLook(nextLook);
     setDetailUrl(url);
+  }
+
+  async function deleteLook(look: BrowseLookRow) {
+    if (deleting) return;
+    const confirmed = window.confirm(
+      "Delete this look permanently? This removes it from Browse, the Carousel, and the TV."
+    );
+    if (!confirmed) return;
+
+    setDeleteError(null);
+    setDeleting(true);
+    try {
+      if (!accessToken) throw new Error("Not authenticated");
+      await apiFetch(`/generations/${look.id}`, accessToken, { method: "DELETE" });
+      urlMapRef.current.delete(look.id);
+      const remaining = looks.filter((row) => row.id !== look.id);
+      setLooks(remaining);
+      closeDetail();
+      // An emptied category should drop out of the rail, so re-run the tab query.
+      if (remaining.length === 0) setRefreshKey((prev) => prev + 1);
+    } catch (err) {
+      console.error("BrowsePage: failed to delete look", look.id, err);
+      setDeleteError(err instanceof Error ? err.message : "Couldn't delete this look. Try again.");
+    } finally {
+      setDeleting(false);
+    }
   }
 
   async function toggleHero(look: BrowseLookRow) {
@@ -272,6 +305,17 @@ export function BrowsePage() {
               ›
             </button>
           ) : null}
+        </div>
+        <div className="mt-browse-detail-footer">
+          {deleteError ? <div className="mt-browse-hero-error">{deleteError}</div> : null}
+          <button
+            type="button"
+            className="mt-browse-delete"
+            disabled={deleting}
+            onClick={() => void deleteLook(detailLook)}
+          >
+            {deleting ? "Deleting…" : "Delete look"}
+          </button>
         </div>
       </div>
     );
@@ -497,11 +541,34 @@ export function BrowsePage() {
         .mt-browse-detail-frame { position: relative; display: flex; max-width: 92%; }
         .mt-browse-detail-frame img {
           max-width: 100%;
-          max-height: calc(100svh - 240px);
+          max-height: calc(100svh - 310px);
           object-fit: contain;
           animation: mt-browse-fade-in 0.4s ease;
           border-radius: 8px;
         }
+        .mt-browse-detail-footer {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 8px;
+          padding: 0 clamp(16px, 2.5vw, 32px) clamp(16px, 2.5vw, 32px);
+        }
+        .mt-browse-delete {
+          font: inherit;
+          font-size: clamp(0.9rem, 1.4vw, 1.1rem);
+          font-weight: 700;
+          color: #B3261E;
+          background: var(--card);
+          border: 1.5px solid #B3261E;
+          border-radius: 12px;
+          padding: 8px 22px;
+          cursor: pointer;
+          transition: background 0.15s ease;
+        }
+        .mt-browse-delete:hover { background: #FEF2F2; }
+        .mt-browse-delete:focus-visible { outline: 3px solid #B3261E; outline-offset: 2px; }
+        .mt-browse-delete:disabled { opacity: 0.6; cursor: default; }
+
         .mt-browse-nav-btn {
           position: absolute;
           top: 50%;

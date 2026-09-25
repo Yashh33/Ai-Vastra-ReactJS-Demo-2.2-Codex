@@ -796,6 +796,93 @@ export function GeneratePage() {
         </section>
 
         <section className="card stack-sm">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+            <span className="section-label">Select Style</span>
+            <button
+              onClick={() => void refetchGarmentTypes()}
+              style={{
+                width: "32px",
+                height: "32px",
+                borderRadius: "50%",
+                border: "0.5px solid var(--border)",
+                background: "var(--white)",
+                cursor: "pointer",
+                display: "grid",
+                placeItems: "center",
+                color: "var(--text-muted)"
+              }}
+              aria-label="Refresh garment types"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              >
+                <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+                <path d="M21 3v5h-5" />
+              </svg>
+            </button>
+          </div>
+
+          <div className="pill-row">
+            {garmentTypes.map((garment) => (
+              <button
+                key={garment.id}
+                className={`style-pill ${selectedGarmentId === garment.id ? "active" : ""}`}
+                type="button"
+                onClick={() => {
+                  setSelectedGarmentId(garment.id);
+                  setHeroChangeOpen(false);
+                  setHeroReplacementFile(null);
+                  setHeroReplacementPreviewUrl(null);
+                }}
+                disabled={actionBusy || loadingGarmentTypes}
+              >
+                {garment.name}
+              </button>
+            ))}
+          </div>
+
+          {loadingGarmentTypes ? <p className="tiny muted">Loading garment types...</p> : null}
+
+          {selectedGarment ? (
+            <>
+              <div className="model-preview-box">
+                {selectedHeroPreviewUrl ? (
+                  <img className="model-preview-img" src={selectedHeroPreviewUrl} alt={`${selectedGarment.name} hero`} />
+                ) : (
+                  <div className="model-preview-placeholder">No hero preview available</div>
+                )}
+                <button
+                  className="model-change-btn"
+                  type="button"
+                  onClick={() => setHeroChangeOpen((prev) => !prev)}
+                  disabled={actionBusy}
+                >
+                  Change
+                </button>
+              </div>
+
+              {heroChangeOpen ? (
+                <label className="field">
+                  <span>Replacement Hero Image</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={onHeroReplacementChange}
+                    disabled={actionBusy}
+                  />
+                </label>
+              ) : null}
+            </>
+          ) : null}
+        </section>
+
+        <section className="card stack-sm">
           <h2>Choose Cloth</h2>
 
           <div className="fabric-scroll">
@@ -1016,93 +1103,6 @@ export function GeneratePage() {
             hidden
             onChange={onFabricGalleryChange}
           />
-        </section>
-
-        <section className="card stack-sm">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-            <span className="section-label">Select Style</span>
-            <button
-              onClick={() => void refetchGarmentTypes()}
-              style={{
-                width: "32px",
-                height: "32px",
-                borderRadius: "50%",
-                border: "0.5px solid var(--border)",
-                background: "var(--white)",
-                cursor: "pointer",
-                display: "grid",
-                placeItems: "center",
-                color: "var(--text-muted)"
-              }}
-              aria-label="Refresh garment types"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                width="16"
-                height="16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              >
-                <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
-                <path d="M21 3v5h-5" />
-              </svg>
-            </button>
-          </div>
-
-          <div className="pill-row">
-            {garmentTypes.map((garment) => (
-              <button
-                key={garment.id}
-                className={`style-pill ${selectedGarmentId === garment.id ? "active" : ""}`}
-                type="button"
-                onClick={() => {
-                  setSelectedGarmentId(garment.id);
-                  setHeroChangeOpen(false);
-                  setHeroReplacementFile(null);
-                  setHeroReplacementPreviewUrl(null);
-                }}
-                disabled={actionBusy || loadingGarmentTypes}
-              >
-                {garment.name}
-              </button>
-            ))}
-          </div>
-
-          {loadingGarmentTypes ? <p className="tiny muted">Loading garment types...</p> : null}
-
-          {selectedGarment ? (
-            <>
-              <div className="model-preview-box">
-                {selectedHeroPreviewUrl ? (
-                  <img className="model-preview-img" src={selectedHeroPreviewUrl} alt={`${selectedGarment.name} hero`} />
-                ) : (
-                  <div className="model-preview-placeholder">No hero preview available</div>
-                )}
-                <button
-                  className="model-change-btn"
-                  type="button"
-                  onClick={() => setHeroChangeOpen((prev) => !prev)}
-                  disabled={actionBusy}
-                >
-                  Change
-                </button>
-              </div>
-
-              {heroChangeOpen ? (
-                <label className="field">
-                  <span>Replacement Hero Image</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={onHeroReplacementChange}
-                    disabled={actionBusy}
-                  />
-                </label>
-              ) : null}
-            </>
-          ) : null}
         </section>
 
         <section className="card stack-sm">

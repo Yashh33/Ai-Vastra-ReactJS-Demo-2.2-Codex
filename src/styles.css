@@ -58,14 +58,24 @@ h2 { font-size: 1rem; font-weight: 700; }
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: nowrap;
   gap: 12px;
 }
 
 .app-brand {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
   min-width: 0;
   line-height: 1.1;
+}
+
+.app-header-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  gap: 8px;
 }
 
 .app-wordmark {
@@ -88,6 +98,7 @@ h2 { font-size: 1rem; font-weight: 700; }
 }
 
 .credits-chip {
+  white-space: nowrap;
   background: var(--mt-card);
   border: 1px solid var(--mt-border);
   border-radius: 20px;
@@ -147,6 +158,15 @@ h2 { font-size: 1rem; font-weight: 700; }
   border-top: 1px solid var(--mt-border);
   display: flex;
   padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@media (max-width: 420px) {
+  .app-shell-header { padding: 0 10px; gap: 8px; }
+  .app-header-actions { gap: 6px; }
+  .app-wordmark { font-size: 1rem; }
+  .credits-chip { padding: 3px 8px; font-size: 10px; }
+  .buy-credits-btn { padding: 4px 9px; font-size: 10px; }
+  .app-header-actions .catalog-icon-btn { width: 30px; height: 30px; }
 }
 
 .nav-tab {
@@ -663,9 +683,15 @@ h2 { font-size: 1rem; font-weight: 700; }
 .login-wordmark {
   font-size: 32px;
   font-weight: 800;
-  color: var(--gold);
-  letter-spacing: 0.1em;
+  letter-spacing: 0.02em;
+  /* Light plate so the navy half of the lockup stays legible on the navy login background. */
+  background: var(--mt-page);
+  border-radius: 14px;
+  padding: 8px 22px;
 }
+
+.login-wordmark-primary { color: #1B1B2F; }
+.login-wordmark-accent { color: #C9A84C; }
 
 .login-tagline {
   font-size: 11px;

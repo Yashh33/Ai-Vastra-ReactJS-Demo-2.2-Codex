@@ -133,7 +133,7 @@ export function AppShell() {
           </span>
           {shopHeaderText ? <span className="app-brand-shop">{shopHeaderText}</span> : null}
         </div>
-        <div className="row">
+        <div className="app-header-actions">
           <span className="credits-chip">{creditBalance} credits</span>
           <button
             className="buy-credits-btn"
