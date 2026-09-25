@@ -4,6 +4,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
+const BrowsePage = lazy(() => import("./pages/BrowsePage").then((m) => ({ default: m.BrowsePage })));
 const CatalogPage = lazy(() => import("./pages/CatalogPage").then((m) => ({ default: m.CatalogPage })));
 const CarouselPage = lazy(() => import("./pages/CarouselPage").then((m) => ({ default: m.CarouselPage })));
 const FabricSiloPage = lazy(() => import("./pages/FabricSiloPage").then((m) => ({ default: m.FabricSiloPage })));
@@ -39,6 +40,7 @@ export function AppRouter() {
             <Route path="/" element={<HomePage />} />
             <Route path="/create-looks" element={<HomePage />} />
             <Route path="/generate" element={<GeneratePage />} />
+            <Route path="/browse" element={<BrowsePage />} />
             <Route path="/catalog" element={<CatalogPage />} />
             <Route path="/fabric-silo" element={<FabricSiloPage />} />
             <Route path="/output-history" element={<OutputHistoryPage />} />
