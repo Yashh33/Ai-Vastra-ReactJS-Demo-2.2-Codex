@@ -9,6 +9,14 @@ import {
   type ShopScreenGenerationRow,
   type ShopScreenStateRow
 } from "../lib/realtime";
+import {
+  fetchBrowseGarmentTypes,
+  fetchBrowseLooks,
+  fetchCarouselLooks,
+  type BrowseGarmentType,
+  type BrowseLookRow,
+  type CarouselRow
+} from "../lib/screenData";
 
 const SIGNED_URL_TTL_SECONDS = 6 * 60 * 60;
 const CAROUSEL_LIMIT = 30;
@@ -19,25 +27,6 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 type CarouselItem = {
   id: string;
   url: string;
-};
-
-type CarouselRow = {
-  id: string;
-  output_path: string;
-  created_at: string;
-};
-
-type BrowseGarmentType = {
-  id: string;
-  name: string;
-};
-
-type BrowseLookRow = {
-  id: string;
-  output_path: string;
-  created_at: string;
-  is_hero: boolean;
-  folder_id: string;
 };
 
 type ScreenMode = "idle" | "catalog" | "live" | "browse";
@@ -196,6 +185,7 @@ export function ScreenPage() {
 
   useEffect(() => {
     if (!resolvedShopId) return;
+    const shopId = resolvedShopId;
     let cancelled = false;
 
     liveGenerationIdRef.current = null;
@@ -316,19 +306,9 @@ export function ScreenPage() {
     }
 
     async function loadInitial() {
-      const { data: approvedRows } = await supabase
-        .from("generations")
-        .select("id,output_path,created_at")
-        .eq("shop_id", resolvedShopId)
-        .eq("generation_type", "look")
-        .order("created_at", { ascending: false })
-        .limit(CAROUSEL_LIMIT);
+      const rows: CarouselRow[] = await fetchCarouselLooks(supabase, shopId, CAROUSEL_LIMIT);
 
       if (cancelled) return;
-
-      const rows: CarouselRow[] = (approvedRows ?? [])
-        .filter((row: { output_path: string | null }) => !!row.output_path)
-        .map((row: { id: string; output_path: string; created_at: string }) => row);
 
       const currentIds = new Set(rows.map((row) => row.id));
       for (const id of Array.from(carouselUrlMapRef.current.keys())) {
@@ -452,42 +432,15 @@ export function ScreenPage() {
 
   useEffect(() => {
     if (mode !== "browse" || !resolvedShopId) return;
+    const shopId = resolvedShopId;
     let cancelled = false;
     setBrowseRefreshing(true);
 
     async function loadBrowseTabs() {
       try {
-        const { data: lookRows } = await supabase
-          .from("generations")
-          .select("folder_id,output_path")
-          .eq("shop_id", resolvedShopId)
-          .eq("generation_type", "look")
-          .eq("status", "done");
+        const tabs: BrowseGarmentType[] = await fetchBrowseGarmentTypes(supabase, shopId);
 
         if (cancelled) return;
-
-        const folderIdsWithLooks = new Set(
-          (lookRows ?? [])
-            .filter((row: { output_path: string | null }) => !!row.output_path)
-            .map((row: { folder_id: string }) => row.folder_id)
-        );
-
-        if (folderIdsWithLooks.size === 0) {
-          setBrowseGarmentTypes([]);
-          setBrowseSelectedGarmentTypeId(null);
-          return;
-        }
-
-        const { data: garmentTypeRows } = await supabase
-          .from("garment_types")
-          .select("id,name")
-          .eq("shop_id", resolvedShopId);
-
-        if (cancelled) return;
-
-        const tabs: BrowseGarmentType[] = (garmentTypeRows ?? []).filter((row: { id: string }) =>
-          folderIdsWithLooks.has(row.id)
-        );
 
         setBrowseGarmentTypes(tabs);
         setBrowseSelectedGarmentTypeId((prev) => (prev && tabs.some((tab) => tab.id === prev) ? prev : tabs[0]?.id ?? null));
@@ -509,24 +462,14 @@ export function ScreenPage() {
       return;
     }
 
+    const shopId = resolvedShopId;
+    const folderId = browseSelectedGarmentTypeId;
     let cancelled = false;
 
     async function loadBrowseLooks() {
-      const { data } = await supabase
-        .from("generations")
-        .select("id,output_path,created_at,is_hero,folder_id")
-        .eq("shop_id", resolvedShopId)
-        .eq("generation_type", "look")
-        .eq("status", "done")
-        .eq("folder_id", browseSelectedGarmentTypeId)
-        .order("is_hero", { ascending: false })
-        .order("created_at", { ascending: false });
+      const rows: BrowseLookRow[] = await fetchBrowseLooks(supabase, shopId, folderId);
 
       if (cancelled) return;
-
-      const rows: BrowseLookRow[] = (data ?? []).filter(
-        (row: { output_path: string | null }) => !!row.output_path
-      );
 
       setBrowseLooks(rows);
     }
