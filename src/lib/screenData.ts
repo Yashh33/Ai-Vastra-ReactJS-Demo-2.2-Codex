@@ -9,7 +9,17 @@ export type BrowseLookRow = {
   created_at: string;
   is_hero: boolean;
   folder_id: string;
+  barcode: string | null;
+  mrp: number | null;
+  description: string | null;
 };
+
+// Postgres numeric can arrive as a string; normalise to a number (or null when absent/invalid).
+function toMrpNumber(raw: unknown): number | null {
+  if (raw === null || raw === undefined || raw === "") return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
 
 // Loosely typed so both the anon and authenticated supabase-js clients are accepted.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -45,5 +55,15 @@ export async function fetchBrowseLooks(
   // Security-definer RPC: filters look/done/output_path and orders is_hero desc, created_at desc.
   const { data, error } = await supabase.rpc("get_browse_looks", { p_shop_id: shopId, p_folder_id: folderId });
   if (error) console.error("[screenData] get_browse_looks error", error);
-  return (data ?? []) as BrowseLookRow[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (data ?? []).map((r: any) => ({
+    id: r.id,
+    output_path: r.output_path,
+    created_at: r.created_at,
+    is_hero: r.is_hero,
+    folder_id: r.folder_id,
+    barcode: r.barcode ?? null,
+    mrp: toMrpNumber(r.mrp),
+    description: r.description ?? null
+  }));
 }

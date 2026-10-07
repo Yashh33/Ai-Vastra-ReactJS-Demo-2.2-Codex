@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
+import { LookDetails } from "../components/LookDetails";
 import { supabase } from "../lib/supabase";
 import { createSignedUrl } from "../lib/storage";
 import {
@@ -854,7 +855,9 @@ export function ScreenPage() {
           font-size: clamp(0.9rem, 1.4vw, 1.1rem);
           padding: 8px clamp(16px, 2.5vw, 32px) 0;
         }
-        .tv-browse-detail-media { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; }
+        .tv-browse-detail-media { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+        /* Side padding keeps the details card clear of the mode FAB in the bottom-right corner. */
+        .tv-browse-detail-info { flex-shrink: 0; padding: 0 clamp(76px, 12vw, 130px) clamp(16px, 3vw, 32px); }
         .tv-browse-detail-media img { max-width: 92%; max-height: 92%; object-fit: contain; animation: tv-fade-in 0.4s ease; border-radius: 8px; }
         .tv-browse-nav-btn {
           position: absolute;
@@ -998,6 +1001,14 @@ export function ScreenPage() {
                             ›
                           </button>
                         ) : null}
+                      </div>
+                      <div className="tv-browse-detail-info">
+                        <LookDetails
+                          variant="tv"
+                          barcode={browseDetailLook.barcode}
+                          mrp={browseDetailLook.mrp}
+                          description={browseDetailLook.description}
+                        />
                       </div>
                     </div>
                   ) : (

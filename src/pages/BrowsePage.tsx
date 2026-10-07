@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
+import { LookDetails } from "../components/LookDetails";
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useMe } from "../lib/queries";
@@ -16,6 +17,7 @@ import { supabase } from "../lib/supabase";
 // local state only: it never reads or writes shop_screen_state, so it can't change the TV.
 
 const SIGNED_URL_TTL_SECONDS = 6 * 60 * 60;
+const DESCRIPTION_MAX_LENGTH = 300;
 
 function sortBrowseLooks(rows: BrowseLookRow[]): BrowseLookRow[] {
   return [...rows].sort((a, b) => {
@@ -85,6 +87,12 @@ export function BrowsePage() {
   const [heroError, setHeroError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [editingDetails, setEditingDetails] = useState(false);
+  const [editBarcode, setEditBarcode] = useState("");
+  const [editMrp, setEditMrp] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [detailsSaving, setDetailsSaving] = useState(false);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
 
   const urlMapRef = useRef<Map<string, string>>(new Map());
 
@@ -147,6 +155,11 @@ export function BrowsePage() {
     if (!detailLook) return;
 
     function handleKeyDown(event: KeyboardEvent) {
+      // While the details form is open the arrow keys belong to its inputs.
+      if (editingDetails) {
+        if (event.key === "Escape" && !detailsSaving) cancelEditDetails();
+        return;
+      }
       if (event.key === "ArrowRight") {
         void navigateDetail(1);
       } else if (event.key === "ArrowLeft") {
@@ -158,13 +171,60 @@ export function BrowsePage() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [detailLook, looks]);
+  }, [detailLook, looks, editingDetails, detailsSaving]);
+
+  function cancelEditDetails() {
+    setEditingDetails(false);
+    setDetailsError(null);
+  }
+
+  function startEditDetails(look: BrowseLookRow) {
+    setEditBarcode(look.barcode ?? "");
+    setEditMrp(look.mrp !== null ? String(look.mrp) : "");
+    setEditDescription(look.description ?? "");
+    setDetailsError(null);
+    setEditingDetails(true);
+  }
+
+  async function saveDetails(look: BrowseLookRow) {
+    if (detailsSaving) return;
+
+    const barcode = editBarcode.trim();
+    const description = editDescription.trim();
+    const mrpRaw = editMrp.trim();
+    const mrp = mrpRaw === "" ? null : Number(mrpRaw);
+    if (mrp !== null && (!Number.isFinite(mrp) || mrp < 0)) {
+      setDetailsError("Enter a valid MRP.");
+      return;
+    }
+
+    setDetailsError(null);
+    setDetailsSaving(true);
+    try {
+      if (!accessToken) throw new Error("Not authenticated");
+      // The backend turns empty strings into null, which is how a field gets cleared.
+      await apiFetch(`/generations/${look.id}/details`, accessToken, {
+        method: "PATCH",
+        body: JSON.stringify({ barcode, mrp: mrp ?? "", description })
+      });
+      const patch = { barcode: barcode || null, mrp, description: description || null };
+      setDetailLook((prev) => (prev && prev.id === look.id ? { ...prev, ...patch } : prev));
+      setLooks((prev) => prev.map((row) => (row.id === look.id ? { ...row, ...patch } : row)));
+      setEditingDetails(false);
+    } catch (err) {
+      console.error("BrowsePage: failed to save look details", look.id, err);
+      setDetailsError(err instanceof Error ? err.message : "Couldn't save details. Try again.");
+    } finally {
+      setDetailsSaving(false);
+    }
+  }
 
   function closeDetail() {
     setDetailLook(null);
     setDetailUrl(null);
     setHeroError(null);
     setDeleteError(null);
+    cancelEditDetails();
   }
 
   async function navigateDetail(direction: 1 | -1) {
@@ -190,6 +250,7 @@ export function BrowsePage() {
 
     setHeroError(null);
     setDeleteError(null);
+    cancelEditDetails();
     setDetailLook(nextLook);
     setDetailUrl(url);
   }
@@ -306,6 +367,72 @@ export function BrowsePage() {
             </button>
           ) : null}
         </div>
+        <div className="mt-browse-detail-info">
+          {editingDetails ? (
+            <form
+              className="mt-browse-edit-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void saveDetails(detailLook);
+              }}
+            >
+              <label className="mt-browse-edit-field">
+                <span>Barcode</span>
+                <input
+                  type="text"
+                  value={editBarcode}
+                  onChange={(event) => setEditBarcode(event.target.value)}
+                  disabled={detailsSaving}
+                />
+              </label>
+              <label className="mt-browse-edit-field">
+                <span>MRP (₹)</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="any"
+                  value={editMrp}
+                  onChange={(event) => setEditMrp(event.target.value)}
+                  disabled={detailsSaving}
+                />
+              </label>
+              <label className="mt-browse-edit-field">
+                <span>
+                  Description ({editDescription.length}/{DESCRIPTION_MAX_LENGTH})
+                </span>
+                <textarea
+                  rows={3}
+                  maxLength={DESCRIPTION_MAX_LENGTH}
+                  value={editDescription}
+                  onChange={(event) => setEditDescription(event.target.value)}
+                  disabled={detailsSaving}
+                />
+              </label>
+              {detailsError ? <div className="mt-browse-edit-error">{detailsError}</div> : null}
+              <div className="mt-browse-edit-actions">
+                <button type="submit" className="mt-browse-edit-save" disabled={detailsSaving}>
+                  {detailsSaving ? "Saving…" : "Save"}
+                </button>
+                <button
+                  type="button"
+                  className="mt-browse-edit-cancel"
+                  disabled={detailsSaving}
+                  onClick={cancelEditDetails}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : (
+            <>
+              <LookDetails barcode={detailLook.barcode} mrp={detailLook.mrp} description={detailLook.description} />
+              <button type="button" className="mt-browse-edit-btn" onClick={() => startEditDetails(detailLook)}>
+                Edit details
+              </button>
+            </>
+          )}
+        </div>
         <div className="mt-browse-detail-footer">
           {deleteError ? <div className="mt-browse-hero-error">{deleteError}</div> : null}
           <button
@@ -361,6 +488,7 @@ export function BrowsePage() {
                 urlMapRef={urlMapRef}
                 onOpen={(openedLook, url) => {
                   setHeroError(null);
+                  cancelEditDetails();
                   setDetailLook(openedLook);
                   setDetailUrl(url);
                 }}
@@ -546,6 +674,73 @@ export function BrowsePage() {
           animation: mt-browse-fade-in 0.4s ease;
           border-radius: 8px;
         }
+        .mt-browse-detail-info {
+          width: 100%;
+          max-width: 560px;
+          margin: 0 auto;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 10px;
+          padding: 0 clamp(16px, 2.5vw, 32px) 16px;
+        }
+        .mt-browse-edit-btn,
+        .mt-browse-edit-save,
+        .mt-browse-edit-cancel {
+          font: inherit;
+          font-size: clamp(0.9rem, 1.4vw, 1.1rem);
+          font-weight: 700;
+          color: var(--navy);
+          background: var(--card);
+          border: 1.5px solid var(--navy);
+          border-radius: 12px;
+          padding: 8px 22px;
+          cursor: pointer;
+          transition: background 0.15s ease;
+        }
+        .mt-browse-edit-btn:hover,
+        .mt-browse-edit-cancel:hover { background: #EFEDE8; }
+        .mt-browse-edit-save { background: var(--gold); border-color: var(--gold); }
+        .mt-browse-edit-btn:focus-visible,
+        .mt-browse-edit-save:focus-visible,
+        .mt-browse-edit-cancel:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+        .mt-browse-edit-save:disabled,
+        .mt-browse-edit-cancel:disabled { opacity: 0.6; cursor: default; }
+        .mt-browse-edit-form {
+          width: 100%;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          padding: 14px 16px;
+          background: var(--card);
+          border: 1px solid var(--border);
+          border-radius: 14px;
+        }
+        .mt-browse-edit-field { display: flex; flex-direction: column; gap: 4px; }
+        .mt-browse-edit-field span {
+          font-size: 0.75rem;
+          font-weight: 700;
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          color: var(--muted);
+        }
+        .mt-browse-edit-field input,
+        .mt-browse-edit-field textarea {
+          font: inherit;
+          font-size: 1rem;
+          color: var(--navy);
+          background: var(--card);
+          border: 1px solid var(--border);
+          border-radius: 10px;
+          padding: 10px 12px;
+          width: 100%;
+          box-sizing: border-box;
+          resize: vertical;
+        }
+        .mt-browse-edit-field input:focus-visible,
+        .mt-browse-edit-field textarea:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+        .mt-browse-edit-error { color: #B3261E; font-size: 0.9rem; }
+        .mt-browse-edit-actions { display: flex; gap: 10px; }
         .mt-browse-detail-footer {
           display: flex;
           flex-direction: column;

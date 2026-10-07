@@ -105,6 +105,11 @@ export function GeneratePage() {
   const [hasPattern, setHasPattern] = useState(false);
   const [fabricScale, setFabricScale] = useState<"fine" | "medium" | "bold" | null>(null);
 
+  const [productDetailsOpen, setProductDetailsOpen] = useState(false);
+  const [lookBarcode, setLookBarcode] = useState("");
+  const [lookMrp, setLookMrp] = useState("");
+  const [lookDescription, setLookDescription] = useState("");
+
   const [heroChangeOpen, setHeroChangeOpen] = useState(false);
   const [heroReplacementFile, setHeroReplacementFile] = useState<File | null>(null);
   const [heroReplacementPreviewUrl, setHeroReplacementPreviewUrl] = useState<string | null>(null);
@@ -509,6 +514,19 @@ export function GeneratePage() {
   async function handleCreateGeneration() {
     if (!accessToken || !selectedGarment) return;
 
+    // Optional product details: only the filled fields are sent with the create request.
+    const productDetails: { barcode?: string; mrp?: number; description?: string } = {};
+    if (lookBarcode.trim()) productDetails.barcode = lookBarcode.trim();
+    if (lookDescription.trim()) productDetails.description = lookDescription.trim();
+    if (lookMrp.trim()) {
+      const mrp = Number(lookMrp.trim());
+      if (!Number.isFinite(mrp) || mrp < 0) {
+        setStatusText("Generate failed: enter a valid MRP.");
+        return;
+      }
+      productDetails.mrp = mrp;
+    }
+
     setCreatingGeneration(true);
     try {
       const fabricImage = await ensureFabricImage();
@@ -528,7 +546,8 @@ export function GeneratePage() {
         body: JSON.stringify({
           hero_image_id: heroImageId,
           fabric_image_id: fabricImage.id,
-          fabrics: [fabricAssignment]
+          fabrics: [fabricAssignment],
+          ...productDetails
         })
       });
 
@@ -1106,6 +1125,62 @@ export function GeneratePage() {
         </section>
 
         <section className="card stack-sm">
+          <button
+            type="button"
+            aria-expanded={productDetailsOpen}
+            onClick={() => setProductDetailsOpen((prev) => !prev)}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "#1B1B2F",
+              fontWeight: 600,
+              fontSize: "13px",
+              fontFamily: "inherit",
+              cursor: "pointer",
+              padding: 0,
+              textAlign: "left"
+            }}
+          >
+            {productDetailsOpen ? "▾" : "▸"} Add product details (optional)
+          </button>
+
+          {productDetailsOpen ? (
+            <>
+              <label className="field">
+                <span>Barcode</span>
+                <input
+                  type="text"
+                  value={lookBarcode}
+                  onChange={(event) => setLookBarcode(event.target.value)}
+                  disabled={actionBusy}
+                />
+              </label>
+              <label className="field">
+                <span>MRP (₹)</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="any"
+                  value={lookMrp}
+                  onChange={(event) => setLookMrp(event.target.value)}
+                  placeholder="e.g. 1299"
+                  disabled={actionBusy}
+                />
+              </label>
+              <label className="field">
+                <span>Description</span>
+                <textarea
+                  rows={3}
+                  maxLength={300}
+                  value={lookDescription}
+                  onChange={(event) => setLookDescription(event.target.value)}
+                  disabled={actionBusy}
+                />
+              </label>
+            </>
+          ) : null}
+
           <button
             className="btn-primary"
             type="button"
