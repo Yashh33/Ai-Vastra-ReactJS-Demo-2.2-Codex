@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
+import { ColorStudio } from "../components/ColorStudio";
 import { CustomerConsentModal } from "../components/CustomerConsentModal";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
@@ -37,10 +38,21 @@ function mapGarmentToApplyTo(garment: GarmentType): ApplyToTarget {
 const MULTI_DRAFT_STORAGE_KEY = "aivastra-multi-draft";
 
 type MultiFabricSelection = {
+  /** Empty while a freshly picked photo is still waiting to be uploaded. */
   fabricImageId: string;
   previewUrl: string | null;
   label: string;
+  /** A new Capture/Gallery photo, held locally until Sew / Try On so its colour can be corrected first. */
+  pendingFile?: File;
+  colourAdjusted?: boolean;
 };
+
+/** Which freshly picked fabric photo the Match colour studio is open for. */
+type ColourTarget = { kind: "single" } | { kind: "multi"; slotId: string };
+
+function isSlotFilled(selection: MultiFabricSelection | undefined) {
+  return !!selection && (!!selection.fabricImageId || !!selection.pendingFile);
+}
 
 type MultiDraftSelection = { fabricImageId: string; label: string };
 
@@ -104,6 +116,8 @@ export function GeneratePage() {
   const [fabricColor, setFabricColor] = useState("");
   const [hasPattern, setHasPattern] = useState(false);
   const [fabricScale, setFabricScale] = useState<"fine" | "medium" | "bold" | null>(null);
+  const [fabricColourAdjusted, setFabricColourAdjusted] = useState(false);
+  const [colourTarget, setColourTarget] = useState<ColourTarget | null>(null);
 
   const [productDetailsOpen, setProductDetailsOpen] = useState(false);
   const [lookBarcode, setLookBarcode] = useState("");
@@ -140,7 +154,7 @@ export function GeneratePage() {
   );
   const allMultiSlotsFilled =
     sortedFabricSlots.length > 0 &&
-    sortedFabricSlots.every((slot) => !!multiSelections[slot.id]?.fabricImageId);
+    sortedFabricSlots.every((slot) => isSlotFilled(multiSelections[slot.id]));
 
   const selectedFabricImageId = existingFabricImage?.id ?? "";
   const selectedHeroPreviewUrl =
@@ -203,6 +217,7 @@ export function GeneratePage() {
 
         setExistingFabricImage(row);
         setFabricFile(null);
+        setFabricColourAdjusted(false);
         setFabricPreviewUrl(signed);
         setHasPattern(false);
         setFabricScale(null);
@@ -286,6 +301,8 @@ export function GeneratePage() {
     try {
       const draftSelections: Record<string, MultiDraftSelection> = {};
       Object.entries(multiSelections).forEach(([slotId, selection]) => {
+        // Photos not uploaded yet have no id to restore from, so they are not part of the draft.
+        if (!selection.fabricImageId) return;
         draftSelections[slotId] = { fabricImageId: selection.fabricImageId, label: selection.label };
       });
       const draft: MultiDraft = { selectedGarmentId, multiSelections: draftSelections };
@@ -410,6 +427,7 @@ export function GeneratePage() {
 
   function clearFabricSelection() {
     setFabricFile(null);
+    setFabricColourAdjusted(false);
     setExistingFabricImage(null);
     setFabricPreviewUrl(null);
     setHasPattern(false);
@@ -420,6 +438,7 @@ export function GeneratePage() {
     if (!file) return;
     const compressed = await compressImage(file, 1600);
     setFabricFile(compressed);
+    setFabricColourAdjusted(false);
     setExistingFabricImage(null);
     setFabricPreviewUrl(URL.createObjectURL(compressed));
     setHasPattern(false);
@@ -649,21 +668,81 @@ export function GeneratePage() {
     });
   }
 
+  // A new photo stays on the device until Sew / Try On, so "Match colour" can
+  // replace it before anything is uploaded.
   async function handleMultiFabricPicked(file: File | null, slotId: string) {
     if (!file) return;
 
+    const compressed = await compressImage(file, 1600);
+    assignFabricToSlot(slotId, {
+      fabricImageId: "",
+      previewUrl: URL.createObjectURL(compressed),
+      label: "New fabric",
+      pendingFile: compressed
+    });
+    setMultiPickerSlotId(null);
+  }
+
+  /** Uploads every slot photo still held locally and returns the selections with real ids. */
+  async function uploadPendingMultiFabrics() {
+    const resolved: Record<string, MultiFabricSelection> = { ...multiSelections };
+    for (const [slotId, selection] of Object.entries(multiSelections)) {
+      const pendingFile = selection.pendingFile;
+      if (!pendingFile) continue;
+
+      setStatusText("Uploading fabric image...");
+      const uploaded = await uploadMultiFabricImage(pendingFile);
+      const next: MultiFabricSelection = { ...selection, fabricImageId: uploaded.id, pendingFile: undefined };
+      resolved[slotId] = next;
+      setMultiSelections((prev) => (prev[slotId]?.pendingFile === pendingFile ? { ...prev, [slotId]: next } : prev));
+    }
+    return resolved;
+  }
+
+  async function openFabricSiloForSlot(slotId: string) {
+    // Leaving this page drops local photos, so upload them first.
     setMultiUploading(true);
     try {
-      const compressed = await compressImage(file, 1600);
-      const previewUrl = URL.createObjectURL(compressed);
-      const uploaded = await uploadMultiFabricImage(compressed);
-      assignFabricToSlot(slotId, { fabricImageId: uploaded.id, previewUrl, label: "New fabric" });
-      setMultiPickerSlotId(null);
+      await uploadPendingMultiFabrics();
     } catch (err) {
       setStatusText(`Fabric upload failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+      setMultiPickerSlotId(null);
+      return;
     } finally {
       setMultiUploading(false);
     }
+    navigate(`/fabric-silo?picker=1&returnTab=multi&slotId=${encodeURIComponent(slotId)}`);
+  }
+
+  const colourSourceFile =
+    colourTarget?.kind === "single"
+      ? fabricFile
+      : colourTarget?.kind === "multi"
+        ? multiSelections[colourTarget.slotId]?.pendingFile ?? null
+        : null;
+
+  function handleFabricColourSaved(blob: Blob) {
+    const target = colourTarget;
+    if (!target || !colourSourceFile) return;
+
+    // Same name, now a JPEG; this replaces the picked photo before any upload happens.
+    const corrected = new File([blob], colourSourceFile.name || "fabric.jpg", { type: "image/jpeg" });
+    const previewUrl = URL.createObjectURL(corrected);
+    if (target.kind === "single") {
+      setFabricFile(corrected);
+      setFabricPreviewUrl(previewUrl);
+      setFabricColourAdjusted(true);
+    } else {
+      setMultiSelections((prev) => {
+        const selection = prev[target.slotId];
+        if (!selection) return prev;
+        return {
+          ...prev,
+          [target.slotId]: { ...selection, pendingFile: corrected, previewUrl, colourAdjusted: true }
+        };
+      });
+    }
+    setColourTarget(null);
   }
 
   function onMultiCameraChange(event: ChangeEvent<HTMLInputElement>) {
@@ -693,11 +772,12 @@ export function GeneratePage() {
 
     setCreatingGeneration(true);
     try {
+      const selections = await uploadPendingMultiFabrics();
       const heroImageId = await ensureHeroImageId(selectedGarment);
 
       const fabrics: GenerationFabricAssignmentPayload[] = sortedFabricSlots.map((slot) => {
-        const selection = multiSelections[slot.id];
-        if (!selection) throw new Error(`Missing fabric selection for ${slot.label}.`);
+        const selection = selections[slot.id];
+        if (!selection?.fabricImageId) throw new Error(`Missing fabric selection for ${slot.label}.`);
 
         return {
           fabric_image_id: selection.fabricImageId,
@@ -758,6 +838,7 @@ export function GeneratePage() {
     if (!allMultiSlotsFilled) throw new Error("Fill all fabric slots first.");
     if (!shopContext) throw new Error("Shop context is loading.");
 
+    const selections = await uploadPendingMultiFabrics();
     const heroImageId = await ensureHeroImageId(selectedGarment);
     const compressedPhoto = await compressImage(customerPhotoFile, 1280);
 
@@ -768,8 +849,8 @@ export function GeneratePage() {
     formData.set("customer_photo", compressedPhoto);
 
     sortedFabricSlots.forEach((slot, index) => {
-      const selection = multiSelections[slot.id];
-      if (!selection) return;
+      const selection = selections[slot.id];
+      if (!selection?.fabricImageId) return;
       formData.set(`fabric_image_id_${index + 1}`, selection.fabricImageId);
       formData.set(`apply_to_${index + 1}`, slot.apply_to);
     });
@@ -961,6 +1042,21 @@ export function GeneratePage() {
               </div>
             ) : null}
           </div>
+
+          {fabricFile ? (
+            <div className="row">
+              <button
+                className="btn btn-light"
+                type="button"
+                style={{ minHeight: "36px", padding: "0 12px", fontSize: "12px" }}
+                onClick={() => setColourTarget({ kind: "single" })}
+                disabled={actionBusy}
+              >
+                🎨 Match colour
+              </button>
+              {fabricColourAdjusted ? <span className="chip">Colour adjusted</span> : null}
+            </div>
+          ) : null}
 
           <div className="row">
             <button
@@ -1405,6 +1501,22 @@ export function GeneratePage() {
                             >
                               Change
                             </button>
+                            {selection.pendingFile ? (
+                              <button
+                                type="button"
+                                className="btn btn-light"
+                                style={{ marginTop: "6px", marginLeft: "6px", padding: "6px 12px", fontSize: "12px" }}
+                                onClick={() => setColourTarget({ kind: "multi", slotId: slot.id })}
+                                disabled={actionBusy}
+                              >
+                                🎨 Match colour
+                              </button>
+                            ) : null}
+                            {selection.colourAdjusted ? (
+                              <div style={{ marginTop: "6px" }}>
+                                <span className="chip">Colour adjusted</span>
+                              </div>
+                            ) : null}
                           </>
                         ) : (
                           <button
@@ -1576,9 +1688,9 @@ export function GeneratePage() {
 
             <button
               type="button"
+              disabled={multiUploading}
               onClick={() => {
-                if (!multiPickerSlotId) return;
-                navigate(`/fabric-silo?picker=1&returnTab=multi&slotId=${encodeURIComponent(multiPickerSlotId)}`);
+                if (multiPickerSlotId) void openFabricSiloForSlot(multiPickerSlotId);
               }}
               style={{
                 background: "transparent",
@@ -1596,6 +1708,16 @@ export function GeneratePage() {
             </button>
           </div>
         </div>
+      )}
+
+      {colourTarget && colourSourceFile && (
+        <ColorStudio
+          source={colourSourceFile}
+          allowSegment
+          defaultSegment={false}
+          onSave={handleFabricColourSaved}
+          onClose={() => setColourTarget(null)}
+        />
       )}
 
       {showConsentModal && (

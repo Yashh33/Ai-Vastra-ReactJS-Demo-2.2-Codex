@@ -1,5 +1,4 @@
-// sRGB <-> linear <-> CIE Lab (D65) primitives shared by selection and adjustment code.
-// Kept free of DOM access so the selection worker can import it.
+// sRGB <-> linear <-> CIE Lab (D65) primitives used by the adjustment code.
 
 export const SRGB_TO_LINEAR = (() => {
   const table = new Float32Array(256);
@@ -66,14 +65,4 @@ export function labToSrgb8(L: number, a: number, b: number): [number, number, nu
   const lin = [0, 0, 0];
   labToLinear(L, a, b, lin, 0);
   return [linearToSrgb8(lin[0]!), linearToSrgb8(lin[1]!), linearToSrgb8(lin[2]!)];
-}
-
-/** Whole RGBA buffer -> Float32 Lab triplets (L, a, b per pixel). */
-export function rgbaToLab(rgba: Uint8ClampedArray, width: number, height: number) {
-  const count = width * height;
-  const lab = new Float32Array(count * 3);
-  for (let i = 0, p = 0, q = 0; i < count; i += 1, p += 4, q += 3) {
-    linearToLab(SRGB_TO_LINEAR[rgba[p]!]!, SRGB_TO_LINEAR[rgba[p + 1]!]!, SRGB_TO_LINEAR[rgba[p + 2]!]!, lab, q);
-  }
-  return lab;
 }

@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type TouchEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
+import { ColorStudio } from "../components/ColorStudio";
 import { CustomerConsentModal } from "../components/CustomerConsentModal";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { saveColorCorrected } from "../lib/colorStudio/saveCorrected";
+import { useGarmentTypes } from "../lib/queries";
 import { subscribeToGeneration } from "../lib/realtime";
+import { createSignedUrl } from "../lib/storage";
 import type {
   CatalogImageDownloadUrlResponse,
   CatalogImageRow,
@@ -37,6 +41,9 @@ export function OutputViewerPage() {
   const [catalogImageRows, setCatalogImageRows] = useState<CatalogImageRow[]>([]);
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [showTryOnFlow, setShowTryOnFlow] = useState(false);
+  const [showColourStudio, setShowColourStudio] = useState(false);
+  const [colourUpdatedId, setColourUpdatedId] = useState<string | null>(null);
+  const { data: garmentTypes } = useGarmentTypes();
 
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -282,9 +289,25 @@ export function OutputViewerPage() {
     return URL.createObjectURL(blob);
   }
 
-  function handleMatchColor() {
-    if (!generationId) return;
-    navigate(`/match-color?generationId=${encodeURIComponent(generationId)}`);
+  // Style (garment type) the look was sewn in; pre-selects the part in Match colour.
+  const garmentTypeName = garmentTypes?.find((garment) => garment.id === generation?.folder_id)?.name;
+  const colourUpdated = !!generationId && colourUpdatedId === generationId;
+
+  async function handleColourSaved(blob: Blob) {
+    if (!accessToken || !generationId) throw new Error("Not authenticated");
+    const savedId = generationId;
+    const saved = await saveColorCorrected(accessToken, savedId, blob);
+    const signed = await createSignedUrl("generated-outputs", saved.output_path);
+
+    setGeneration((prev) => (prev && prev.id === savedId ? { ...prev, output_path: saved.output_path } : prev));
+    setCatalogGenerationRows((prev) =>
+      prev.map((row) =>
+        row.id === savedId ? { ...row, output_path: saved.output_path, download_url: signed } : row
+      )
+    );
+    setImageUrl(signed);
+    setColourUpdatedId(savedId);
+    setShowColourStudio(false);
   }
 
   function handleClose() {
@@ -415,22 +438,23 @@ export function OutputViewerPage() {
                 {downloading ? 'Preparing...' : '↑ Share / Save'}
               </button>
 
-              <button
-                className="btn-primary"
-                onClick={() => navigate(
-                  `/match-color?generationId=${generationId}`
-                )}
-                disabled={!imageUrl}
-                style={{
-                  flex: 1,
-                  background: 'var(--white)',
-                  color: '#1B1B2F',
-                  border: '1px solid var(--border)',
-                }}
-              >
-                Match Color
-              </button>
+              {generationMode ? (
+                <button
+                  className="btn-primary"
+                  onClick={() => setShowColourStudio(true)}
+                  disabled={!imageUrl}
+                  style={{
+                    flex: 1,
+                    background: 'var(--white)',
+                    color: '#1B1B2F',
+                    border: '1px solid var(--border)',
+                  }}
+                >
+                  🎨 Match colour
+                </button>
+              ) : null}
             </div>
+            {colourUpdated ? <p className="tiny muted">Colour updated</p> : null}
 
             {generationMode && !catalogImageMode ? (
               <button
@@ -472,7 +496,7 @@ export function OutputViewerPage() {
               </button>
               <button
                 className="btn-primary"
-                onClick={handleMatchColor}
+                onClick={() => setShowColourStudio(true)}
                 disabled={!imageUrl}
                 style={{
                   flex: 1,
@@ -481,9 +505,10 @@ export function OutputViewerPage() {
                   border: "1px solid var(--border)",
                 }}
               >
-                Match Color
+                🎨 Match colour
               </button>
             </div>
+            {colourUpdated ? <p className="tiny muted">Colour updated</p> : null}
             <button
               onClick={() => setShowConsentModal(true)}
               disabled={!imageUrl}
@@ -557,6 +582,18 @@ export function OutputViewerPage() {
             setShowTryOnFlow(true);
           }}
           onCancel={() => setShowConsentModal(false)}
+        />
+      )}
+
+      {showColourStudio && generationId && imageUrl && (
+        <ColorStudio
+          source={imageUrl}
+          generationId={generationId}
+          garmentTypeName={garmentTypeName}
+          allowSegment
+          defaultSegment
+          onSave={handleColourSaved}
+          onClose={() => setShowColourStudio(false)}
         />
       )}
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { compressImage } from "../lib/compressImage";
+import { ColorStudio } from "./ColorStudio";
 
 type Props = {
   onClose: () => void;
@@ -21,6 +22,7 @@ export function TryOnFlow({ onClose, onSubmit, onPushToScreen, onShowCarousel }:
   const [pushError, setPushError] = useState<string | null>(null);
   const [showingCarousel, setShowingCarousel] = useState(false);
   const [carouselShown, setCarouselShown] = useState(false);
+  const [showColourStudio, setShowColourStudio] = useState(false);
   const captureRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
 
@@ -297,6 +299,23 @@ export function TryOnFlow({ onClose, onSubmit, onPushToScreen, onShowCarousel }:
               {sharing ? "Preparing..." : "↑ Share / Save"}
             </button>
             <button
+              onClick={() => setShowColourStudio(true)}
+              style={{
+                width: "100%",
+                minHeight: "44px",
+                background: "#FFFFFF",
+                color: "#1B1B2F",
+                border: "1px solid rgba(201,168,76,0.35)",
+                borderRadius: "12px",
+                fontSize: "14px",
+                fontWeight: 600,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              🎨 Match colour
+            </button>
+            <button
               onClick={() => {
                 setResultUrl(null);
                 setCustomerPhoto(null);
@@ -487,6 +506,20 @@ export function TryOnFlow({ onClose, onSubmit, onPushToScreen, onShowCarousel }:
           </>
         )}
       </div>
+
+      {/* This image shows the customer: whole-photo correction only, never sent for
+          segmentation, and the result stays in memory (share / push read resultUrl). */}
+      {showColourStudio && resultUrl && (
+        <ColorStudio
+          source={resultUrl}
+          allowSegment={false}
+          onSave={(blob) => {
+            setResultUrl(URL.createObjectURL(blob));
+            setShowColourStudio(false);
+          }}
+          onClose={() => setShowColourStudio(false)}
+        />
+      )}
     </div>
   );
 }

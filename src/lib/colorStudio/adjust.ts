@@ -289,7 +289,7 @@ export function measureMaskedColor(
 export type RenderView = {
   /** Treat the whole image as selected (the mask texture is ignored). */
   whole: boolean;
-  /** 0..1 strength of the gold selection overlay. */
+  /** 0..1 strength of the gold selection overlay (also draws an outline round the mask). */
   overlay: number;
   /** Show the untouched source (before / after compare). */
   original: boolean;
@@ -301,7 +301,9 @@ export type RenderView = {
 };
 
 const OVERLAY_RGB: [number, number, number] = [201, 168, 76]; // --mt-gold
-const OVERLAY_ALPHA = 0.45;
+const OVERLAY_ALPHA = 0.38;
+// The outline is found by comparing mask samples this many mask pixels apart.
+const OUTLINE_REACH = 2;
 
 export interface AdjustRenderer {
   readonly kind: "webgl" | "cpu";
@@ -340,6 +342,7 @@ uniform float u_whole;
 uniform float u_active;
 uniform float u_overlay;
 uniform vec3 u_overlay_color;
+uniform vec2 u_outline_step;
 uniform vec3 u_gain;
 uniform float u_chroma_scale;
 uniform vec2 u_chroma_add;
@@ -374,7 +377,8 @@ vec3 labFInv(vec3 f) {
 
 void main() {
   vec3 src = texture2D(u_image, v_uv).rgb;
-  float mask = max(u_whole, texture2D(u_mask, u_mask_rect.xy + v_uv * u_mask_rect.zw).r);
+  vec2 maskUv = u_mask_rect.xy + v_uv * u_mask_rect.zw;
+  float mask = max(u_whole, texture2D(u_mask, maskUv).r);
   vec3 color = src;
 
   if (u_active > 0.5) {
@@ -404,7 +408,16 @@ void main() {
     color = mix(src, toSrgb(clamp(outLin, 0.0, 1.0)), mask);
   }
 
-  color = mix(color, u_overlay_color, u_overlay * mask);
+  if (u_overlay > 0.0) {
+    color = mix(color, u_overlay_color, u_overlay * mask);
+    // Solid line where the mask changes quickly, i.e. along its edge.
+    float right = texture2D(u_mask, maskUv + vec2(u_outline_step.x, 0.0)).r;
+    float left = texture2D(u_mask, maskUv - vec2(u_outline_step.x, 0.0)).r;
+    float down = texture2D(u_mask, maskUv + vec2(0.0, u_outline_step.y)).r;
+    float up = texture2D(u_mask, maskUv - vec2(0.0, u_outline_step.y)).r;
+    float edge = max(max(right, left), max(down, up)) - min(min(right, left), min(down, up));
+    color = mix(color, u_overlay_color, smoothstep(0.35, 0.75, edge) * (1.0 - u_whole));
+  }
   gl_FragColor = vec4(color, 1.0);
 }
 `;
@@ -417,6 +430,7 @@ const UNIFORM_NAMES = [
   "u_active",
   "u_overlay",
   "u_overlay_color",
+  "u_outline_step",
   "u_gain",
   "u_chroma_scale",
   "u_chroma_add",
@@ -492,6 +506,7 @@ export class WebGLAdjustRenderer implements AdjustRenderer {
   private readonly positionLocation: number;
   private readonly uniforms: Record<UniformName, WebGLUniformLocation | null>;
   private maskWidth = 0;
+  private maskHeight = 0;
   private scratch = new Uint8Array(0);
   private disposed = false;
 
@@ -545,6 +560,7 @@ export class WebGLAdjustRenderer implements AdjustRenderer {
   setMask(mask: Uint8Array, width: number, height: number) {
     const gl = this.gl;
     this.maskWidth = width;
+    this.maskHeight = height;
     gl.bindTexture(gl.TEXTURE_2D, this.maskTexture);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, width, height, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, mask);
   }
@@ -599,6 +615,11 @@ export class WebGLAdjustRenderer implements AdjustRenderer {
     gl.uniform1f(u.u_active, uniforms.active && !view.original ? 1 : 0);
     gl.uniform1f(u.u_overlay, view.original ? 0 : view.overlay * OVERLAY_ALPHA);
     gl.uniform3f(u.u_overlay_color, OVERLAY_RGB[0] / 255, OVERLAY_RGB[1] / 255, OVERLAY_RGB[2] / 255);
+    gl.uniform2f(
+      u.u_outline_step,
+      OUTLINE_REACH / Math.max(1, this.maskWidth),
+      OUTLINE_REACH / Math.max(1, this.maskHeight)
+    );
     gl.uniform3f(u.u_gain, uniforms.gain[0], uniforms.gain[1], uniforms.gain[2]);
     gl.uniform1f(u.u_chroma_scale, uniforms.chromaScale);
     gl.uniform2f(u.u_chroma_add, uniforms.chromaAdd[0], uniforms.chromaAdd[1]);
@@ -718,6 +739,25 @@ export function applyAdjustCPU(
         outR += (OVERLAY_RGB[0] - outR) * mix;
         outG += (OVERLAY_RGB[1] - outG) * mix;
         outB += (OVERLAY_RGB[2] - outB) * mix;
+      }
+      if (overlay > 0 && direct && mask && !whole) {
+        // Outline, as in the shader: mask range across a small cross of samples.
+        const xl = Math.max(0, x - OUTLINE_REACH);
+        const xr = Math.min(width - 1, x + OUTLINE_REACH);
+        const yu = Math.max(0, y - OUTLINE_REACH) * width;
+        const yd = Math.min(height - 1, y + OUTLINE_REACH) * width;
+        const a = mask.data[y * width + xl]!;
+        const b = mask.data[y * width + xr]!;
+        const c = mask.data[yu + x]!;
+        const d = mask.data[yd + x]!;
+        const range = (Math.max(a, b, c, d) - Math.min(a, b, c, d)) / 255;
+        const t = Math.min(1, Math.max(0, (range - 0.35) / 0.4));
+        const line = t * t * (3 - 2 * t);
+        if (line > 0) {
+          outR += (OVERLAY_RGB[0] - outR) * line;
+          outG += (OVERLAY_RGB[1] - outG) * line;
+          outB += (OVERLAY_RGB[2] - outB) * line;
+        }
       }
 
       dst[p] = outR;

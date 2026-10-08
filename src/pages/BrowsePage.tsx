@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
+import { ColorStudio } from "../components/ColorStudio";
 import { LookDetails } from "../components/LookDetails";
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { restoreOriginalColor, saveColorCorrected } from "../lib/colorStudio/saveCorrected";
 import { useMe } from "../lib/queries";
 import {
   fetchBrowseGarmentTypes,
@@ -93,6 +95,10 @@ export function BrowsePage() {
   const [editDescription, setEditDescription] = useState("");
   const [detailsSaving, setDetailsSaving] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
+  const [colourStudioOpen, setColourStudioOpen] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [colourNote, setColourNote] = useState<string | null>(null);
+  const [colourError, setColourError] = useState<string | null>(null);
 
   const urlMapRef = useRef<Map<string, string>>(new Map());
 
@@ -155,6 +161,8 @@ export function BrowsePage() {
     if (!detailLook) return;
 
     function handleKeyDown(event: KeyboardEvent) {
+      // The Match colour modal sits on top and owns the keyboard (its sliders use the arrows).
+      if (colourStudioOpen) return;
       // While the details form is open the arrow keys belong to its inputs.
       if (editingDetails) {
         if (event.key === "Escape" && !detailsSaving) cancelEditDetails();
@@ -171,7 +179,7 @@ export function BrowsePage() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [detailLook, looks, editingDetails, detailsSaving]);
+  }, [detailLook, looks, editingDetails, detailsSaving, colourStudioOpen]);
 
   function cancelEditDetails() {
     setEditingDetails(false);
@@ -219,12 +227,53 @@ export function BrowsePage() {
     }
   }
 
+  function clearColourMessages() {
+    setColourNote(null);
+    setColourError(null);
+  }
+
   function closeDetail() {
     setDetailLook(null);
     setDetailUrl(null);
     setHeroError(null);
     setDeleteError(null);
+    clearColourMessages();
     cancelEditDetails();
+  }
+
+  // Points the detail view and the grid tile at a look's new image.
+  async function applyNewOutputPath(lookId: string, outputPath: string) {
+    const url = await createSignedUrl("generated-outputs", outputPath, SIGNED_URL_TTL_SECONDS);
+    urlMapRef.current.set(lookId, url);
+    setLooks((prev) => prev.map((row) => (row.id === lookId ? { ...row, output_path: outputPath } : row)));
+    setDetailLook((prev) => (prev && prev.id === lookId ? { ...prev, output_path: outputPath } : prev));
+    if (detailLook?.id === lookId) setDetailUrl(url);
+  }
+
+  async function handleColourSaved(look: BrowseLookRow, blob: Blob) {
+    if (!accessToken) throw new Error("Not authenticated");
+    const saved = await saveColorCorrected(accessToken, look.id, blob);
+    await applyNewOutputPath(look.id, saved.output_path);
+    setColourError(null);
+    setColourNote("Colour updated");
+    setColourStudioOpen(false);
+  }
+
+  async function restoreOriginal(look: BrowseLookRow) {
+    if (restoring) return;
+    clearColourMessages();
+    setRestoring(true);
+    try {
+      if (!accessToken) throw new Error("Not authenticated");
+      const restored = await restoreOriginalColor(accessToken, look.id);
+      await applyNewOutputPath(look.id, restored.output_path);
+      setColourNote("Original restored");
+    } catch (err) {
+      console.error("BrowsePage: failed to restore original", look.id, err);
+      setColourError(err instanceof Error ? err.message : "Couldn't restore the original. Try again.");
+    } finally {
+      setRestoring(false);
+    }
   }
 
   async function navigateDetail(direction: 1 | -1) {
@@ -250,6 +299,7 @@ export function BrowsePage() {
 
     setHeroError(null);
     setDeleteError(null);
+    clearColourMessages();
     cancelEditDetails();
     setDetailLook(nextLook);
     setDetailUrl(url);
@@ -427,9 +477,31 @@ export function BrowsePage() {
           ) : (
             <>
               <LookDetails barcode={detailLook.barcode} mrp={detailLook.mrp} description={detailLook.description} />
-              <button type="button" className="mt-browse-edit-btn" onClick={() => startEditDetails(detailLook)}>
-                Edit details
+              <div className="mt-browse-detail-actions">
+                <button type="button" className="mt-browse-edit-btn" onClick={() => startEditDetails(detailLook)}>
+                  Edit details
+                </button>
+                <button
+                  type="button"
+                  className="mt-browse-edit-btn"
+                  onClick={() => {
+                    clearColourMessages();
+                    setColourStudioOpen(true);
+                  }}
+                >
+                  🎨 Match colour
+                </button>
+              </div>
+              <button
+                type="button"
+                className="mt-browse-restore"
+                disabled={restoring}
+                onClick={() => void restoreOriginal(detailLook)}
+              >
+                {restoring ? "Restoring…" : "Restore original"}
               </button>
+              {colourNote ? <div className="mt-browse-colour-note">{colourNote}</div> : null}
+              {colourError ? <div className="mt-browse-edit-error">{colourError}</div> : null}
             </>
           )}
         </div>
@@ -444,6 +516,17 @@ export function BrowsePage() {
             {deleting ? "Deleting…" : "Delete look"}
           </button>
         </div>
+        {colourStudioOpen ? (
+          <ColorStudio
+            source={detailUrl}
+            generationId={detailLook.id}
+            garmentTypeName={garmentTypes.find((garmentType) => garmentType.id === selectedGarmentTypeId)?.name}
+            allowSegment
+            defaultSegment
+            onSave={(blob) => handleColourSaved(detailLook, blob)}
+            onClose={() => setColourStudioOpen(false)}
+          />
+        ) : null}
       </div>
     );
   } else if (garmentTypes.length === 0) {
@@ -483,11 +566,13 @@ export function BrowsePage() {
           ) : (
             looks.map((look) => (
               <BrowseTile
-                key={look.id}
+                // A corrected / restored look gets a new output_path; remount to pick up its new URL.
+                key={`${look.id}:${look.output_path}`}
                 look={look}
                 urlMapRef={urlMapRef}
                 onOpen={(openedLook, url) => {
                   setHeroError(null);
+                  clearColourMessages();
                   cancelEditDetails();
                   setDetailLook(openedLook);
                   setDetailUrl(url);
@@ -740,6 +825,20 @@ export function BrowsePage() {
         .mt-browse-edit-field input:focus-visible,
         .mt-browse-edit-field textarea:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
         .mt-browse-edit-error { color: #B3261E; font-size: 0.9rem; }
+        .mt-browse-detail-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+        .mt-browse-restore {
+          font: inherit;
+          font-size: 0.85rem;
+          font-weight: 600;
+          color: var(--muted);
+          background: transparent;
+          border: none;
+          padding: 4px 8px;
+          text-decoration: underline;
+          cursor: pointer;
+        }
+        .mt-browse-restore:disabled { opacity: 0.6; cursor: default; }
+        .mt-browse-colour-note { color: var(--navy); font-size: 0.9rem; font-weight: 600; }
         .mt-browse-edit-actions { display: flex; gap: 10px; }
         .mt-browse-detail-footer {
           display: flex;

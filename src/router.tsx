@@ -7,7 +7,6 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 const BrowsePage = lazy(() => import("./pages/BrowsePage").then((m) => ({ default: m.BrowsePage })));
 const CatalogPage = lazy(() => import("./pages/CatalogPage").then((m) => ({ default: m.CatalogPage })));
 const CarouselPage = lazy(() => import("./pages/CarouselPage").then((m) => ({ default: m.CarouselPage })));
-const ColorLabPage = lazy(() => import("./pages/ColorLabPage").then((m) => ({ default: m.ColorLabPage })));
 const FabricSiloPage = lazy(() => import("./pages/FabricSiloPage").then((m) => ({ default: m.FabricSiloPage })));
 const GeneratePage = lazy(() => import("./pages/GeneratePage").then((m) => ({ default: m.GeneratePage })));
 const HomePage = lazy(() => import("./pages/HomePage").then((m) => ({ default: m.HomePage })));
@@ -48,7 +47,6 @@ export function AppRouter() {
             <Route path="/output-viewer" element={<OutputViewerPage />} />
             <Route path="/match-color" element={<MatchColorPage />} />
             <Route path="/carousel" element={<CarouselPage />} />
-            <Route path="/color-lab" element={<ColorLabPage />} />
           </Route>
         </Route>
 
