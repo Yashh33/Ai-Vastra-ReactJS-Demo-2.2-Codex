@@ -520,6 +520,8 @@ export function ColorStudio({
   // In part mode with no mask the sliders would change nothing.
   const canAdjust = status === "ready" && (whole || hasMask);
 
+  const boxWidth = box?.width ?? 0;
+
   const uniforms = useMemo(
     () => compileAdjustments(toUnit(adjustments), stats, pickedHue),
     [adjustments, stats, pickedHue]
@@ -532,12 +534,14 @@ export function ColorStudio({
     session.uniforms = uniforms;
     session.view = {
       whole,
-      // The outline only belongs to step 1; step 2 shows the corrected image and nothing else.
+      // The highlight only belongs to step 1; step 2 shows the corrected image and nothing else.
       overlay: step === "pick" && !whole ? 1 : 0,
+      // Preview pixels per on-screen pixel, so the outline is the same thickness on any phone.
+      outlineScale: boxWidth ? session.pw / boxWidth : 1,
       original: comparing
     };
     requestRender();
-  }, [uniforms, whole, step, comparing, status, requestRender]);
+  }, [uniforms, whole, step, comparing, status, boxWidth, requestRender]);
 
   useEffect(() => {
     const session = sessionRef.current;
@@ -729,24 +733,30 @@ export function ColorStudio({
 
               {!whole && (
                 <>
-                  <div className="cs-chips" role="listbox" aria-label="Part to fix">
-                    {GARMENT_PARTS.map((part) => (
-                      <button
-                        key={part.key}
-                        type="button"
-                        role="option"
-                        aria-selected={activePartKey === part.key}
-                        className={`cs-chip${activePartKey === part.key ? " is-active" : ""}`}
-                        disabled={!ready}
-                        onClick={() => selectPart(part)}
-                      >
-                        {part.label}
-                      </button>
-                    ))}
-                  </div>
+                  <label className="cs-part">
+                    <span>Which part?</span>
+                    <select
+                      value={activePartKey ?? ""}
+                      disabled={!ready}
+                      onChange={(event) => {
+                        const part = findGarmentPart(event.target.value);
+                        if (part) selectPart(part);
+                      }}
+                    >
+                      {!activePartKey && (
+                        <option value="" disabled>
+                          Choose a part…
+                        </option>
+                      )}
+                      {GARMENT_PARTS.map((part) => (
+                        <option key={part.key} value={part.key}>
+                          {part.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
 
                   {segmentError && <p className="error-text">{segmentError}</p>}
-                  {!activePart && <p className="cs-hint">Choose the part you want to fix.</p>}
 
                   {activePart && (
                     <div className="cs-panel">
@@ -774,7 +784,7 @@ export function ColorStudio({
                       {(fixMode || dots.length > 0) && (
                         <p className="cs-hint">
                           {fixMode === "remove"
-                            ? "Tap the photo where the outline should NOT be (red dots), then Select again."
+                            ? "Tap the photo where the selection should NOT be (red dots), then Select again."
                             : fixMode === "add"
                               ? "Tap the photo on the part that was missed (green dots), then Select again."
                               : "Dots are placed. Tap Select again to use them."}

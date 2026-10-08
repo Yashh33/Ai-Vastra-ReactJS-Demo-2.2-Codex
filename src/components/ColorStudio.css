@@ -250,40 +250,41 @@
   cursor: not-allowed;
 }
 
-/* Part chips wrap onto as many lines as they need; nothing is hidden off-screen. */
-.cs-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+/* Part picker: one native <select>, so phones show their own full-screen wheel / list. */
+.cs-part {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
 }
 
-.cs-chip {
-  min-height: 40px;
-  max-width: 100%;
-  padding: 0 14px;
+.cs-part select {
+  width: 100%;
+  min-width: 0;
+  min-height: 52px;
+  padding: 0 40px 0 14px;
   border: 1.5px solid #1b1b2f;
   border: 1.5px solid var(--mt-navy);
-  border-radius: 999px;
-  background: #fff;
+  border-radius: 14px;
+  background-color: #fff;
+  /* Chevron drawn in CSS, since appearance:none removes the native arrow. */
+  background-image: linear-gradient(45deg, transparent 50%, #1b1b2f 50%),
+    linear-gradient(135deg, #1b1b2f 50%, transparent 50%);
+  background-position: calc(100% - 21px) 50%, calc(100% - 15px) 50%;
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
   color: #1b1b2f;
   color: var(--mt-navy);
   font-family: inherit;
-  font-size: 13px;
+  /* 16px stops iOS Safari zooming the page when the select is focused. */
+  font-size: 16px;
   font-weight: 700;
-  line-height: 1.2;
   cursor: pointer;
   -webkit-appearance: none;
   appearance: none;
 }
 
-.cs-chip.is-active {
-  background: #1b1b2f;
-  background: var(--mt-navy);
-  color: #c9a84c;
-  color: var(--mt-gold);
-}
-
-.cs-chip:disabled {
+.cs-part select:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

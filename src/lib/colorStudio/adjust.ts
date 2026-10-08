@@ -289,8 +289,14 @@ export function measureMaskedColor(
 export type RenderView = {
   /** Treat the whole image as selected (the mask texture is ignored). */
   whole: boolean;
-  /** 0..1 strength of the thin gold outline round the mask. There is no fill, so the fabric stays visible. */
+  /**
+   * 0..1 strength of the selection highlight: everything outside the mask is
+   * dimmed and the mask edge gets a white + dark double outline. The selected
+   * part itself is left untouched, so its fabric stays visible.
+   */
   overlay: number;
+  /** Mask pixels per CSS pixel on screen, so the outline keeps its on-screen thickness. Default 1. */
+  outlineScale?: number;
   /** Show the untouched source (before / after compare). */
   original: boolean;
   /**
@@ -300,9 +306,12 @@ export type RenderView = {
   maskRect?: [number, number, number, number];
 };
 
-const OVERLAY_RGB: [number, number, number] = [201, 168, 76]; // --mt-gold
-// The outline is found by comparing mask samples this many mask pixels apart.
-const OUTLINE_REACH = 2;
+// Highlight (step 1 only): how much the unselected area is darkened, and the
+// double outline - white just inside the mask edge, dark navy just outside it.
+const DIM_OUTSIDE = 0.5;
+const LINE_INNER_CSS_PX = 3;
+const LINE_OUTER_CSS_PX = 2;
+const LINE_OUTER_RGB: [number, number, number] = [27, 27, 47]; // --mt-navy
 
 export interface AdjustRenderer {
   readonly kind: "webgl" | "cpu";
@@ -340,8 +349,9 @@ uniform vec4 u_mask_rect;
 uniform float u_whole;
 uniform float u_active;
 uniform float u_overlay;
-uniform vec3 u_overlay_color;
-uniform vec2 u_outline_step;
+uniform vec3 u_line_outer_color;
+uniform vec2 u_line_inner;
+uniform vec2 u_line_outer;
 uniform vec3 u_gain;
 uniform float u_chroma_scale;
 uniform vec2 u_chroma_add;
@@ -372,6 +382,23 @@ vec3 labFInv(vec3 f) {
   vec3 low = (f - 16.0 / 116.0) / 7.787;
   vec3 high = f * f * f;
   return mix(low, high, step(vec3(0.206893), f));
+}
+
+// Lowest (x) and highest (y) mask value on a ring of 8 samples at reach r.
+vec2 maskRing(vec2 uv, vec2 r) {
+  vec2 d = r * 0.7071;
+  float a = texture2D(u_mask, uv + vec2(r.x, 0.0)).r;
+  float b = texture2D(u_mask, uv - vec2(r.x, 0.0)).r;
+  float c = texture2D(u_mask, uv + vec2(0.0, r.y)).r;
+  float e = texture2D(u_mask, uv - vec2(0.0, r.y)).r;
+  float f = texture2D(u_mask, uv + d).r;
+  float g = texture2D(u_mask, uv - d).r;
+  float h = texture2D(u_mask, uv + vec2(d.x, -d.y)).r;
+  float k = texture2D(u_mask, uv + vec2(-d.x, d.y)).r;
+  return vec2(
+    min(min(min(a, b), min(c, e)), min(min(f, g), min(h, k))),
+    max(max(max(a, b), max(c, e)), max(max(f, g), max(h, k)))
+  );
 }
 
 void main() {
@@ -407,14 +434,18 @@ void main() {
     color = mix(src, toSrgb(clamp(outLin, 0.0, 1.0)), mask);
   }
 
-  if (u_overlay > 0.0) {
-    // Solid line where the mask changes quickly, i.e. along its edge.
-    float right = texture2D(u_mask, maskUv + vec2(u_outline_step.x, 0.0)).r;
-    float left = texture2D(u_mask, maskUv - vec2(u_outline_step.x, 0.0)).r;
-    float down = texture2D(u_mask, maskUv + vec2(0.0, u_outline_step.y)).r;
-    float up = texture2D(u_mask, maskUv - vec2(0.0, u_outline_step.y)).r;
-    float edge = max(max(right, left), max(down, up)) - min(min(right, left), min(down, up));
-    color = mix(color, u_overlay_color, smoothstep(0.35, 0.75, edge) * (1.0 - u_whole) * u_overlay);
+  if (u_overlay > 0.0 && u_whole < 0.5) {
+    float inside = smoothstep(0.4, 0.6, mask);
+    color = mix(color, color * ${(1 - DIM_OUTSIDE).toFixed(3)}, (1.0 - inside) * u_overlay);
+
+    // A pixel is on the white line if it is selected but something unselected is
+    // within reach; on the dark line if it is unselected with the selection in reach.
+    float lowest = min(maskRing(maskUv, u_line_inner).x, maskRing(maskUv, u_line_inner * 0.5).x);
+    float highest = max(maskRing(maskUv, u_line_outer).y, maskRing(maskUv, u_line_outer * 0.5).y);
+    float white = inside * (1.0 - smoothstep(0.4, 0.6, lowest));
+    float dark = (1.0 - inside) * smoothstep(0.4, 0.6, highest);
+    color = mix(color, vec3(1.0), white * u_overlay);
+    color = mix(color, u_line_outer_color, dark * u_overlay);
   }
   gl_FragColor = vec4(color, 1.0);
 }
@@ -427,8 +458,9 @@ const UNIFORM_NAMES = [
   "u_whole",
   "u_active",
   "u_overlay",
-  "u_overlay_color",
-  "u_outline_step",
+  "u_line_outer_color",
+  "u_line_inner",
+  "u_line_outer",
   "u_gain",
   "u_chroma_scale",
   "u_chroma_add",
@@ -612,12 +644,19 @@ export class WebGLAdjustRenderer implements AdjustRenderer {
     gl.uniform1f(u.u_whole, view.whole ? 1 : 0);
     gl.uniform1f(u.u_active, uniforms.active && !view.original ? 1 : 0);
     gl.uniform1f(u.u_overlay, view.original ? 0 : view.overlay);
-    gl.uniform3f(u.u_overlay_color, OVERLAY_RGB[0] / 255, OVERLAY_RGB[1] / 255, OVERLAY_RGB[2] / 255);
-    gl.uniform2f(
-      u.u_outline_step,
-      OUTLINE_REACH / Math.max(1, this.maskWidth),
-      OUTLINE_REACH / Math.max(1, this.maskHeight)
+    gl.uniform3f(
+      u.u_line_outer_color,
+      LINE_OUTER_RGB[0] / 255,
+      LINE_OUTER_RGB[1] / 255,
+      LINE_OUTER_RGB[2] / 255
     );
+    const outlineScale = view.outlineScale ?? 1;
+    const maskW = Math.max(1, this.maskWidth);
+    const maskH = Math.max(1, this.maskHeight);
+    const innerReach = LINE_INNER_CSS_PX * outlineScale;
+    const outerReach = LINE_OUTER_CSS_PX * outlineScale;
+    gl.uniform2f(u.u_line_inner, innerReach / maskW, innerReach / maskH);
+    gl.uniform2f(u.u_line_outer, outerReach / maskW, outerReach / maskH);
     gl.uniform3f(u.u_gain, uniforms.gain[0], uniforms.gain[1], uniforms.gain[2]);
     gl.uniform1f(u.u_chroma_scale, uniforms.chromaScale);
     gl.uniform2f(u.u_chroma_add, uniforms.chromaAdd[0], uniforms.chromaAdd[1]);
@@ -666,6 +705,34 @@ export function applyAdjustCPU(
   const { chromaScale, lightnessLift, lightnessScale } = uniforms;
   const rect = view.maskRect ?? [0, 0, 1, 1];
   const direct = Boolean(mask) && !view.maskRect && mask!.width === width && mask!.height === height;
+
+  // Highlight helpers (same idea as maskRing in the shader); preview-size masks only.
+  const highlight = overlay > 0 && direct && !whole && mask ? mask : null;
+  const outlineScale = view.outlineScale ?? 1;
+  const innerReach = LINE_INNER_CSS_PX * outlineScale;
+  const outerReach = LINE_OUTER_CSS_PX * outlineScale;
+  const sampleMask = (data: Uint8Array, sx: number, sy: number) => {
+    const cx = Math.min(width - 1, Math.max(0, Math.round(sx)));
+    const cy = Math.min(height - 1, Math.max(0, Math.round(sy)));
+    return data[cy * width + cx]! / 255;
+  };
+  const smooth = (value: number) => {
+    const t = Math.min(1, Math.max(0, (value - 0.4) / 0.2));
+    return t * t * (3 - 2 * t);
+  };
+  /** Lowest (wantMax false) or highest mask value on rings at `reach` and half of it. */
+  const ringExtreme = (data: Uint8Array, x: number, y: number, reach: number, wantMax: boolean) => {
+    let extreme = wantMax ? 0 : 1;
+    for (const r of [reach, reach * 0.5]) {
+      const d = r * 0.7071;
+      const offsets = [r, 0, -r, 0, 0, r, 0, -r, d, d, -d, -d, d, -d, -d, d];
+      for (let i = 0; i < offsets.length; i += 2) {
+        const value = sampleMask(data, x + offsets[i]!, y + offsets[i + 1]!);
+        extreme = wantMax ? Math.max(extreme, value) : Math.min(extreme, value);
+      }
+    }
+    return extreme;
+  };
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
@@ -732,23 +799,26 @@ export function applyAdjustCPU(
         outB = b8 + (adjB - b8) * alpha;
       }
 
-      if (overlay > 0 && direct && mask && !whole) {
-        // Outline, as in the shader: mask range across a small cross of samples.
-        const xl = Math.max(0, x - OUTLINE_REACH);
-        const xr = Math.min(width - 1, x + OUTLINE_REACH);
-        const yu = Math.max(0, y - OUTLINE_REACH) * width;
-        const yd = Math.min(height - 1, y + OUTLINE_REACH) * width;
-        const a = mask.data[y * width + xl]!;
-        const b = mask.data[y * width + xr]!;
-        const c = mask.data[yu + x]!;
-        const d = mask.data[yd + x]!;
-        const range = (Math.max(a, b, c, d) - Math.min(a, b, c, d)) / 255;
-        const t = Math.min(1, Math.max(0, (range - 0.35) / 0.4));
-        const line = t * t * (3 - 2 * t) * overlay;
-        if (line > 0) {
-          outR += (OVERLAY_RGB[0] - outR) * line;
-          outG += (OVERLAY_RGB[1] - outG) * line;
-          outB += (OVERLAY_RGB[2] - outB) * line;
+      if (highlight) {
+        const inside = smooth(alpha);
+        const dim = 1 - DIM_OUTSIDE * (1 - inside) * overlay;
+        outR *= dim;
+        outG *= dim;
+        outB *= dim;
+
+        const white = inside > 0 ? inside * (1 - smooth(ringExtreme(highlight.data, x, y, innerReach, false))) : 0;
+        const dark = inside < 1 ? (1 - inside) * smooth(ringExtreme(highlight.data, x, y, outerReach, true)) : 0;
+        if (white > 0) {
+          const mix = white * overlay;
+          outR += (255 - outR) * mix;
+          outG += (255 - outG) * mix;
+          outB += (255 - outB) * mix;
+        }
+        if (dark > 0) {
+          const mix = dark * overlay;
+          outR += (LINE_OUTER_RGB[0] - outR) * mix;
+          outG += (LINE_OUTER_RGB[1] - outG) * mix;
+          outB += (LINE_OUTER_RGB[2] - outB) * mix;
         }
       }
 

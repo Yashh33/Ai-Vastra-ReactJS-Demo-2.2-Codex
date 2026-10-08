@@ -9,6 +9,9 @@ export default defineConfig({
       registerType: "autoUpdate",
       workbox: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,webp,woff,woff2}"],
+        // The HEIC converter is ~1.3 MB and only needed when a browser cannot decode
+        // an iPhone HEIC photo itself; fetch it on demand instead of precaching it for everyone.
+        globIgnores: ["**/heic2any-*.js"],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/[^/]+\.supabase\.co\/storage\/.*/i,
