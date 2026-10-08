@@ -1,0 +1,383 @@
+/* ColorStudio - reusable colour-correction module (MyTryonAi light theme) */
+.cs {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  color: var(--mt-navy);
+}
+
+.cs-stage {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  min-height: 160px;
+  padding: 8px;
+  background: var(--mt-card);
+  border: 1px solid var(--mt-border);
+  border-radius: 14px;
+}
+
+/* Sized from the image's aspect ratio so tall photos still leave room for the controls. */
+.cs-canvas-wrap {
+  position: relative;
+  width: 100%;
+  max-width: calc(56vh * var(--cs-aspect, 1));
+  max-width: calc(56svh * var(--cs-aspect, 1));
+  aspect-ratio: var(--cs-aspect, 1);
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--mt-page);
+}
+
+.cs-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* While selecting, the finger paints instead of scrolling the page. */
+.cs-canvas.is-selecting {
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.cs-ring {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(27, 27, 47, 0.6);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cs-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--mt-navy);
+  color: var(--mt-gold);
+  font-size: 11px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.cs-stage-cover {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--mt-card);
+}
+
+.cs-panel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  background: var(--mt-card);
+  border: 1px solid var(--mt-border);
+  border-radius: 14px;
+}
+
+.cs-segment {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  background: var(--mt-page);
+  border: 1px solid var(--mt-border);
+  border-radius: 12px;
+}
+
+.cs-segment button,
+.cs-tool {
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--mt-navy);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cs-segment button.is-active,
+.cs-tool.is-active {
+  background: var(--mt-navy);
+  color: var(--mt-gold);
+}
+
+.cs-tools {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.cs-tool {
+  border-color: var(--mt-border);
+  background: var(--mt-card);
+}
+
+.cs-segment button:disabled,
+.cs-tool:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.cs-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 56px;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cs-option input {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  accent-color: var(--mt-navy);
+}
+
+.cs-option-value {
+  text-align: right;
+  color: var(--mt-muted);
+}
+
+.cs-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cs-check input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--mt-navy);
+}
+
+.cs-hint {
+  font-size: 12px;
+  color: var(--mt-muted);
+}
+
+.cs-warning {
+  padding: 10px 12px;
+  border: 1px solid var(--gold-border);
+  border-radius: 12px;
+  background: var(--gold-light);
+  color: var(--gold-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Sliders */
+.cs-slider {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cs-slider.is-disabled {
+  opacity: 0.45;
+}
+
+.cs-slider-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.cs-slider-value {
+  min-width: 44px;
+  padding: 2px 8px;
+  border: 1px solid var(--mt-border);
+  border-radius: 999px;
+  background: var(--mt-page);
+  color: var(--mt-navy);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cs-slider-value:disabled {
+  color: var(--mt-muted);
+  cursor: default;
+}
+
+.cs-slider-track {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 32px;
+}
+
+.cs-slider-track::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 6px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: var(--cs-track, var(--mt-border));
+}
+
+/* Marks the "original" position at the centre of every slider. */
+.cs-slider-tick {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  border-radius: 1px;
+  background: var(--mt-navy);
+  opacity: 0.5;
+}
+
+.cs-slider-track input {
+  position: relative;
+  width: 100%;
+  height: 32px;
+  margin: 0;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+
+.cs-slider-track input:disabled {
+  cursor: not-allowed;
+}
+
+.cs-slider-track input::-webkit-slider-runnable-track {
+  height: 6px;
+  background: transparent;
+}
+
+.cs-slider-track input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 22px;
+  height: 22px;
+  margin-top: -8px;
+  border: 2px solid var(--mt-navy);
+  border-radius: 50%;
+  background: var(--mt-card);
+  box-shadow: 0 1px 3px rgba(27, 27, 47, 0.25);
+}
+
+.cs-slider-track input::-moz-range-track {
+  height: 6px;
+  background: transparent;
+}
+
+.cs-slider-track input::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--mt-navy);
+  border-radius: 50%;
+  background: var(--mt-card);
+  box-shadow: 0 1px 3px rgba(27, 27, 47, 0.25);
+}
+
+.cs-slider-ends {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--mt-muted);
+}
+
+.cs-slider-ends span:last-child {
+  text-align: right;
+}
+
+.cs-dots {
+  display: grid;
+  gap: 8px;
+}
+
+.cs-dots-label {
+  font-size: 12px;
+  color: var(--mt-muted);
+}
+
+.cs-dots-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.cs-dot {
+  width: 40px;
+  height: 40px;
+  flex: 0 1 40px;
+  min-width: 0;
+  padding: 0;
+  border: 1px solid var(--mt-border);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.cs-dot.is-active {
+  border-color: var(--mt-navy);
+  box-shadow: 0 0 0 2px var(--mt-card), 0 0 0 4px var(--mt-navy);
+}
+
+.cs-reset {
+  justify-self: start;
+}
+
+/* Stays reachable while the sliders scroll. */
+.cs-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  gap: 8px;
+  padding: 8px 0;
+  background: var(--mt-page);
+}
+
+.cs-actions button {
+  min-width: 0;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.cs-actions .cs-save {
+  flex: 1;
+  width: auto;
+  min-height: 44px;
+  border-radius: 12px;
+  font-size: 14px;
+}
+
+.cs-compare {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
