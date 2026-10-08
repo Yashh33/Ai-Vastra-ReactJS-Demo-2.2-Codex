@@ -1,13 +1,39 @@
-/* ColorStudio - full-screen "Match colour" modal (MyTryonAi light theme) */
+/* ColorStudio - "Match colour" modal (MyTryonAi light theme).
+   Full-screen on phones, a centred 520px sheet on larger screens. */
 .cs-modal {
   position: fixed;
   inset: 0;
   z-index: 200;
   display: flex;
-  flex-direction: column;
-  min-width: 0;
+  justify-content: center;
   background: var(--mt-page);
   color: var(--mt-navy);
+}
+
+.cs-sheet {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 520px;
+  min-width: 0;
+  height: 100%;
+  background: var(--mt-page);
+}
+
+@media (min-width: 600px) {
+  .cs-modal {
+    align-items: center;
+    padding: 24px;
+    background: rgba(27, 27, 47, 0.55);
+  }
+
+  .cs-sheet {
+    height: auto;
+    max-height: 100%;
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.3);
+  }
 }
 
 .cs-header {
@@ -15,24 +41,43 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 14px;
+  gap: 8px;
+  padding: 6px 8px;
   background: var(--mt-card);
   border-bottom: 1px solid var(--mt-border);
 }
 
-.cs-header h2 {
+.cs-back {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  color: #1b1b2f;
+  color: var(--mt-navy);
+  font-family: inherit;
   font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cs-back span {
+  font-size: 20px;
+  line-height: 1;
 }
 
 .cs-close {
-  width: 36px;
-  height: 36px;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
   padding: 0;
   border: none;
   background: transparent;
   color: var(--mt-muted);
-  font-size: 24px;
+  font-size: 26px;
   line-height: 1;
   cursor: pointer;
 }
@@ -43,121 +88,63 @@
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  display: grid;
-  align-content: start;
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   padding: 12px;
 }
 
 .cs-body > * {
-  width: 100%;
-  max-width: 640px;
+  flex-shrink: 0;
   min-width: 0;
-  margin: 0 auto;
+}
+
+.cs-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
 }
 
 .cs-footer {
   flex-shrink: 0;
   display: flex;
-  justify-content: center;
   gap: 8px;
   padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
   background: var(--mt-card);
   border-top: 1px solid var(--mt-border);
 }
 
-.cs-footer button {
-  min-width: 0;
-  padding: 0 14px;
+.cs-footer .btn-secondary {
+  min-height: 50px;
+  padding: 0 18px;
   white-space: nowrap;
 }
 
-.cs-footer .cs-save {
+.cs-footer .cs-primary {
   flex: 1;
   width: auto;
-  max-width: 360px;
-  min-height: 44px;
-  border-radius: 12px;
-  font-size: 14px;
+  min-width: 0;
+  min-height: 50px;
 }
 
-/* Part picker */
-.cs-check {
+/* Image. The grey stage spans the full width; the box inside gets its exact
+   pixel size from JS (image aspect ratio, "contain" within the stage), so the
+   photo can never be stretched or squeezed. */
+.cs-stage {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.cs-check input {
-  flex-shrink: 0;
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  accent-color: var(--mt-navy);
-}
-
-.cs-chips {
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  padding-bottom: 2px;
-  scrollbar-width: none;
-}
-
-.cs-chips::-webkit-scrollbar {
-  display: none;
-}
-
-.cs-chip {
-  flex-shrink: 0;
-  min-height: 36px;
-  padding: 0 14px;
-  border: 1px solid var(--mt-border);
-  border-radius: 999px;
-  background: var(--mt-card);
-  color: var(--mt-navy);
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.cs-chip.is-active {
-  background: var(--mt-navy);
-  border-color: var(--mt-navy);
-  color: var(--mt-gold);
-}
-
-.cs-chip:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* Image */
-.cs-stage {
-  position: relative;
-  display: flex;
   justify-content: center;
-  min-height: 140px;
-  padding: 6px;
-  background: var(--mt-card);
-  border: 1px solid var(--mt-border);
+  width: 100%;
+  min-height: 120px;
   border-radius: 14px;
+  background: #e9e7e2;
+  overflow: hidden;
 }
 
-/* Sized from the image's aspect ratio so tall photos still leave room for the controls. */
 .cs-canvas-wrap {
   position: relative;
-  width: 100%;
-  max-width: calc(46vh * var(--cs-aspect, 1));
-  max-width: calc(46svh * var(--cs-aspect, 1));
-  aspect-ratio: var(--cs-aspect, 1);
-  overflow: hidden;
-  border-radius: 10px;
-  background: var(--mt-page);
+  flex: none;
+  max-width: 100%;
 }
 
 .cs-canvas {
@@ -218,38 +205,87 @@
   font-weight: 700;
 }
 
-.cs-compare {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-  min-height: 34px;
-  padding: 0 12px;
-  border: 1px solid var(--mt-border);
-  border-radius: 999px;
-  background: var(--mt-card);
-  color: var(--mt-navy);
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 2px 6px rgba(27, 27, 47, 0.18);
-  touch-action: none;
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-touch-callout: none;
-}
-
-.cs-compare:disabled {
-  display: none;
-}
-
 .cs-stage-cover {
   position: absolute;
   inset: 0;
   display: grid;
   place-items: center;
+  background: #e9e7e2;
+}
+
+/* Step 1 */
+.cs-scope {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.cs-scope-btn {
+  min-width: 0;
+  min-height: 54px;
+  padding: 0 8px;
+  border: 1.5px solid #1b1b2f;
+  border: 1.5px solid var(--mt-navy);
   border-radius: 14px;
-  background: var(--mt-card);
+  background: #fff;
+  color: #1b1b2f;
+  color: var(--mt-navy);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.cs-scope-btn.is-active {
+  background: #1b1b2f;
+  background: var(--mt-navy);
+  color: #c9a84c;
+  color: var(--mt-gold);
+}
+
+.cs-scope-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Part chips wrap onto as many lines as they need; nothing is hidden off-screen. */
+.cs-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cs-chip {
+  min-height: 40px;
+  max-width: 100%;
+  padding: 0 14px;
+  border: 1.5px solid #1b1b2f;
+  border: 1.5px solid var(--mt-navy);
+  border-radius: 999px;
+  background: #fff;
+  color: #1b1b2f;
+  color: var(--mt-navy);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.cs-chip.is-active {
+  background: #1b1b2f;
+  background: var(--mt-navy);
+  color: #c9a84c;
+  color: var(--mt-gold);
+}
+
+.cs-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .cs-panel {
@@ -261,7 +297,6 @@
   border-radius: 14px;
 }
 
-/* Fix selection */
 .cs-fix {
   display: flex;
   align-items: center;
@@ -276,13 +311,13 @@
 }
 
 .cs-fix-btn {
-  min-height: 36px;
+  min-height: 40px;
   padding: 0 14px;
   border: 1.5px solid var(--mt-border);
   border-radius: 10px;
-  background: var(--mt-card);
+  background: #fff;
   font-family: inherit;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -314,18 +349,13 @@
 
 .cs-fix-action {
   flex: 1;
-  min-height: 38px;
+  min-height: 40px;
   padding: 0 10px;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .cs-hint {
   font-size: 12px;
-  color: var(--mt-muted);
-}
-
-.cs-footnote {
-  font-size: 11px;
   color: var(--mt-muted);
 }
 
@@ -337,6 +367,42 @@
   color: var(--gold-muted);
   font-size: 12px;
   font-weight: 600;
+}
+
+/* Step 2 */
+.cs-compare {
+  width: 100%;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.cs-more {
+  justify-self: start;
+  min-height: 36px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--mt-navy);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cs-link {
+  align-self: center;
+  min-height: 36px;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  color: var(--mt-navy);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 /* Sliders */
@@ -431,9 +497,9 @@
 
 .cs-slider-track input::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 22px;
-  height: 22px;
-  margin-top: -8px;
+  width: 24px;
+  height: 24px;
+  margin-top: -9px;
   border: 2px solid var(--mt-navy);
   border-radius: 50%;
   background: var(--mt-card);
@@ -446,8 +512,8 @@
 }
 
 .cs-slider-track input::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   border: 2px solid var(--mt-navy);
   border-radius: 50%;
   background: var(--mt-card);
@@ -457,7 +523,7 @@
 .cs-slider-ends {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--mt-muted);
 }

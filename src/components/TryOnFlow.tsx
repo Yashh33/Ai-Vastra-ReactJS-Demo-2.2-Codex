@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
-import { compressImage } from "../lib/compressImage";
+import { compressImage, PHOTO_READ_ERROR } from "../lib/compressImage";
 import { ColorStudio } from "./ColorStudio";
+import { PhotoPickStatus } from "./PhotoPickStatus";
 
 type Props = {
   onClose: () => void;
@@ -23,6 +24,8 @@ export function TryOnFlow({ onClose, onSubmit, onPushToScreen, onShowCarousel }:
   const [showingCarousel, setShowingCarousel] = useState(false);
   const [carouselShown, setCarouselShown] = useState(false);
   const [showColourStudio, setShowColourStudio] = useState(false);
+  const [preparingPhoto, setPreparingPhoto] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
   const captureRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
 
@@ -46,7 +49,17 @@ export function TryOnFlow({ onClose, onSubmit, onPushToScreen, onShowCarousel }:
   }, [resultUrl]);
 
   async function handleFileSelect(file: File) {
-    const compressed = await compressImage(file, 1280);
+    setPhotoError(null);
+    setPreparingPhoto(true);
+    let compressed: File;
+    try {
+      compressed = await compressImage(file, 1280);
+    } catch (err) {
+      setPhotoError(err instanceof Error ? err.message : PHOTO_READ_ERROR);
+      return;
+    } finally {
+      setPreparingPhoto(false);
+    }
     setCustomerPhoto(compressed);
     setPreviewUrl(URL.createObjectURL(compressed));
     setResultUrl(null);
@@ -407,9 +420,12 @@ export function TryOnFlow({ onClose, onSubmit, onPushToScreen, onShowCarousel }:
                   type="file"
                   accept="image/*"
                   capture="environment"
-                  style={{ display: "none" }}
+                  className="visually-hidden-input"
+                  tabIndex={-1}
+                  aria-hidden
                   onChange={(e) => {
                     const f = e.target.files?.[0];
+                    e.target.value = "";
                     if (f) void handleFileSelect(f);
                   }}
                 />
@@ -417,12 +433,16 @@ export function TryOnFlow({ onClose, onSubmit, onPushToScreen, onShowCarousel }:
                   ref={galleryRef}
                   type="file"
                   accept="image/*"
-                  style={{ display: "none" }}
+                  className="visually-hidden-input"
+                  tabIndex={-1}
+                  aria-hidden
                   onChange={(e) => {
                     const f = e.target.files?.[0];
+                    e.target.value = "";
                     if (f) void handleFileSelect(f);
                   }}
                 />
+                <PhotoPickStatus preparing={preparingPhoto} error={photoError} />
               </div>
             )}
 

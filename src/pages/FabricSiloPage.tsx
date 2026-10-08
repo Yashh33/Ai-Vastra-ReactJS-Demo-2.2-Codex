@@ -2,9 +2,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
+import { PhotoPickStatus } from "../components/PhotoPickStatus";
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { compressImage } from "../lib/compressImage";
+import { compressImage, PHOTO_READ_ERROR } from "../lib/compressImage";
 import { useFabricImages, useMe } from "../lib/queries";
 import { createSignedUrl, uploadToStorage } from "../lib/storage";
 import type { FabricImageRow } from "../lib/types";
@@ -127,6 +128,8 @@ export function FabricSiloPage() {
   const [draftFabricCode, setDraftFabricCode] = useState("");
   const [draftFabricColor, setDraftFabricColor] = useState("");
   const [saving, setSaving] = useState(false);
+  const [preparingPhoto, setPreparingPhoto] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
 
   const pageTitle = pickerMode ? "Select a Cloth" : "My Fabrics";
 
@@ -160,6 +163,7 @@ export function FabricSiloPage() {
   }
 
   function resetDraft() {
+    setPhotoError(null);
     setDraftFile(null);
     setDraftPreviewUrl(null);
     setDraftFabricCode("");
@@ -173,7 +177,17 @@ export function FabricSiloPage() {
 
   async function handleDraftFilePicked(file: File | null) {
     if (!file) return;
-    const compressed = await compressImage(file, 1600);
+    setPhotoError(null);
+    setPreparingPhoto(true);
+    let compressed: File;
+    try {
+      compressed = await compressImage(file, 1600);
+    } catch (err) {
+      setPhotoError(err instanceof Error ? err.message : PHOTO_READ_ERROR);
+      return;
+    } finally {
+      setPreparingPhoto(false);
+    }
     setDraftFile(compressed);
     setDraftPreviewUrl(URL.createObjectURL(compressed));
     setStatusText("Fabric image selected.");
@@ -317,6 +331,8 @@ export function FabricSiloPage() {
               </button>
             </div>
 
+            <PhotoPickStatus preparing={preparingPhoto} error={photoError} />
+
             {draftPreviewUrl ? (
               <img className="preview-image" src={draftPreviewUrl} alt="Fabric preview" />
             ) : (
@@ -364,10 +380,20 @@ export function FabricSiloPage() {
               type="file"
               accept="image/*"
               capture="environment"
-              hidden
+              className="visually-hidden-input"
+              tabIndex={-1}
+              aria-hidden
               onChange={onCameraChange}
             />
-            <input ref={galleryInputRef} type="file" accept="image/*" hidden onChange={onGalleryChange} />
+            <input
+              ref={galleryInputRef}
+              type="file"
+              accept="image/*"
+              className="visually-hidden-input"
+              tabIndex={-1}
+              aria-hidden
+              onChange={onGalleryChange}
+            />
           </section>
         ) : null}
 

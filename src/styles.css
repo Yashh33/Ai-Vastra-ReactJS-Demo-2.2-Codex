@@ -661,6 +661,26 @@ h2 { font-size: 1rem; font-weight: 700; }
 }
 
 .spinner-small { width: 18px; height: 18px; border-width: 2px; }
+
+/* File inputs opened from a button. Kept in the layout (not display:none / hidden) because
+   iOS Safari can ignore click() and change events on inputs that are not rendered. */
+.visually-hidden-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.photo-pick-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mt-muted);
+}
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Misc */

@@ -1,6 +1,7 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
+import { PhotoPickStatus } from "../components/PhotoPickStatus";
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { compressImage } from "../lib/compressImage";
@@ -67,6 +68,8 @@ export function VisualizePage() {
 
   const [loading, setLoading] = useState(false);
   const [uploadingFabric, setUploadingFabric] = useState(false);
+  const [preparingPhoto, setPreparingPhoto] = useState(false);
+  const pickerDraftIdRef = useRef<string | null>(null);
   const [creatingGeneration, setCreatingGeneration] = useState(false);
   const [visualizingGenerationId, setVisualizingGenerationId] = useState<string | null>(null);
   const [statusText, setStatusText] = useState("Preparing Visualize screen...");
@@ -205,7 +208,13 @@ export function VisualizePage() {
     if (!file || !accessToken || !shopContext || !draftId) return;
     setUploadingFabric(true);
     try {
-      const compressedFile = await compressImage(file, 1600);
+      setPreparingPhoto(true);
+      let compressedFile: File;
+      try {
+        compressedFile = await compressImage(file, 1600);
+      } finally {
+        setPreparingPhoto(false);
+      }
       const ext = guessFileExtension(compressedFile.name, compressedFile.type);
       const filename = `${Date.now()}-${makeRandomSuffix()}.${ext}`;
       const storagePath = `${shopContext.shop_id}/${filename}`;
@@ -245,27 +254,29 @@ export function VisualizePage() {
     } finally {
       setUploadingFabric(false);
       setActiveFabricDraftId(null);
-      if (galleryInputRef.current) galleryInputRef.current.value = "";
-      if (cameraInputRef.current) cameraInputRef.current.value = "";
     }
   }
 
   function onFabricGalleryChange(event: ChangeEvent<HTMLInputElement>) {
-    void handleFabricPicked(event.target.files?.[0] ?? null, activeFabricDraftId);
+    const file = event.target.files?.[0] ?? null;
+    event.target.value = "";
+    void handleFabricPicked(file, pickerDraftIdRef.current);
   }
 
   function onFabricCameraChange(event: ChangeEvent<HTMLInputElement>) {
-    void handleFabricPicked(event.target.files?.[0] ?? null, activeFabricDraftId);
+    const file = event.target.files?.[0] ?? null;
+    event.target.value = "";
+    void handleFabricPicked(file, pickerDraftIdRef.current);
   }
 
   function openFabricPicker(draftId: string, mode: "camera" | "gallery") {
     if (actionBusy) return;
+    // iOS only opens the picker if click() runs first thing in the tap handler,
+    // so the target draft goes in a ref and the state update comes after.
+    pickerDraftIdRef.current = draftId;
+    if (mode === "camera") cameraInputRef.current?.click();
+    else galleryInputRef.current?.click();
     setActiveFabricDraftId(draftId);
-    if (mode === "camera") {
-      cameraInputRef.current?.click();
-      return;
-    }
-    galleryInputRef.current?.click();
   }
 
   function handleApplyToChange(draftId: string, value: string) {
@@ -542,16 +553,21 @@ export function VisualizePage() {
             type="file"
             accept="image/*"
             capture="environment"
-            hidden
+            className="visually-hidden-input"
+            tabIndex={-1}
+            aria-hidden
             onChange={onFabricCameraChange}
           />
           <input
             ref={galleryInputRef}
             type="file"
             accept="image/*"
-            hidden
+            className="visually-hidden-input"
+            tabIndex={-1}
+            aria-hidden
             onChange={onFabricGalleryChange}
           />
+          <PhotoPickStatus preparing={preparingPhoto} />
         </section>
 
         <section className="card stack-sm">

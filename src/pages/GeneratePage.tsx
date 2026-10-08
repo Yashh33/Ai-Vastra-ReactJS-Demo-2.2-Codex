@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { ColorStudio } from "../components/ColorStudio";
 import { CustomerConsentModal } from "../components/CustomerConsentModal";
+import { PhotoPickStatus } from "../components/PhotoPickStatus";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -21,7 +22,7 @@ import type {
   GenerationRow,
   HeroImageRow
 } from "../lib/types";
-import { compressImage } from "../lib/compressImage";
+import { compressImage, PHOTO_READ_ERROR } from "../lib/compressImage";
 import { guessFileExtension, isPendingStatus, makeRandomSuffix } from "../lib/utils";
 
 function mapGarmentToApplyTo(garment: GarmentType): ApplyToTarget {
@@ -46,6 +47,9 @@ type MultiFabricSelection = {
   pendingFile?: File;
   colourAdjusted?: boolean;
 };
+
+/** Which photo picker a "Preparing photo…" spinner or read error belongs to. */
+type PhotoPicker = "fabric" | "hero" | "multi";
 
 /** Which freshly picked fabric photo the Match colour studio is open for. */
 type ColourTarget = { kind: "single" } | { kind: "multi"; slotId: string };
@@ -118,6 +122,8 @@ export function GeneratePage() {
   const [fabricScale, setFabricScale] = useState<"fine" | "medium" | "bold" | null>(null);
   const [fabricColourAdjusted, setFabricColourAdjusted] = useState(false);
   const [colourTarget, setColourTarget] = useState<ColourTarget | null>(null);
+  const [preparingPhoto, setPreparingPhoto] = useState<PhotoPicker | null>(null);
+  const [photoError, setPhotoError] = useState<{ picker: PhotoPicker; message: string } | null>(null);
 
   const [productDetailsOpen, setProductDetailsOpen] = useState(false);
   const [lookBarcode, setLookBarcode] = useState("");
@@ -434,9 +440,24 @@ export function GeneratePage() {
     setFabricScale(null);
   }
 
+  /** Converts a just-picked photo to JPEG, showing a spinner meanwhile. Null (with a message shown) if unreadable. */
+  async function preparePhoto(file: File, picker: PhotoPicker) {
+    setPhotoError(null);
+    setPreparingPhoto(picker);
+    try {
+      return await compressImage(file, 1600);
+    } catch (err) {
+      setPhotoError({ picker, message: err instanceof Error ? err.message : PHOTO_READ_ERROR });
+      return null;
+    } finally {
+      setPreparingPhoto(null);
+    }
+  }
+
   async function handleFabricPicked(file: File | null) {
     if (!file) return;
-    const compressed = await compressImage(file, 1600);
+    const compressed = await preparePhoto(file, "fabric");
+    if (!compressed) return;
     setFabricFile(compressed);
     setFabricColourAdjusted(false);
     setExistingFabricImage(null);
@@ -458,9 +479,11 @@ export function GeneratePage() {
 
   async function onHeroReplacementChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
+    event.target.value = "";
     if (!file) return;
 
-    const compressed = await compressImage(file, 1600);
+    const compressed = await preparePhoto(file, "hero");
+    if (!compressed) return;
     setHeroReplacementFile(compressed);
     setHeroReplacementPreviewUrl(URL.createObjectURL(compressed));
     setStatusText("Replacement hero selected for this generation.");
@@ -673,7 +696,8 @@ export function GeneratePage() {
   async function handleMultiFabricPicked(file: File | null, slotId: string) {
     if (!file) return;
 
-    const compressed = await compressImage(file, 1600);
+    const compressed = await preparePhoto(file, "multi");
+    if (!compressed) return;
     assignFabricToSlot(slotId, {
       fabricImageId: "",
       previewUrl: URL.createObjectURL(compressed),
@@ -978,6 +1002,10 @@ export function GeneratePage() {
                   />
                 </label>
               ) : null}
+              <PhotoPickStatus
+                preparing={preparingPhoto === "hero"}
+                error={photoError?.picker === "hero" ? photoError.message : null}
+              />
             </>
           ) : null}
         </section>
@@ -1084,6 +1112,11 @@ export function GeneratePage() {
               Fabric Silo
             </button>
           </div>
+
+          <PhotoPickStatus
+            preparing={preparingPhoto === "fabric"}
+            error={photoError?.picker === "fabric" ? photoError.message : null}
+          />
 
           <label className="silo-toggle-row">
             <input
@@ -1208,14 +1241,18 @@ export function GeneratePage() {
             type="file"
             accept="image/*"
             capture="environment"
-            hidden
+            className="visually-hidden-input"
+            tabIndex={-1}
+            aria-hidden
             onChange={onFabricCameraChange}
           />
           <input
             ref={galleryInputRef}
             type="file"
             accept="image/*"
-            hidden
+            className="visually-hidden-input"
+            tabIndex={-1}
+            aria-hidden
             onChange={onFabricGalleryChange}
           />
         </section>
@@ -1599,14 +1636,18 @@ export function GeneratePage() {
           type="file"
           accept="image/*"
           capture="environment"
-          hidden
+          className="visually-hidden-input"
+          tabIndex={-1}
+          aria-hidden
           onChange={onMultiCameraChange}
         />
         <input
           ref={multiGalleryInputRef}
           type="file"
           accept="image/*"
-          hidden
+          className="visually-hidden-input"
+          tabIndex={-1}
+          aria-hidden
           onChange={onMultiGalleryChange}
         />
         </>
@@ -1649,7 +1690,7 @@ export function GeneratePage() {
                 className="btn btn-light flex-1"
                 type="button"
                 onClick={() => multiCameraInputRef.current?.click()}
-                disabled={multiUploading}
+                disabled={multiUploading || preparingPhoto === "multi"}
               >
                 Camera
               </button>
@@ -1657,13 +1698,17 @@ export function GeneratePage() {
                 className="btn btn-light flex-1"
                 type="button"
                 onClick={() => multiGalleryInputRef.current?.click()}
-                disabled={multiUploading}
+                disabled={multiUploading || preparingPhoto === "multi"}
               >
                 Gallery
               </button>
             </div>
 
             {multiUploading ? <p className="tiny muted">Uploading...</p> : null}
+            <PhotoPickStatus
+              preparing={preparingPhoto === "multi"}
+              error={photoError?.picker === "multi" ? photoError.message : null}
+            />
 
             <span className="section-label">Recent fabrics</span>
             <div className="fabric-scroll">

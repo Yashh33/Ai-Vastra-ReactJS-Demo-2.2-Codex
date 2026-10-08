@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -50,11 +51,11 @@ export type ColorStudioProps = {
   /** Garment type name, used to pre-select the part to colour. */
   garmentTypeName?: string;
   /**
-   * Whether "Select only one part" is offered. Must be false for try-on results
+   * Whether fixing just one part (step 1) is offered. Must be false for try-on results
    * and anything else showing the customer: those images never go to /segment.
    */
   allowSegment: boolean;
-  /** Start with "Select only one part" ticked. */
+  /** Open on step 1 with "One part" chosen. Otherwise the studio opens straight on the sliders. */
   defaultSegment?: boolean;
   /** Receives the corrected full-resolution JPEG. The modal shows "Saving…" until this settles. */
   onSave: (blob: Blob) => void | Promise<void>;
@@ -63,6 +64,13 @@ export type ColorStudioProps = {
 
 type AdjustKey = keyof Adjustments;
 type FixMode = "add" | "remove";
+type Step = "pick" | "adjust";
+type Scope = "whole" | "part";
+
+// Tallest the image may be, as a share of the viewport. Step 2 is shorter so the
+// three main sliders sit on screen with it on a phone.
+const STAGE_HEIGHT_PICK = 0.6;
+const STAGE_HEIGHT_ADJUST = 0.48;
 
 const PREVIEW_MAX_EDGE = 1280;
 // Without WebGL every slider move is a full CPU pass, so work on a smaller preview.
@@ -82,12 +90,16 @@ const PASTELS: { css: string; hue: ShadeHue }[] = [
   hue: index === 5 ? { a: 0, b: 0 } : hueFromSrgb(r!, g!, b!)
 }));
 
-const SLIDERS: { key: Exclude<AdjustKey, "shade">; label: string; left: string; right: string }[] = [
+type SliderSpec = { key: Exclude<AdjustKey, "shade">; label: string; left: string; right: string };
+
+// Always visible in step 2.
+const MAIN_SLIDERS: SliderSpec[] = [
   { key: "temperature", label: "Temperature", left: "Cooler", right: "Warmer" },
-  { key: "tint", label: "Tint", left: "Greener", right: "Pinker" },
   { key: "exposure", label: "Exposure", left: "Darker", right: "Brighter" },
   { key: "saturation", label: "Saturation", left: "Duller", right: "Stronger" }
 ];
+// Behind "More options", together with Shade strength.
+const MORE_SLIDERS: SliderSpec[] = [{ key: "tint", label: "Tint", left: "Greener", right: "Pinker" }];
 
 type Session = {
   image: HTMLImageElement;
@@ -235,14 +247,19 @@ export function ColorStudio({
 }: ColorStudioProps) {
   const { accessToken } = useAuth();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const sessionRef = useRef<Session | null>(null);
 
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorText, setErrorText] = useState<string | null>(null);
   const [aspect, setAspect] = useState(1);
+  const [box, setBox] = useState<{ width: number; height: number } | null>(null);
   const [rendererKind, setRendererKind] = useState<"webgl" | "cpu">("webgl");
 
-  const [segmentOn, setSegmentOn] = useState(allowSegment && defaultSegment);
+  // Step 1 ("pick") chooses what to fix; step 2 ("adjust") has the sliders.
+  const startOnPick = allowSegment && defaultSegment;
+  const [step, setStep] = useState<Step>(startOnPick ? "pick" : "adjust");
+  const [scope, setScope] = useState<Scope>(startOnPick ? "part" : "whole");
   const [activePartKey, setActivePartKey] = useState<string | null>(null);
   const [loadingPartKey, setLoadingPartKey] = useState<string | null>(null);
   const [segmentError, setSegmentError] = useState<string | null>(null);
@@ -251,10 +268,10 @@ export function ColorStudio({
   const [hasMask, setHasMask] = useState(false);
   const [fixMode, setFixMode] = useState<FixMode | null>(null);
   const [dotsByPart, setDotsByPart] = useState<Record<string, SegmentPoint[]>>({});
-  const [overlayOn, setOverlayOn] = useState(true);
 
   const [adjustments, setAdjustments] = useState<Adjustments>(NEUTRAL_ADJUSTMENTS);
   const [pastel, setPastel] = useState<number | null>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [stats, setStats] = useState<MaskStats | null>(null);
   const [comparing, setComparing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -358,6 +375,40 @@ export function ColorStudio({
     // The studio is opened for one image; callers remount it for another.
   }, []);
 
+  /* ----- image box: sized in JS from the true aspect ratio, so it is never squeezed ----- */
+
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    const measure = () => {
+      const available = stage.clientWidth;
+      if (!available) return;
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      const maxHeight = Math.max(160, viewportHeight * (step === "pick" ? STAGE_HEIGHT_PICK : STAGE_HEIGHT_ADJUST));
+      // "contain": fill the width unless that makes the image taller than allowed.
+      let width = available;
+      let height = width / aspect;
+      if (height > maxHeight) {
+        height = maxHeight;
+        width = height * aspect;
+      }
+      const next = { width: Math.round(width), height: Math.round(height) };
+      setBox((current) =>
+        current && current.width === next.width && current.height === next.height ? current : next
+      );
+    };
+
+    measure();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    observer?.observe(stage);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [aspect, step]);
+
   /* ----- part selection (SAM 3 via the backend) ----- */
 
   const runSegment = useCallback(
@@ -386,14 +437,14 @@ export function ColorStudio({
         const decoded = await session.decoder.decode(response.mask_png_base64, session.pw, session.ph);
         if (session.disposed) return;
 
-        // The request was paid for, so keep the result even if the user moved on.
-        session.masks.set(part.key, decoded.mask);
+        // Keep the result even if the user moved on, so going back to this part is instant.
+        // An empty result is not kept: tapping the chip again should try again.
+        if (decoded.selected > 0) session.masks.set(part.key, decoded.mask);
         if (activePartRef.current !== part.key) return;
-        showMask(decoded.mask);
-        setOverlayOn(true);
+        showMask(decoded.selected > 0 ? decoded.mask : null);
         if (decoded.selected === 0) {
           setSegmentError(
-            `Couldn't find ${part.label.toLowerCase()} in this photo. Try another part, or use Fix selection and tap on it.`
+            `Couldn't find ${part.label.toLowerCase()} in this photo. Try another part, or tap + Add and touch it in the photo.`
           );
         }
       } catch (err) {
@@ -415,7 +466,6 @@ export function ColorStudio({
       setActivePartKey(part.key);
       setSegmentError(null);
       setFixMode(null);
-      setOverlayOn(true);
 
       const cached = session.masks.get(part.key);
       if (cached) {
@@ -431,16 +481,16 @@ export function ColorStudio({
     [runSegment, showMask]
   );
 
-  // First time the box is ticked: select the part that matches the garment type.
+  // First time "One part" is chosen: select the part that matches the garment type.
   useEffect(() => {
-    if (status !== "ready" || !segmentOn || autoRanRef.current) return;
+    if (status !== "ready" || step !== "pick" || scope !== "part" || autoRanRef.current) return;
     autoRanRef.current = true;
     const part = defaultPartForGarmentName(garmentTypeName);
     if (part) selectPart(part);
-  }, [status, segmentOn, garmentTypeName, selectPart]);
+  }, [status, step, scope, garmentTypeName, selectPart]);
 
   const handleCanvasClick = (event: ReactMouseEvent<HTMLCanvasElement>) => {
-    if (!segmentOn || !fixMode || !activePartKey || saving) return;
+    if (step !== "pick" || scope !== "part" || !fixMode || !activePartKey || saving) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     if (bounds.width === 0 || bounds.height === 0) return;
     const point: SegmentPoint = {
@@ -449,7 +499,6 @@ export function ColorStudio({
       label: fixMode === "add" ? 1 : 0
     };
     setDotsByPart((current) => ({ ...current, [activePartKey]: [...(current[activePartKey] ?? []), point] }));
-    setOverlayOn(true);
   };
 
   const handleSelectAgain = () => {
@@ -464,11 +513,11 @@ export function ColorStudio({
 
   /* ----- derived adjustment state ----- */
 
-  const whole = !segmentOn;
+  const whole = scope === "whole";
   const neutral = isNeutralStats(stats);
   const pickedHue = neutral && pastel !== null ? PASTELS[pastel]?.hue ?? null : null;
   const shadeNeedsPick = neutral && pastel === null;
-  // In part mode with no mask yet the sliders would change nothing.
+  // In part mode with no mask the sliders would change nothing.
   const canAdjust = status === "ready" && (whole || hasMask);
 
   const uniforms = useMemo(
@@ -483,11 +532,12 @@ export function ColorStudio({
     session.uniforms = uniforms;
     session.view = {
       whole,
-      overlay: !whole && (overlayOn || fixMode !== null) ? 1 : 0,
+      // The outline only belongs to step 1; step 2 shows the corrected image and nothing else.
+      overlay: step === "pick" && !whole ? 1 : 0,
       original: comparing
     };
     requestRender();
-  }, [uniforms, whole, overlayOn, fixMode, comparing, status, requestRender]);
+  }, [uniforms, whole, step, comparing, status, requestRender]);
 
   useEffect(() => {
     const session = sessionRef.current;
@@ -503,13 +553,32 @@ export function ColorStudio({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose, saving]);
 
+  /* ----- navigation ----- */
+
+  const goToAdjust = () => {
+    setFixMode(null);
+    setComparing(false);
+    setStep("adjust");
+  };
+
+  const goToPick = (nextScope?: Scope) => {
+    setComparing(false);
+    if (nextScope) setScope(nextScope);
+    setStep("pick");
+  };
+
+  // Step 2 goes back to step 1 (slider values are kept); otherwise the arrow leaves the studio.
+  const canGoBack = allowSegment && step === "adjust";
+  const handleBack = () => {
+    if (saving) return;
+    if (canGoBack) goToPick();
+    else onClose();
+  };
+
   /* ----- adjustments ----- */
 
   const setAdjustment = (key: AdjustKey, value: number) => {
     setAdjustments((current) => ({ ...current, [key]: value }));
-    // Get the gold overlay out of the way so the colour change is visible.
-    setOverlayOn(false);
-    setFixMode(null);
   };
 
   const handleReset = () => {
@@ -540,7 +609,7 @@ export function ColorStudio({
 
   const adjusted = uniforms.active;
   const ready = status === "ready";
-  const stageStyle = { "--cs-aspect": String(aspect) } as CSSProperties;
+  const picking = step === "pick";
   const compareHandlers = {
     onPointerDown: () => setComparing(true),
     onPointerUp: () => setComparing(false),
@@ -553,245 +622,307 @@ export function ColorStudio({
     onBlur: () => setComparing(false)
   };
   const loadingPart = findGarmentPart(loadingPartKey);
-  const showDots = segmentOn && !comparing && (overlayOn || fixMode !== null);
   const fixBusy = !!loadingPartKey || saving;
+  const title = picking
+    ? "What do you want to fix?"
+    : !whole && activePart
+      ? `Adjust ${activePart.label}`
+      : "Adjust colour";
+  const boxStyle: CSSProperties = box
+    ? { width: box.width, height: box.height }
+    : { width: "100%", aspectRatio: String(aspect) };
+
+  const renderSlider = (slider: SliderSpec) => (
+    <AdjustSlider
+      key={slider.key}
+      label={slider.label}
+      left={slider.left}
+      right={slider.right}
+      value={adjustments[slider.key]}
+      disabled={!canAdjust}
+      onChange={(value) => setAdjustment(slider.key, value)}
+    />
+  );
 
   return createPortal(
-    <div className="cs-modal" role="dialog" aria-modal="true" aria-label="Match colour">
-      <header className="cs-header">
-        <h2>Match colour</h2>
-        <button type="button" className="cs-close" onClick={onClose} disabled={saving} aria-label="Close">
-          ×
-        </button>
-      </header>
+    <div className="cs-modal">
+      <div className="cs-sheet" role="dialog" aria-modal="true" aria-label="Match colour">
+        <header className="cs-header">
+          <button
+            type="button"
+            className="cs-back"
+            onClick={handleBack}
+            disabled={saving}
+            aria-label={canGoBack ? "Back to choosing what to fix" : "Close"}
+          >
+            <span aria-hidden>←</span> Match colour
+          </button>
+          <button type="button" className="cs-close" onClick={onClose} disabled={saving} aria-label="Close">
+            ×
+          </button>
+        </header>
 
-      <div className="cs-body">
-        {allowSegment && status !== "error" && (
-          <label className="cs-check">
-            <input
-              type="checkbox"
-              checked={segmentOn}
-              disabled={!ready || saving}
-              onChange={(event) => {
-                setSegmentOn(event.target.checked);
-                setFixMode(null);
-                setOverlayOn(true);
-              }}
-            />
-            <span>Select only one part (Kurta, Koti, Lehenga…)</span>
-          </label>
-        )}
+        <div className="cs-body">
+          {status !== "error" && <h3 className="cs-title">{title}</h3>}
 
-        {segmentOn && status !== "error" && (
-          <div className="cs-chips" role="listbox" aria-label="Part to colour">
-            {GARMENT_PARTS.map((part) => (
-              <button
-                key={part.key}
-                type="button"
-                role="option"
-                aria-selected={activePartKey === part.key}
-                className={`cs-chip${activePartKey === part.key ? " is-active" : ""}`}
-                disabled={!ready || saving}
-                onClick={() => selectPart(part)}
-              >
-                {part.label}
-              </button>
-            ))}
+          <div className="cs-stage" ref={stageRef}>
+            <div className="cs-canvas-wrap" style={boxStyle}>
+              <canvas
+                ref={canvasRef}
+                className={`cs-canvas${picking && !whole && fixMode ? " is-tapping" : ""}`}
+                onClick={handleCanvasClick}
+              />
+              {picking &&
+                !whole &&
+                dots.map((dot, index) => (
+                  <span
+                    key={index}
+                    className={`cs-dot-mark${dot.label === 1 ? " is-add" : " is-remove"}`}
+                    style={{ left: `${dot.x * 100}%`, top: `${dot.y * 100}%` }}
+                    aria-hidden
+                  />
+                ))}
+              {comparing && <span className="cs-badge">Original</span>}
+              {picking && !whole && loadingPart && (
+                <div className="cs-finding" role="status">
+                  <div className="spinner spinner-small" />
+                  <span>Finding {loadingPart.label}...</span>
+                </div>
+              )}
+              {status === "loading" && (
+                <div className="cs-stage-cover">
+                  <div className="spinner" aria-label="Loading" />
+                </div>
+              )}
+            </div>
           </div>
-        )}
 
-        <div className="cs-stage" style={stageStyle}>
-          <div className="cs-canvas-wrap">
-            <canvas
-              ref={canvasRef}
-              className={`cs-canvas${segmentOn && fixMode ? " is-tapping" : ""}`}
-              onClick={handleCanvasClick}
-            />
-            {showDots &&
-              dots.map((dot, index) => (
-                <span
-                  key={index}
-                  className={`cs-dot-mark${dot.label === 1 ? " is-add" : " is-remove"}`}
-                  style={{ left: `${dot.x * 100}%`, top: `${dot.y * 100}%` }}
-                  aria-hidden
-                />
-              ))}
-            {comparing && <span className="cs-badge">Original</span>}
-            {segmentOn && loadingPart && (
-              <div className="cs-finding" role="status">
-                <div className="spinner spinner-small" />
-                <span>Finding {loadingPart.label}...</span>
+          {errorText && <p className="error-text">{errorText}</p>}
+
+          {status !== "error" && picking && (
+            <>
+              <div className="cs-scope" role="radiogroup" aria-label="What to fix">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={whole}
+                  className={`cs-scope-btn${whole ? " is-active" : ""}`}
+                  disabled={!ready}
+                  onClick={() => {
+                    setScope("whole");
+                    setFixMode(null);
+                  }}
+                >
+                  Whole photo
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={!whole}
+                  className={`cs-scope-btn${!whole ? " is-active" : ""}`}
+                  disabled={!ready}
+                  onClick={() => setScope("part")}
+                >
+                  One part
+                </button>
               </div>
-            )}
-            {ready && (
+
+              {!whole && (
+                <>
+                  <div className="cs-chips" role="listbox" aria-label="Part to fix">
+                    {GARMENT_PARTS.map((part) => (
+                      <button
+                        key={part.key}
+                        type="button"
+                        role="option"
+                        aria-selected={activePartKey === part.key}
+                        className={`cs-chip${activePartKey === part.key ? " is-active" : ""}`}
+                        disabled={!ready}
+                        onClick={() => selectPart(part)}
+                      >
+                        {part.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {segmentError && <p className="error-text">{segmentError}</p>}
+                  {!activePart && <p className="cs-hint">Choose the part you want to fix.</p>}
+
+                  {activePart && (
+                    <div className="cs-panel">
+                      <div className="cs-fix">
+                        <span className="cs-fix-label">Not right?</span>
+                        <button
+                          type="button"
+                          className={`cs-fix-btn is-add${fixMode === "add" ? " is-active" : ""}`}
+                          aria-pressed={fixMode === "add"}
+                          disabled={fixBusy}
+                          onClick={() => setFixMode((mode) => (mode === "add" ? null : "add"))}
+                        >
+                          + Add
+                        </button>
+                        <button
+                          type="button"
+                          className={`cs-fix-btn is-remove${fixMode === "remove" ? " is-active" : ""}`}
+                          aria-pressed={fixMode === "remove"}
+                          disabled={fixBusy}
+                          onClick={() => setFixMode((mode) => (mode === "remove" ? null : "remove"))}
+                        >
+                          − Remove
+                        </button>
+                      </div>
+                      {(fixMode || dots.length > 0) && (
+                        <p className="cs-hint">
+                          {fixMode === "remove"
+                            ? "Tap the photo where the outline should NOT be (red dots), then Select again."
+                            : fixMode === "add"
+                              ? "Tap the photo on the part that was missed (green dots), then Select again."
+                              : "Dots are placed. Tap Select again to use them."}
+                        </p>
+                      )}
+                      <div className="cs-fix">
+                        <button
+                          type="button"
+                          className="btn-secondary cs-fix-action"
+                          disabled={dots.length === 0 || fixBusy}
+                          onClick={handleSelectAgain}
+                        >
+                          Select again
+                        </button>
+                        {dots.length > 0 && (
+                          <button
+                            type="button"
+                            className="btn-secondary cs-fix-action"
+                            disabled={fixBusy}
+                            onClick={handleClearDots}
+                          >
+                            Clear dots
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          )}
+
+          {status !== "error" && !picking && (
+            <>
               <button
                 type="button"
-                className="cs-compare"
+                className="btn-secondary cs-compare"
                 disabled={!adjusted || !canAdjust}
                 onContextMenu={(event) => event.preventDefault()}
                 {...compareHandlers}
               >
-                Hold: Before
+                Hold to see original
               </button>
-            )}
-          </div>
-          {status === "loading" && (
-            <div className="cs-stage-cover">
-              <div className="spinner" aria-label="Loading" />
-            </div>
+
+              {canAdjust && stats && stats.blownFraction > BLOWN_OUT_WARNING && (
+                <p className="cs-warning" role="status">
+                  Photo is too bright here – colour can be adjusted but detail is lost.
+                </p>
+              )}
+
+              <div className="cs-panel">
+                {MAIN_SLIDERS.map(renderSlider)}
+
+                <button
+                  type="button"
+                  className="cs-more"
+                  aria-expanded={moreOpen}
+                  onClick={() => setMoreOpen((open) => !open)}
+                >
+                  More options {moreOpen ? "▾" : "▸"}
+                </button>
+
+                {moreOpen && (
+                  <>
+                    {MORE_SLIDERS.map(renderSlider)}
+                    <AdjustSlider
+                      label="Shade strength"
+                      left="Paler"
+                      right="Stronger"
+                      value={adjustments.shade}
+                      disabled={!canAdjust || shadeNeedsPick}
+                      trackStyle={
+                        shadeTrack
+                          ? ({
+                              "--cs-track": `linear-gradient(90deg, ${shadeTrack[0]}, ${shadeTrack[1]})`
+                            } as CSSProperties)
+                          : undefined
+                      }
+                      onChange={(value) => setAdjustment("shade", value)}
+                    />
+                    {neutral && canAdjust && (
+                      <div className="cs-dots">
+                        <span className="cs-dots-label">
+                          This fabric is almost colourless. Pick the shade it should lean to:
+                        </span>
+                        <div className="cs-dots-row">
+                          {PASTELS.map((entry, index) => (
+                            <button
+                              key={entry.css}
+                              type="button"
+                              className={`cs-dot${pastel === index ? " is-active" : ""}`}
+                              style={{ background: entry.css }}
+                              aria-label={`Shade option ${index + 1}`}
+                              aria-pressed={pastel === index}
+                              onClick={() => setPastel(index)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {allowSegment && !defaultSegment && whole && (
+                <button type="button" className="cs-link" disabled={saving} onClick={() => goToPick("part")}>
+                  Fix one part only
+                </button>
+              )}
+
+              {rendererKind === "cpu" && ready && (
+                <p className="cs-hint">This device has no WebGL, so the preview is smaller and slower.</p>
+              )}
+            </>
           )}
         </div>
 
-        {errorText && <p className="error-text">{errorText}</p>}
-
-        {segmentOn && status !== "error" && (
-          <div className="cs-panel">
-            {segmentError && <p className="error-text">{segmentError}</p>}
-            {!activePart && <p className="cs-hint">Pick the part you want to colour.</p>}
-            {activePart && (
-              <>
-                <div className="cs-fix">
-                  <span className="cs-fix-label">Fix selection</span>
-                  <button
-                    type="button"
-                    className={`cs-fix-btn is-add${fixMode === "add" ? " is-active" : ""}`}
-                    aria-pressed={fixMode === "add"}
-                    disabled={fixBusy}
-                    onClick={() => setFixMode((mode) => (mode === "add" ? null : "add"))}
-                  >
-                    + Add
-                  </button>
-                  <button
-                    type="button"
-                    className={`cs-fix-btn is-remove${fixMode === "remove" ? " is-active" : ""}`}
-                    aria-pressed={fixMode === "remove"}
-                    disabled={fixBusy}
-                    onClick={() => setFixMode((mode) => (mode === "remove" ? null : "remove"))}
-                  >
-                    − Remove
-                  </button>
-                </div>
-                {(fixMode || dots.length > 0) && (
-                  <>
-                    <p className="cs-hint">
-                      {fixMode === "remove"
-                        ? "Tap the photo where the selection should NOT be (red dots)."
-                        : fixMode === "add"
-                          ? "Tap the photo where the selection is missing (green dots)."
-                          : "Dots are placed. Select again to apply them."}
-                    </p>
-                    <div className="cs-fix">
-                      <button
-                        type="button"
-                        className="btn-secondary cs-fix-action"
-                        disabled={dots.length === 0 || fixBusy}
-                        onClick={handleSelectAgain}
-                      >
-                        Select again
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-secondary cs-fix-action"
-                        disabled={dots.length === 0 || fixBusy}
-                        onClick={handleClearDots}
-                      >
-                        Clear dots
-                      </button>
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-            <p className="cs-footnote">Each new selection costs ~₹0.5</p>
-          </div>
-        )}
-
-        {status !== "error" && (
-          <>
-            {canAdjust && stats && stats.blownFraction > BLOWN_OUT_WARNING && (
-              <p className="cs-warning" role="status">
-                Photo is too bright here – colour can be adjusted but detail is lost.
-              </p>
-            )}
-
-            <div className="cs-panel">
-              {SLIDERS.map((slider) => (
-                <AdjustSlider
-                  key={slider.key}
-                  label={slider.label}
-                  left={slider.left}
-                  right={slider.right}
-                  value={adjustments[slider.key]}
-                  disabled={!canAdjust}
-                  onChange={(value) => setAdjustment(slider.key, value)}
-                />
-              ))}
-
-              <AdjustSlider
-                label="Shade strength"
-                left="Paler"
-                right="Stronger"
-                value={adjustments.shade}
-                disabled={!canAdjust || shadeNeedsPick}
-                trackStyle={
-                  shadeTrack
-                    ? ({ "--cs-track": `linear-gradient(90deg, ${shadeTrack[0]}, ${shadeTrack[1]})` } as CSSProperties)
-                    : undefined
-                }
-                onChange={(value) => setAdjustment("shade", value)}
-              />
-              {neutral && canAdjust && (
-                <div className="cs-dots">
-                  <span className="cs-dots-label">
-                    This fabric is almost colourless. Pick the shade it should lean to:
-                  </span>
-                  <div className="cs-dots-row">
-                    {PASTELS.map((entry, index) => (
-                      <button
-                        key={entry.css}
-                        type="button"
-                        className={`cs-dot${pastel === index ? " is-active" : ""}`}
-                        style={{ background: entry.css }}
-                        aria-label={`Shade option ${index + 1}`}
-                        aria-pressed={pastel === index}
-                        onClick={() => {
-                          setPastel(index);
-                          setOverlayOn(false);
-                        }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {rendererKind === "cpu" && ready && (
-              <p className="cs-hint">This device has no WebGL, so the preview is smaller and slower.</p>
-            )}
-          </>
-        )}
+        <footer className="cs-footer">
+          {status === "error" ? (
+            <button type="button" className="btn-secondary" onClick={onClose}>
+              Close
+            </button>
+          ) : picking ? (
+            <button
+              type="button"
+              className="btn-primary cs-primary"
+              onClick={goToAdjust}
+              disabled={!ready || (!whole && (!hasMask || !!loadingPartKey))}
+            >
+              Next →
+            </button>
+          ) : (
+            <>
+              <button type="button" className="btn-secondary" onClick={handleReset} disabled={!adjusted || saving}>
+                Reset
+              </button>
+              <button
+                type="button"
+                className="btn-primary cs-primary"
+                onClick={() => void handleSave()}
+                disabled={!canAdjust || !adjusted || saving}
+              >
+                {saving ? "Saving…" : "Save ✓"}
+              </button>
+            </>
+          )}
+        </footer>
       </div>
-
-      <footer className="cs-footer">
-        {status !== "error" && (
-          <button type="button" className="btn-secondary" onClick={handleReset} disabled={!adjusted || saving}>
-            Reset
-          </button>
-        )}
-        <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>
-          Cancel
-        </button>
-        {status !== "error" && (
-          <button
-            type="button"
-            className="btn-primary cs-save"
-            onClick={() => void handleSave()}
-            disabled={!canAdjust || !adjusted || saving}
-          >
-            {saving ? "Saving…" : "Save"}
-          </button>
-        )}
-      </footer>
     </div>,
     document.body
   );

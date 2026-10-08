@@ -289,7 +289,7 @@ export function measureMaskedColor(
 export type RenderView = {
   /** Treat the whole image as selected (the mask texture is ignored). */
   whole: boolean;
-  /** 0..1 strength of the gold selection overlay (also draws an outline round the mask). */
+  /** 0..1 strength of the thin gold outline round the mask. There is no fill, so the fabric stays visible. */
   overlay: number;
   /** Show the untouched source (before / after compare). */
   original: boolean;
@@ -301,7 +301,6 @@ export type RenderView = {
 };
 
 const OVERLAY_RGB: [number, number, number] = [201, 168, 76]; // --mt-gold
-const OVERLAY_ALPHA = 0.38;
 // The outline is found by comparing mask samples this many mask pixels apart.
 const OUTLINE_REACH = 2;
 
@@ -409,14 +408,13 @@ void main() {
   }
 
   if (u_overlay > 0.0) {
-    color = mix(color, u_overlay_color, u_overlay * mask);
     // Solid line where the mask changes quickly, i.e. along its edge.
     float right = texture2D(u_mask, maskUv + vec2(u_outline_step.x, 0.0)).r;
     float left = texture2D(u_mask, maskUv - vec2(u_outline_step.x, 0.0)).r;
     float down = texture2D(u_mask, maskUv + vec2(0.0, u_outline_step.y)).r;
     float up = texture2D(u_mask, maskUv - vec2(0.0, u_outline_step.y)).r;
     float edge = max(max(right, left), max(down, up)) - min(min(right, left), min(down, up));
-    color = mix(color, u_overlay_color, smoothstep(0.35, 0.75, edge) * (1.0 - u_whole));
+    color = mix(color, u_overlay_color, smoothstep(0.35, 0.75, edge) * (1.0 - u_whole) * u_overlay);
   }
   gl_FragColor = vec4(color, 1.0);
 }
@@ -613,7 +611,7 @@ export class WebGLAdjustRenderer implements AdjustRenderer {
     gl.uniform4f(u.u_mask_rect, maskRect[0], maskRect[1], maskRect[2], maskRect[3]);
     gl.uniform1f(u.u_whole, view.whole ? 1 : 0);
     gl.uniform1f(u.u_active, uniforms.active && !view.original ? 1 : 0);
-    gl.uniform1f(u.u_overlay, view.original ? 0 : view.overlay * OVERLAY_ALPHA);
+    gl.uniform1f(u.u_overlay, view.original ? 0 : view.overlay);
     gl.uniform3f(u.u_overlay_color, OVERLAY_RGB[0] / 255, OVERLAY_RGB[1] / 255, OVERLAY_RGB[2] / 255);
     gl.uniform2f(
       u.u_outline_step,
@@ -661,7 +659,7 @@ export function applyAdjustCPU(
   mask: MaskSource | null
 ) {
   const active = uniforms.active && !view.original;
-  const overlay = view.original ? 0 : view.overlay * OVERLAY_ALPHA;
+  const overlay = view.original ? 0 : view.overlay;
   const whole = view.whole || !mask;
   const [gainR, gainG, gainB] = uniforms.gain;
   const [addA, addB] = uniforms.chromaAdd;
@@ -734,12 +732,6 @@ export function applyAdjustCPU(
         outB = b8 + (adjB - b8) * alpha;
       }
 
-      if (overlay > 0 && alpha > 0) {
-        const mix = overlay * alpha;
-        outR += (OVERLAY_RGB[0] - outR) * mix;
-        outG += (OVERLAY_RGB[1] - outG) * mix;
-        outB += (OVERLAY_RGB[2] - outB) * mix;
-      }
       if (overlay > 0 && direct && mask && !whole) {
         // Outline, as in the shader: mask range across a small cross of samples.
         const xl = Math.max(0, x - OUTLINE_REACH);
@@ -752,7 +744,7 @@ export function applyAdjustCPU(
         const d = mask.data[yd + x]!;
         const range = (Math.max(a, b, c, d) - Math.min(a, b, c, d)) / 255;
         const t = Math.min(1, Math.max(0, (range - 0.35) / 0.4));
-        const line = t * t * (3 - 2 * t);
+        const line = t * t * (3 - 2 * t) * overlay;
         if (line > 0) {
           outR += (OVERLAY_RGB[0] - outR) * line;
           outG += (OVERLAY_RGB[1] - outG) * line;

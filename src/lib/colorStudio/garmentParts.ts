@@ -12,7 +12,8 @@ export type GarmentPart = {
 
 export const GARMENT_PARTS: GarmentPart[] = [
   { key: "kurta", label: "Kurta", prompt: "kurta" },
-  { key: "koti", label: "Koti", prompt: "nehru jacket" },
+  { key: "kurti", label: "Kurti", prompt: "tunic top" },
+  { key: "koti", label: "Koti / Nehru jacket", prompt: "nehru jacket" },
   { key: "shirt", label: "Shirt", prompt: "shirt" },
   { key: "pant", label: "Pant", prompt: "trousers" },
   { key: "suit", label: "Suit / Coat", prompt: "suit jacket" },
@@ -20,24 +21,23 @@ export const GARMENT_PARTS: GarmentPart[] = [
   { key: "lehenga", label: "Lehenga", prompt: "skirt" },
   { key: "blouse", label: "Blouse", prompt: "blouse" },
   { key: "dupatta", label: "Dupatta", prompt: "scarf" },
-  { key: "saree", label: "Saree", prompt: "saree" },
-  { key: "fabric", label: "Fabric", prompt: "fabric" }
+  { key: "saree", label: "Saree", prompt: "saree" }
 ];
 
-// Checked in order, so the more specific names win ("Kurta Koti Set" -> koti,
-// "Single Breasted Suit" -> suit).
+// Checked in order, so the more specific names win: "kurti" before "kurta",
+// "Kurta Koti Set" -> koti, "Single Breasted Suit" -> suit.
 const NAME_RULES: { key: string; pattern: RegExp }[] = [
-  { key: "sherwani", pattern: /sherwani|achkan|indo[\s-]?western/ },
-  { key: "lehenga", pattern: /lehenga|lehnga|ghagra|skirt/ },
+  { key: "sherwani", pattern: /sherwani|achkan/ },
+  { key: "lehenga", pattern: /lehenga|lehnga|ghagra/ },
   { key: "blouse", pattern: /blouse|choli/ },
-  { key: "dupatta", pattern: /dupatta|stole|scarf/ },
+  { key: "dupatta", pattern: /dupatta/ },
   { key: "saree", pattern: /saree|sari\b/ },
-  { key: "koti", pattern: /koti|nehru|waistcoat|vest|bandi/ },
-  { key: "suit", pattern: /suit|blazer|coat|tuxedo|jodhpuri|bandhgala/ },
-  { key: "kurta", pattern: /kurta|kurti|pathani/ },
+  { key: "koti", pattern: /koti|nehru/ },
+  { key: "suit", pattern: /suit|blazer|coat/ },
+  { key: "kurti", pattern: /kurti/ },
+  { key: "kurta", pattern: /kurta/ },
   { key: "shirt", pattern: /shirt/ },
-  { key: "pant", pattern: /pant|trouser|pyjama|pajama|churidar/ },
-  { key: "fabric", pattern: /fabric|cloth/ }
+  { key: "pant", pattern: /pant|trouser/ }
 ];
 
 export function findGarmentPart(key: string | null | undefined): GarmentPart | null {
