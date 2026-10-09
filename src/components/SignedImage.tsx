@@ -1,5 +1,6 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 
+import { debugImageSize, debugLog, debugTileState, isDebugEnabled } from "../lib/debugLog";
 import { getCachedSignedUrl, signUrlsBatch } from "../lib/storage";
 
 type Bucket = Parameters<typeof signUrlsBatch>[0];
@@ -13,6 +14,8 @@ type Props = {
   className?: string;
   /** Load straight away instead of when the image nears the viewport. */
   eager?: boolean;
+  /** Names this image (a grid tile number) in the ?debug=1 diagnostics. No effect otherwise. */
+  debugLabel?: string;
 };
 
 // primary -> primary re-signed (in case the URL expired) -> fallback -> placeholder
@@ -21,10 +24,45 @@ type Stage = "primary" | "primary-retry" | "fallback" | "failed";
 // Kept in the layout while loading: a lazy image that is display:none never starts loading.
 const LOADING_STYLE: CSSProperties = { position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" };
 
-function SignedImageInner({ bucket, path, fallbackPath, alt, className, eager }: Props) {
+function SignedImageInner({ bucket, path, fallbackPath, alt, className, eager, debugLabel }: Props) {
   const [stage, setStage] = useState<Stage>("primary");
   const [url, setUrl] = useState<string | null>(() => getCachedSignedUrl(bucket, path));
   const [loaded, setLoaded] = useState(false);
+
+  // ?debug=1 diagnostics only; `debug` is null in normal use and nothing below it runs.
+  const debug = debugLabel && isDebugEnabled() ? debugLabel : null;
+  const stageStartedAtRef = useRef(performance.now());
+  const reportedUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!debug) return;
+    debugLog(`${debug} thumb START`);
+    debugTileState(debug, "loading");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    stageStartedAtRef.current = performance.now();
+  }, [stage]);
+
+  /** Logs how the current stage ended. `final` marks a failure with nothing left to try. */
+  function report(ok: boolean, detail = "", final = false) {
+    if (!debug || stage === "failed") return;
+    const ms = `${Math.round(performance.now() - stageStartedAtRef.current)}ms`;
+    const name = stage === "primary" ? "thumb" : stage === "primary-retry" ? "retry" : "fallback FULL";
+    debugLog(`${debug} ${name} ${ok ? "OK" : "FAIL"} ${ms}${detail ? ` ${detail}` : ""}`);
+    if (ok) debugTileState(debug, stage === "fallback" ? "fallback" : "loaded");
+    else if (final) debugTileState(debug, "failed");
+  }
+
+  function markLoaded(loadedUrl: string) {
+    // The ref callback and onLoad can both see the same image; report it once.
+    if (reportedUrlRef.current !== loadedUrl) {
+      reportedUrlRef.current = loadedUrl;
+      report(true, debugImageSize(loadedUrl).trim());
+    }
+    setLoaded(true);
+  }
 
   useEffect(() => {
     if (stage === "failed" || (stage === "primary" && url)) return;
@@ -44,12 +82,18 @@ function SignedImageInner({ bucket, path, fallbackPath, alt, className, eager }:
       .then((urls) => {
         if (cancelled) return;
         const signed = urls[target];
-        if (signed) setUrl(signed);
-        else setStage(afterMissing);
+        if (signed) {
+          setUrl(signed);
+          return;
+        }
+        report(false, "no signed URL (file missing)", afterMissing === "failed");
+        setStage(afterMissing);
       })
       .catch((err) => {
         console.warn("SignedImage: failed to sign", target, err);
-        if (!cancelled) setStage(afterFailure);
+        if (cancelled) return;
+        report(false, `sign failed: ${err instanceof Error ? err.message : String(err)}`, afterFailure === "failed");
+        setStage(afterFailure);
       });
 
     return () => {
@@ -60,11 +104,12 @@ function SignedImageInner({ bucket, path, fallbackPath, alt, className, eager }:
   }, [stage, bucket, path, fallbackPath]);
 
   function handleError() {
+    const next: Stage =
+      stage === "primary" ? "primary-retry" : stage === "primary-retry" && fallbackPath ? "fallback" : "failed";
+    report(false, "image load error", next === "failed");
     setUrl(null);
     setLoaded(false);
-    setStage((current) =>
-      current === "primary" ? "primary-retry" : current === "primary-retry" && fallbackPath ? "fallback" : "failed"
-    );
+    setStage(next);
   }
 
   if (stage === "failed") {
@@ -79,14 +124,14 @@ function SignedImageInner({ bucket, path, fallbackPath, alt, className, eager }:
           key={url}
           ref={(element) => {
             // An image served from the browser cache can be complete before onLoad is attached.
-            if (element?.complete && element.naturalWidth > 0) setLoaded(true);
+            if (element?.complete && element.naturalWidth > 0) markLoaded(url);
           }}
           className={className}
           src={url}
           alt={alt}
           loading={eager ? "eager" : "lazy"}
           style={loaded ? undefined : LOADING_STYLE}
-          onLoad={() => setLoaded(true)}
+          onLoad={() => markLoaded(url)}
           onError={handleError}
         />
       ) : null}

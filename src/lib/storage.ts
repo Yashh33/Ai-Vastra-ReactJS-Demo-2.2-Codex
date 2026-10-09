@@ -47,8 +47,14 @@ function requestSignedUrls(bucket: StorageBucket, paths: string[], ttlSeconds: n
     const batchPaths = new Set<string>();
     const promise = new Promise<void>((resolve) => setTimeout(resolve, 0)).then(async () => {
       pendingSignBatches.delete(batchKey);
+      const startedAt = performance.now();
       const { data, error } = await supabase.storage.from(bucket).createSignedUrls(Array.from(batchPaths), ttlSeconds);
-      if (error) throw new Error(error.message);
+      const elapsed = `${Math.round(performance.now() - startedAt)}ms`;
+      if (error) {
+        debugLog(`signUrlsBatch ${batchPaths.size} paths -> FAIL ${elapsed} ${error.message}`);
+        throw new Error(error.message);
+      }
+      debugLog(`signUrlsBatch ${batchPaths.size} paths -> OK ${elapsed}`);
 
       const expiresAt = Date.now() + ttlSeconds * 1000;
       const signed: Record<string, string> = {};

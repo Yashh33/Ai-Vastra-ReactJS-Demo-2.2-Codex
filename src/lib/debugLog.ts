@@ -3,10 +3,20 @@
 // Needed because an iPhone has no console to look at.
 
 const MAX_EVENTS = 10;
+// The TV diagnostics overlay scrolls, so it keeps a much longer history than the strip.
+const OVERLAY_MAX_EVENTS = 400;
 const STORAGE_KEY = "debugStrip";
 
 const events: string[] = [];
 let strip: HTMLElement | null = null;
+// True while a page shows the events itself (the TV overlay) instead of the strip.
+let overlayAttached = false;
+let version = 0;
+const listeners = new Set<() => void>();
+
+type TileState = "loading" | "loaded" | "fallback" | "failed";
+const tileStates = new Map<string, TileState>();
+let lastTileLoadedMs: number | null = null;
 
 function readEnabled() {
   if (typeof window === "undefined") return false;
@@ -23,6 +33,86 @@ function readEnabled() {
 }
 
 const enabled = readEnabled();
+
+function notify() {
+  version += 1;
+  listeners.forEach((listener) => listener());
+}
+
+export function isDebugEnabled() {
+  return enabled;
+}
+
+/** For useSyncExternalStore: the snapshot is a counter that changes whenever anything is logged. */
+export function subscribeDebug(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+export function getDebugVersion() {
+  return version;
+}
+
+export function getDebugEvents(): readonly string[] {
+  return events;
+}
+
+/** A page that renders the events itself calls this; the small strip steps aside. Returns the undo. */
+export function attachDebugOverlay() {
+  overlayAttached = true;
+  strip?.remove();
+  strip = null;
+  return () => {
+    overlayAttached = false;
+  };
+}
+
+/** Records where a Browse grid tile's image has got to, for the overlay's summary line. */
+export function debugTileState(label: string, state: TileState) {
+  if (!enabled) return;
+  tileStates.set(label, state);
+  // performance.now() counts from when the page was opened.
+  if (state === "loaded" || state === "fallback") lastTileLoadedMs = performance.now();
+  notify();
+}
+
+/** Call when the grid shows a different set of looks. */
+export function debugResetTiles() {
+  if (!enabled) return;
+  tileStates.clear();
+  notify();
+}
+
+export function getDebugTileSummary() {
+  let loaded = 0;
+  let failed = 0;
+  let fallback = 0;
+  tileStates.forEach((state) => {
+    if (state === "loaded") loaded += 1;
+    else if (state === "fallback") fallback += 1;
+    else if (state === "failed") failed += 1;
+  });
+  const lastLoaded = lastTileLoadedMs === null ? "-" : `${(lastTileLoadedMs / 1000).toFixed(1)}s`;
+  return (
+    `tiles ${tileStates.size} | loaded ${loaded + fallback} | failed ${failed} | using fallback ${fallback}` +
+    ` | page open -> last tile loaded ${lastLoaded}`
+  );
+}
+
+/** " 123KB" for an image the browser has just loaded, or "" when the size is not exposed. */
+export function debugImageSize(url: string) {
+  if (!enabled) return "";
+  try {
+    const entries = performance.getEntriesByName(url);
+    const entry = entries[entries.length - 1] as PerformanceResourceTiming | undefined;
+    const bytes = entry ? entry.transferSize || entry.encodedBodySize : 0;
+    return bytes > 0 ? ` ${kb(bytes)}` : "";
+  } catch {
+    return "";
+  }
+}
 
 function render() {
   if (!strip) {
@@ -63,10 +153,12 @@ export function kb(bytes: number) {
 export function debugLog(message: string) {
   if (!enabled) return;
   events.push(`${timestamp()} ${message}`);
-  if (events.length > MAX_EVENTS) events.splice(0, events.length - MAX_EVENTS);
+  const maxEvents = overlayAttached ? OVERLAY_MAX_EVENTS : MAX_EVENTS;
+  if (events.length > maxEvents) events.splice(0, events.length - maxEvents);
   console.log(`[debug] ${message}`);
   try {
-    render();
+    if (!overlayAttached) render();
+    notify();
   } catch {
     // The strip is a diagnostic aid; it must never break a photo pick.
   }

@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { LookDetails } from "../components/LookDetails";
+import { ScreenDebugOverlay } from "../components/ScreenDebugOverlay";
 import { SignedImage } from "../components/SignedImage";
+import { debugResetTiles, isDebugEnabled } from "../lib/debugLog";
 import { supabase } from "../lib/supabase";
 import { lookThumbnailPathFor, preloadSignedImages } from "../lib/storage";
 import { useCarouselSlides } from "../lib/useCarouselSlides";
@@ -70,7 +72,16 @@ function useStageSize() {
 }
 
 // Grid tiles show the small thumbnail; a look without one falls back to its full image.
-function BrowseTile({ look, onOpen }: { look: BrowseLookRow; onOpen: (look: BrowseLookRow) => void }) {
+function BrowseTile({
+  look,
+  position,
+  onOpen
+}: {
+  look: BrowseLookRow;
+  /** 1-based place in the grid; only used to name the tile in the ?debug=1 diagnostics. */
+  position: number;
+  onOpen: (look: BrowseLookRow) => void;
+}) {
   return (
     <button type="button" className="tv-browse-tile" tabIndex={0} onClick={() => onOpen(look)}>
       <SignedImage
@@ -78,6 +89,7 @@ function BrowseTile({ look, onOpen }: { look: BrowseLookRow; onOpen: (look: Brow
         path={lookThumbnailPathFor(look.output_path)}
         fallbackPath={look.output_path}
         alt="Look"
+        debugLabel={String(position)}
       />
       {look.is_hero ? (
         <span className="tv-browse-hero-badge" aria-label="Hero look">
@@ -348,6 +360,7 @@ export function ScreenPage() {
 
       if (cancelled) return;
 
+      debugResetTiles();
       setBrowseLooks(rows);
     }
 
@@ -924,10 +937,11 @@ export function ScreenPage() {
                         {browseLooks.length === 0 ? (
                           <div className="tv-browse-empty">No looks yet</div>
                         ) : (
-                          browseLooks.map((look) => (
+                          browseLooks.map((look, index) => (
                             <BrowseTile
                               key={look.id}
                               look={look}
+                              position={index + 1}
                               onOpen={(openedLook) => {
                                 setBrowseHeroError(null);
                                 setBrowseDetailLook(openedLook);
@@ -1010,6 +1024,7 @@ export function ScreenPage() {
           </div>
         )}
       </div>
+      {isDebugEnabled() ? <ScreenDebugOverlay /> : null}
     </main>
   );
 }
