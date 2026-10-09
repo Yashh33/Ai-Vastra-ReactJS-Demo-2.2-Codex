@@ -1,3 +1,4 @@
+import { debugLog } from "./debugLog";
 import { APP_ENV } from "./env";
 
 type ErrorPayload = {
@@ -15,10 +16,19 @@ export async function apiFetch<T>(
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(`${APP_ENV.apiBaseUrl}${path}`, {
-    ...init,
-    headers
-  });
+  const isUpload = init.body instanceof FormData;
+  if (isUpload) debugLog(`upload start ${path}`);
+  let response: Response;
+  try {
+    response = await fetch(`${APP_ENV.apiBaseUrl}${path}`, {
+      ...init,
+      headers
+    });
+  } catch (err) {
+    if (isUpload) debugLog("upload FAIL network");
+    throw err;
+  }
+  if (isUpload) debugLog(`upload ${response.ok ? "OK" : "FAIL"} ${response.status}`);
 
   const text = await response.text();
   let payload: unknown = null;
@@ -55,10 +65,19 @@ export async function apiFetchBinary(
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(`${APP_ENV.apiBaseUrl}${path}`, {
-    ...init,
-    headers
-  });
+  const isUpload = init.body instanceof FormData;
+  if (isUpload) debugLog(`upload start ${path}`);
+  let response: Response;
+  try {
+    response = await fetch(`${APP_ENV.apiBaseUrl}${path}`, {
+      ...init,
+      headers
+    });
+  } catch (err) {
+    if (isUpload) debugLog("upload FAIL network");
+    throw err;
+  }
+  if (isUpload) debugLog(`upload ${response.ok ? "OK" : "FAIL"} ${response.status}`);
 
   if (!response.ok) {
     const text = await response.text();

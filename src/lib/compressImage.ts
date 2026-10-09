@@ -1,3 +1,5 @@
+import { debugLog, kb } from "./debugLog";
+
 /** Shown to the user whenever a picked photo cannot be decoded. */
 export const PHOTO_READ_ERROR = "Couldn't read this photo. Try another photo or take a screenshot of it.";
 
@@ -19,6 +21,11 @@ export function isHeicFile(file: File) {
     return true;
   }
   return /\.(heic|heif)$/i.test(file.name);
+}
+
+/** iOS can hand over a HEIC with no type at all, so an untyped file gets the HEIC fallback too. */
+function mayBeHeic(file: File) {
+  return isHeicFile(file) || file.type === "";
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -81,9 +88,19 @@ async function decodeWithImage(file: Blob): Promise<Decoded> {
 
 async function decodeNatively(file: Blob): Promise<Decoded> {
   try {
-    return await decodeWithBitmap(file);
+    const decoded = await decodeWithBitmap(file);
+    debugLog("bitmap OK");
+    return decoded;
   } catch {
-    return decodeWithImage(file);
+    debugLog("bitmap FAIL");
+  }
+  try {
+    const decoded = await decodeWithImage(file);
+    debugLog("img OK");
+    return decoded;
+  } catch (err) {
+    debugLog("img FAIL");
+    throw err;
   }
 }
 
@@ -104,8 +121,16 @@ async function decodeAny(file: File): Promise<Decoded> {
   try {
     return await decodeNatively(file);
   } catch (nativeError) {
-    if (!isHeicFile(file)) throw nativeError;
-    return decodeNatively(await convertHeicToJpeg(file));
+    if (!mayBeHeic(file)) throw nativeError;
+    let converted: Blob;
+    try {
+      converted = await convertHeicToJpeg(file);
+    } catch (err) {
+      debugLog("heic2any FAIL");
+      throw err;
+    }
+    debugLog("heic2any OK");
+    return decodeNatively(converted);
   }
 }
 
@@ -162,13 +187,17 @@ export async function normalizeToJpeg(file: File, options: NormalizeOptions = {}
     if (
       options.passThroughSmallJpeg &&
       file.type === "image/jpeg" &&
+      !isHeicFile(file) &&
       decoded.width <= maxEdge &&
       decoded.height <= maxEdge &&
       file.size < PASS_THROUGH_BYTES
     ) {
+      debugLog(`compressed ${kb(file.size)} (kept as is)`);
       return file;
     }
-    return await encodeJpeg(decoded, file.name, maxEdge, options.quality ?? 0.9);
+    const jpeg = await encodeJpeg(decoded, file.name, maxEdge, options.quality ?? 0.9);
+    debugLog(`compressed ${kb(jpeg.size)}`);
+    return jpeg;
   } catch (err) {
     console.warn("normalizeToJpeg: could not convert", file.name, file.type || "(no type)", err);
     throw new Error(PHOTO_READ_ERROR);

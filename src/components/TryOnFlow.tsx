@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { compressImage, PHOTO_READ_ERROR } from "../lib/compressImage";
+import { debugLog, debugLogPicked } from "../lib/debugLog";
 import { ColorStudio } from "./ColorStudio";
 import { PhotoPickStatus } from "./PhotoPickStatus";
 
@@ -383,7 +384,10 @@ export function TryOnFlow({ onClose, onSubmit, onPushToScreen, onShowCarousel }:
                   }}
                 >
                   <button
-                    onClick={() => captureRef.current?.click()}
+                    onClick={() => {
+                      debugLog("input clicked");
+                      captureRef.current?.click();
+                    }}
                     style={{
                       minHeight: "48px",
                       background: "#1B1B2F",
@@ -399,7 +403,10 @@ export function TryOnFlow({ onClose, onSubmit, onPushToScreen, onShowCarousel }:
                     📷 Capture
                   </button>
                   <button
-                    onClick={() => galleryRef.current?.click()}
+                    onClick={() => {
+                      debugLog("input clicked");
+                      galleryRef.current?.click();
+                    }}
                     style={{
                       minHeight: "48px",
                       background: "var(--white)",
@@ -418,13 +425,14 @@ export function TryOnFlow({ onClose, onSubmit, onPushToScreen, onShowCarousel }:
                 <input
                   ref={captureRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/heic,image/heif,image/jpeg,image/png,image/webp"
                   capture="environment"
                   className="visually-hidden-input"
                   tabIndex={-1}
                   aria-hidden
                   onChange={(e) => {
                     const f = e.target.files?.[0];
+                    debugLogPicked(f);
                     e.target.value = "";
                     if (f) void handleFileSelect(f);
                   }}
@@ -432,12 +440,13 @@ export function TryOnFlow({ onClose, onSubmit, onPushToScreen, onShowCarousel }:
                 <input
                   ref={galleryRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/heic,image/heif,image/jpeg,image/png,image/webp"
                   className="visually-hidden-input"
                   tabIndex={-1}
                   aria-hidden
                   onChange={(e) => {
                     const f = e.target.files?.[0];
+                    debugLogPicked(f);
                     e.target.value = "";
                     if (f) void handleFileSelect(f);
                   }}

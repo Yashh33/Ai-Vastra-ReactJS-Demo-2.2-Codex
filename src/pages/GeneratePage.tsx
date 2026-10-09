@@ -23,6 +23,7 @@ import type {
   HeroImageRow
 } from "../lib/types";
 import { compressImage, PHOTO_READ_ERROR } from "../lib/compressImage";
+import { debugLog, debugLogPicked } from "../lib/debugLog";
 import { guessFileExtension, isPendingStatus, makeRandomSuffix } from "../lib/utils";
 
 function mapGarmentToApplyTo(garment: GarmentType): ApplyToTarget {
@@ -468,17 +469,22 @@ export function GeneratePage() {
   }
 
   function onFabricCameraChange(event: ChangeEvent<HTMLInputElement>) {
-    void handleFabricPicked(event.target.files?.[0] ?? null);
+    const file = event.target.files?.[0] ?? null;
+    debugLogPicked(file);
     event.target.value = "";
+    void handleFabricPicked(file);
   }
 
   function onFabricGalleryChange(event: ChangeEvent<HTMLInputElement>) {
-    void handleFabricPicked(event.target.files?.[0] ?? null);
+    const file = event.target.files?.[0] ?? null;
+    debugLogPicked(file);
     event.target.value = "";
+    void handleFabricPicked(file);
   }
 
   async function onHeroReplacementChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
+    debugLogPicked(file);
     event.target.value = "";
     if (!file) return;
 
@@ -771,12 +777,14 @@ export function GeneratePage() {
 
   function onMultiCameraChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
+    debugLogPicked(file);
     event.target.value = "";
     if (multiPickerSlotId) void handleMultiFabricPicked(file, multiPickerSlotId);
   }
 
   function onMultiGalleryChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
+    debugLogPicked(file);
     event.target.value = "";
     if (multiPickerSlotId) void handleMultiFabricPicked(file, multiPickerSlotId);
   }
@@ -996,7 +1004,8 @@ export function GeneratePage() {
                   <span>Replacement Hero Image</span>
                   <input
                     type="file"
-                    accept="image/*"
+                    accept="image/heic,image/heif,image/jpeg,image/png,image/webp"
+                    onClick={() => debugLog("input clicked")}
                     onChange={onHeroReplacementChange}
                     disabled={actionBusy}
                   />
@@ -1018,7 +1027,10 @@ export function GeneratePage() {
               <button
                 className="fabric-thumb-new"
                 type="button"
-                onClick={() => cameraInputRef.current?.click()}
+                onClick={() => {
+                  debugLog("input clicked");
+                  cameraInputRef.current?.click();
+                }}
                 disabled={actionBusy}
                 aria-label="Add new cloth"
                 title="Add new cloth"
@@ -1090,7 +1102,10 @@ export function GeneratePage() {
             <button
               className="btn btn-light flex-1"
               type="button"
-              onClick={() => cameraInputRef.current?.click()}
+              onClick={() => {
+                debugLog("input clicked");
+                cameraInputRef.current?.click();
+              }}
               disabled={actionBusy}
             >
               Capture
@@ -1098,7 +1113,10 @@ export function GeneratePage() {
             <button
               className="btn btn-light flex-1"
               type="button"
-              onClick={() => galleryInputRef.current?.click()}
+              onClick={() => {
+                debugLog("input clicked");
+                galleryInputRef.current?.click();
+              }}
               disabled={actionBusy}
             >
               Gallery
@@ -1239,7 +1257,7 @@ export function GeneratePage() {
           <input
             ref={cameraInputRef}
             type="file"
-            accept="image/*"
+            accept="image/heic,image/heif,image/jpeg,image/png,image/webp"
             capture="environment"
             className="visually-hidden-input"
             tabIndex={-1}
@@ -1249,7 +1267,7 @@ export function GeneratePage() {
           <input
             ref={galleryInputRef}
             type="file"
-            accept="image/*"
+            accept="image/heic,image/heif,image/jpeg,image/png,image/webp"
             className="visually-hidden-input"
             tabIndex={-1}
             aria-hidden
@@ -1634,7 +1652,7 @@ export function GeneratePage() {
         <input
           ref={multiCameraInputRef}
           type="file"
-          accept="image/*"
+          accept="image/heic,image/heif,image/jpeg,image/png,image/webp"
           capture="environment"
           className="visually-hidden-input"
           tabIndex={-1}
@@ -1644,7 +1662,7 @@ export function GeneratePage() {
         <input
           ref={multiGalleryInputRef}
           type="file"
-          accept="image/*"
+          accept="image/heic,image/heif,image/jpeg,image/png,image/webp"
           className="visually-hidden-input"
           tabIndex={-1}
           aria-hidden
@@ -1689,7 +1707,10 @@ export function GeneratePage() {
               <button
                 className="btn btn-light flex-1"
                 type="button"
-                onClick={() => multiCameraInputRef.current?.click()}
+                onClick={() => {
+                  debugLog("input clicked");
+                  multiCameraInputRef.current?.click();
+                }}
                 disabled={multiUploading || preparingPhoto === "multi"}
               >
                 Camera
@@ -1697,7 +1718,10 @@ export function GeneratePage() {
               <button
                 className="btn btn-light flex-1"
                 type="button"
-                onClick={() => multiGalleryInputRef.current?.click()}
+                onClick={() => {
+                  debugLog("input clicked");
+                  multiGalleryInputRef.current?.click();
+                }}
                 disabled={multiUploading || preparingPhoto === "multi"}
               >
                 Gallery

@@ -1,3 +1,4 @@
+import { debugLog } from "./debugLog";
 import { supabase } from "./supabase";
 
 const DEFAULT_TTL_SECONDS = 3600;
@@ -31,13 +32,16 @@ export async function uploadToStorage(
   storagePath: string,
   file: File
 ) {
+  debugLog(`upload start ${bucket} ${file.type || "(no type)"}`);
   const { error } = await supabase.storage.from(bucket).upload(storagePath, file, {
     contentType: file.type || "image/jpeg",
     upsert: false
   });
 
   if (error) {
+    debugLog(`upload FAIL ${error.message}`);
     throw new Error(error.message);
   }
+  debugLog("upload OK");
 }
 

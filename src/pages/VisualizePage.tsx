@@ -5,6 +5,7 @@ import { PhotoPickStatus } from "../components/PhotoPickStatus";
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { compressImage } from "../lib/compressImage";
+import { debugLog, debugLogPicked } from "../lib/debugLog";
 import { subscribeToGeneration } from "../lib/realtime";
 import { createSignedUrl, uploadToStorage } from "../lib/storage";
 import type {
@@ -259,12 +260,14 @@ export function VisualizePage() {
 
   function onFabricGalleryChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
+    debugLogPicked(file);
     event.target.value = "";
     void handleFabricPicked(file, pickerDraftIdRef.current);
   }
 
   function onFabricCameraChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
+    debugLogPicked(file);
     event.target.value = "";
     void handleFabricPicked(file, pickerDraftIdRef.current);
   }
@@ -274,6 +277,7 @@ export function VisualizePage() {
     // iOS only opens the picker if click() runs first thing in the tap handler,
     // so the target draft goes in a ref and the state update comes after.
     pickerDraftIdRef.current = draftId;
+    debugLog("input clicked");
     if (mode === "camera") cameraInputRef.current?.click();
     else galleryInputRef.current?.click();
     setActiveFabricDraftId(draftId);
@@ -551,7 +555,7 @@ export function VisualizePage() {
           <input
             ref={cameraInputRef}
             type="file"
-            accept="image/*"
+            accept="image/heic,image/heif,image/jpeg,image/png,image/webp"
             capture="environment"
             className="visually-hidden-input"
             tabIndex={-1}
@@ -561,7 +565,7 @@ export function VisualizePage() {
           <input
             ref={galleryInputRef}
             type="file"
-            accept="image/*"
+            accept="image/heic,image/heif,image/jpeg,image/png,image/webp"
             className="visually-hidden-input"
             tabIndex={-1}
             aria-hidden

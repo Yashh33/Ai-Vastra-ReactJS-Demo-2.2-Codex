@@ -6,6 +6,7 @@ import { PhotoPickStatus } from "../components/PhotoPickStatus";
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { compressImage, PHOTO_READ_ERROR } from "../lib/compressImage";
+import { debugLog, debugLogPicked } from "../lib/debugLog";
 import { useFabricImages, useMe } from "../lib/queries";
 import { createSignedUrl, uploadToStorage } from "../lib/storage";
 import type { FabricImageRow } from "../lib/types";
@@ -194,13 +195,17 @@ export function FabricSiloPage() {
   }
 
   function onCameraChange(event: ChangeEvent<HTMLInputElement>) {
-    void handleDraftFilePicked(event.target.files?.[0] ?? null);
+    const file = event.target.files?.[0] ?? null;
+    debugLogPicked(file);
     event.target.value = "";
+    void handleDraftFilePicked(file);
   }
 
   function onGalleryChange(event: ChangeEvent<HTMLInputElement>) {
-    void handleDraftFilePicked(event.target.files?.[0] ?? null);
+    const file = event.target.files?.[0] ?? null;
+    debugLogPicked(file);
     event.target.value = "";
+    void handleDraftFilePicked(file);
   }
 
   async function handleSaveFabric() {
@@ -316,7 +321,10 @@ export function FabricSiloPage() {
               <button
                 className="btn btn-light flex-1"
                 type="button"
-                onClick={() => cameraInputRef.current?.click()}
+                onClick={() => {
+                  debugLog("input clicked");
+                  cameraInputRef.current?.click();
+                }}
                 disabled={saving}
               >
                 Capture
@@ -324,7 +332,10 @@ export function FabricSiloPage() {
               <button
                 className="btn btn-light flex-1"
                 type="button"
-                onClick={() => galleryInputRef.current?.click()}
+                onClick={() => {
+                  debugLog("input clicked");
+                  galleryInputRef.current?.click();
+                }}
                 disabled={saving}
               >
                 Gallery
@@ -378,7 +389,7 @@ export function FabricSiloPage() {
             <input
               ref={cameraInputRef}
               type="file"
-              accept="image/*"
+              accept="image/heic,image/heif,image/jpeg,image/png,image/webp"
               capture="environment"
               className="visually-hidden-input"
               tabIndex={-1}
@@ -388,7 +399,7 @@ export function FabricSiloPage() {
             <input
               ref={galleryInputRef}
               type="file"
-              accept="image/*"
+              accept="image/heic,image/heif,image/jpeg,image/png,image/webp"
               className="visually-hidden-input"
               tabIndex={-1}
               aria-hidden
