@@ -3,8 +3,12 @@ import { debugLog, kb } from "./debugLog";
 /** Shown to the user whenever a picked photo cannot be decoded. */
 export const PHOTO_READ_ERROR = "Couldn't read this photo. Try another photo or take a screenshot of it.";
 
-// Canvases above roughly this edge start failing on iOS (memory limits), so nothing is drawn larger.
-const MAX_DECODE_EDGE = 2048;
+// Longest edge of anything uploaded. Also keeps canvases well under the iOS memory limits.
+const MAX_UPLOAD_EDGE = 1600;
+// Bigger uploads fail with "Load failed" on mobile data, so the JPEG quality steps
+// down until the result fits.
+const MAX_UPLOAD_BYTES = 600 * 1024;
+const QUALITY_STEPS = [0.82, 0.75, 0.68, 0.6];
 // A JPEG already this small is passed through by compressImage instead of being re-encoded.
 const PASS_THROUGH_BYTES = 500_000;
 // A decoder that neither succeeds nor fails (seen with HEIC on iOS) must not leave
@@ -139,8 +143,13 @@ function replaceExtensionWithJpg(filename: string) {
   return `${withoutExt || "image"}.jpg`;
 }
 
-async function encodeJpeg(decoded: Decoded, name: string, maxEdge: number, quality: number): Promise<File> {
-  const scale = Math.min(1, Math.min(maxEdge, MAX_DECODE_EDGE) / Math.max(decoded.width, decoded.height));
+function errorReason(err: unknown) {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** Resizes to `maxEdge` (never upscaling) and encodes at the first quality step that fits MAX_UPLOAD_BYTES. */
+async function encodeJpeg(decoded: Decoded, name: string, maxEdge: number): Promise<File> {
+  const scale = Math.min(1, maxEdge / Math.max(decoded.width, decoded.height));
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(decoded.width * scale));
   canvas.height = Math.max(1, Math.round(decoded.height * scale));
@@ -152,34 +161,41 @@ async function encodeJpeg(decoded: Decoded, name: string, maxEdge: number, quali
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(decoded.source, 0, 0, canvas.width, canvas.height);
 
-  const blob = await new Promise<Blob | null>((resolve) => {
-    canvas.toBlob((result) => resolve(result), "image/jpeg", quality);
-  });
-  if (!blob || blob.size === 0) throw new Error("Canvas toBlob failed");
+  let blob: Blob | null = null;
+  for (const quality of QUALITY_STEPS) {
+    blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((result) => resolve(result), "image/jpeg", quality);
+    });
+    if (!blob || blob.size === 0) throw new Error("Canvas toBlob failed");
+    if (blob.size <= MAX_UPLOAD_BYTES) break;
+  }
+  if (!blob) throw new Error("Canvas toBlob failed");
   return new File([blob], replaceExtensionWithJpg(name || "image.jpg"), { type: "image/jpeg" });
 }
 
 type NormalizeOptions = {
-  /** Longest edge of the result; never above 2048. */
+  /** Longest edge of the result; never above 1600. */
   maxEdge?: number;
-  quality?: number;
   /** Hand a small, already-JPEG file back untouched instead of re-encoding it. */
   passThroughSmallJpeg?: boolean;
 };
 
 /**
  * Turns any picked photo - JPEG, PNG, WebP, or an iPhone HEIC/HEIF - into an
- * upright JPEG File. The original file is never returned for a non-JPEG input.
+ * upright JPEG File of at most 1600px and (quality permitting) 600 KB. The
+ * original file is never returned for a non-JPEG input.
  * Tries, in order: createImageBitmap, <img>, then (HEIC only) the heic2any converter.
- * Throws an Error carrying PHOTO_READ_ERROR when nothing can read the photo.
+ * Throws an Error carrying PHOTO_READ_ERROR when nothing can read the photo; the
+ * real cause goes to the debug strip.
  */
 export async function normalizeToJpeg(file: File, options: NormalizeOptions = {}): Promise<File> {
-  const maxEdge = Math.min(options.maxEdge ?? MAX_DECODE_EDGE, MAX_DECODE_EDGE);
+  const maxEdge = Math.min(options.maxEdge ?? MAX_UPLOAD_EDGE, MAX_UPLOAD_EDGE);
   let decoded: Decoded;
   try {
     decoded = await decodeAny(file);
   } catch (err) {
     console.warn("normalizeToJpeg: could not decode", file.name, file.type || "(no type)", err);
+    debugLog(`Couldn't read this photo (decode failed: ${errorReason(err)})`);
     throw new Error(PHOTO_READ_ERROR);
   }
 
@@ -195,11 +211,12 @@ export async function normalizeToJpeg(file: File, options: NormalizeOptions = {}
       debugLog(`compressed ${kb(file.size)} (kept as is)`);
       return file;
     }
-    const jpeg = await encodeJpeg(decoded, file.name, maxEdge, options.quality ?? 0.9);
+    const jpeg = await encodeJpeg(decoded, file.name, maxEdge);
     debugLog(`compressed ${kb(jpeg.size)}`);
     return jpeg;
   } catch (err) {
     console.warn("normalizeToJpeg: could not convert", file.name, file.type || "(no type)", err);
+    debugLog(`Couldn't read this photo (convert failed: ${errorReason(err)})`);
     throw new Error(PHOTO_READ_ERROR);
   } finally {
     decoded.cleanup();
@@ -211,6 +228,6 @@ export async function normalizeToJpeg(file: File, options: NormalizeOptions = {}
  * `maxDimension` on its longest edge. This is what every photo picker calls, so
  * a picked photo is normalised and compressed in a single encode.
  */
-export function compressImage(file: File, maxDimension: number, quality = 0.8): Promise<File> {
-  return normalizeToJpeg(file, { maxEdge: maxDimension, quality, passThroughSmallJpeg: true });
+export function compressImage(file: File, maxDimension: number): Promise<File> {
+  return normalizeToJpeg(file, { maxEdge: maxDimension, passThroughSmallJpeg: true });
 }

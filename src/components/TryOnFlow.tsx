@@ -425,7 +425,7 @@ export function TryOnFlow({ onClose, onSubmit, onPushToScreen, onShowCarousel }:
                 <input
                   ref={captureRef}
                   type="file"
-                  accept="image/heic,image/heif,image/jpeg,image/png,image/webp"
+                  accept="image/*"
                   capture="environment"
                   className="visually-hidden-input"
                   tabIndex={-1}
@@ -440,7 +440,7 @@ export function TryOnFlow({ onClose, onSubmit, onPushToScreen, onShowCarousel }:
                 <input
                   ref={galleryRef}
                   type="file"
-                  accept="image/heic,image/heif,image/jpeg,image/png,image/webp"
+                  accept="image/*"
                   className="visually-hidden-input"
                   tabIndex={-1}
                   aria-hidden

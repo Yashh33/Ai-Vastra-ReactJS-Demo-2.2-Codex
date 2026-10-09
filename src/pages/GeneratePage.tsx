@@ -751,12 +751,15 @@ export function GeneratePage() {
         ? multiSelections[colourTarget.slotId]?.pendingFile ?? null
         : null;
 
-  function handleFabricColourSaved(blob: Blob) {
+  async function handleFabricColourSaved(blob: Blob) {
     const target = colourTarget;
     if (!target || !colourSourceFile) return;
 
     // Same name, now a JPEG; this replaces the picked photo before any upload happens.
-    const corrected = new File([blob], colourSourceFile.name || "fabric.jpg", { type: "image/jpeg" });
+    const corrected = await compressImage(
+      new File([blob], colourSourceFile.name || "fabric.jpg", { type: "image/jpeg" }),
+      1600
+    );
     const previewUrl = URL.createObjectURL(corrected);
     if (target.kind === "single") {
       setFabricFile(corrected);
@@ -1004,7 +1007,7 @@ export function GeneratePage() {
                   <span>Replacement Hero Image</span>
                   <input
                     type="file"
-                    accept="image/heic,image/heif,image/jpeg,image/png,image/webp"
+                    accept="image/*"
                     onClick={() => debugLog("input clicked")}
                     onChange={onHeroReplacementChange}
                     disabled={actionBusy}
@@ -1257,7 +1260,7 @@ export function GeneratePage() {
           <input
             ref={cameraInputRef}
             type="file"
-            accept="image/heic,image/heif,image/jpeg,image/png,image/webp"
+            accept="image/*"
             capture="environment"
             className="visually-hidden-input"
             tabIndex={-1}
@@ -1267,7 +1270,7 @@ export function GeneratePage() {
           <input
             ref={galleryInputRef}
             type="file"
-            accept="image/heic,image/heif,image/jpeg,image/png,image/webp"
+            accept="image/*"
             className="visually-hidden-input"
             tabIndex={-1}
             aria-hidden
@@ -1652,7 +1655,7 @@ export function GeneratePage() {
         <input
           ref={multiCameraInputRef}
           type="file"
-          accept="image/heic,image/heif,image/jpeg,image/png,image/webp"
+          accept="image/*"
           capture="environment"
           className="visually-hidden-input"
           tabIndex={-1}
@@ -1662,7 +1665,7 @@ export function GeneratePage() {
         <input
           ref={multiGalleryInputRef}
           type="file"
-          accept="image/heic,image/heif,image/jpeg,image/png,image/webp"
+          accept="image/*"
           className="visually-hidden-input"
           tabIndex={-1}
           aria-hidden

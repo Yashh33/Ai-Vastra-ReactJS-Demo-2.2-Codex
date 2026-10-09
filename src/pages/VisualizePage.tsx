@@ -555,7 +555,7 @@ export function VisualizePage() {
           <input
             ref={cameraInputRef}
             type="file"
-            accept="image/heic,image/heif,image/jpeg,image/png,image/webp"
+            accept="image/*"
             capture="environment"
             className="visually-hidden-input"
             tabIndex={-1}
@@ -565,7 +565,7 @@ export function VisualizePage() {
           <input
             ref={galleryInputRef}
             type="file"
-            accept="image/heic,image/heif,image/jpeg,image/png,image/webp"
+            accept="image/*"
             className="visually-hidden-input"
             tabIndex={-1}
             aria-hidden
