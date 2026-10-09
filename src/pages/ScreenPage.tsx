@@ -6,7 +6,7 @@ import { ScreenDebugOverlay } from "../components/ScreenDebugOverlay";
 import { SignedImage } from "../components/SignedImage";
 import { debugResetTiles, isDebugEnabled } from "../lib/debugLog";
 import { supabase } from "../lib/supabase";
-import { lookThumbnailPathFor, preloadSignedImages } from "../lib/storage";
+import { preloadSignedImages } from "../lib/storage";
 import { useCarouselSlides } from "../lib/useCarouselSlides";
 import {
   subscribeToShopGenerations,
@@ -73,7 +73,7 @@ function useStageSize() {
   return size;
 }
 
-// Grid tiles show the small thumbnail; a look without one falls back to its full image.
+// The TV grid shows each look's full image: no thumbnails here (the phone app grid uses them).
 function BrowseTile({
   look,
   position,
@@ -88,9 +88,9 @@ function BrowseTile({
     <button type="button" className="tv-browse-tile" tabIndex={0} onClick={() => onOpen(look)}>
       <SignedImage
         bucket={OUTPUT_BUCKET}
-        path={lookThumbnailPathFor(look.output_path)}
-        fallbackPath={look.output_path}
+        path={look.output_path}
         alt="Look"
+        timeoutMs={FULL_IMAGE_TIMEOUT_MS}
         // Old Android WebViews can mis-handle lazy loading inside a scroll container.
         eager
         debugLabel={String(position)}

@@ -53,7 +53,7 @@ function SignedImageInner({
 
   useEffect(() => {
     if (!debug) return;
-    debugLog(`${debug} thumb START`);
+    debugLog(`${debug} image START`);
     debugTileState(debug, "loading");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -66,7 +66,7 @@ function SignedImageInner({
   function report(ok: boolean, detail = "", final = false) {
     if (!debug || stage === "failed") return;
     const ms = `${Math.round(performance.now() - stageStartedAtRef.current)}ms`;
-    const name = stage === "primary" ? "thumb" : stage === "primary-retry" ? "retry" : "fallback FULL";
+    const name = stage === "primary" ? "image" : stage === "primary-retry" ? "retry" : "fallback FULL";
     debugLog(`${debug} ${name} ${ok ? "OK" : "FAIL"} ${ms}${detail ? ` ${detail}` : ""}`);
     if (ok) debugTileState(debug, stage === "fallback" ? "fallback" : "loaded");
     else if (final) debugTileState(debug, "failed");
