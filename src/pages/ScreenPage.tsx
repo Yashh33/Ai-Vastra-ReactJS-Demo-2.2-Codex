@@ -25,6 +25,8 @@ import {
 
 const SIGNED_URL_TTL_SECONDS = 6 * 60 * 60;
 const OUTPUT_BUCKET = "generated-outputs";
+// Full-size looks get longer than a thumbnail before a load counts as stuck.
+const FULL_IMAGE_TIMEOUT_MS = 30000;
 const CAROUSEL_LIMIT = 30;
 const CAROUSEL_INTERVAL_MS = 6000;
 const POLL_INTERVAL_MS = 5000;
@@ -89,6 +91,8 @@ function BrowseTile({
         path={lookThumbnailPathFor(look.output_path)}
         fallbackPath={look.output_path}
         alt="Look"
+        // Old Android WebViews can mis-handle lazy loading inside a scroll container.
+        eager
         debugLabel={String(position)}
       />
       {look.is_hero ? (
@@ -832,7 +836,13 @@ export function ScreenPage() {
                 </div>
               ) : screenState === "live" && livePath ? (
                 <div className="tv-media">
-                  <SignedImage bucket={OUTPUT_BUCKET} path={livePath} alt="Your generated look" eager />
+                  <SignedImage
+                    bucket={OUTPUT_BUCKET}
+                    path={livePath}
+                    alt="Your generated look"
+                    eager
+                    timeoutMs={FULL_IMAGE_TIMEOUT_MS}
+                  />
                   {liveHasBanner ? <div className="tv-banner">Looks good on you! 😍</div> : null}
                 </div>
               ) : screenState === "carousel" && carouselSlide ? (
@@ -885,6 +895,7 @@ export function ScreenPage() {
                           path={browseDetailLook.output_path}
                           alt="Look detail"
                           eager
+                          timeoutMs={FULL_IMAGE_TIMEOUT_MS}
                         />
                         {browseDetailLook.is_hero ? (
                           <span className="tv-browse-hero-badge tv-browse-hero-badge-lg" aria-label="Hero look">

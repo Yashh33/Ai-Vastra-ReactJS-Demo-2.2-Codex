@@ -5,7 +5,10 @@ import { BrowserRouter } from "react-router-dom";
 
 import { AppRouter } from "./router";
 import { AuthProvider } from "./lib/auth";
+import { setUpServiceWorker } from "./lib/serviceWorker";
 import "./styles.css";
+
+setUpServiceWorker();
 
 const queryClient = new QueryClient({
   defaultOptions: {

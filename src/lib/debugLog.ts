@@ -101,14 +101,21 @@ export function getDebugTileSummary() {
   );
 }
 
-/** " 123KB" for an image the browser has just loaded, or "" when the size is not exposed. */
-export function debugImageSize(url: string) {
+/**
+ * What the browser exposes about an image it has just loaded: "123KB", "via SW"
+ * (the request went through a service worker), both, or "" when neither is known.
+ */
+export function debugImageInfo(url: string) {
   if (!enabled) return "";
   try {
     const entries = performance.getEntriesByName(url);
     const entry = entries[entries.length - 1] as PerformanceResourceTiming | undefined;
-    const bytes = entry ? entry.transferSize || entry.encodedBodySize : 0;
-    return bytes > 0 ? ` ${kb(bytes)}` : "";
+    if (!entry) return "";
+    const bytes = entry.transferSize || entry.encodedBodySize;
+    const parts: string[] = [];
+    if (bytes > 0) parts.push(kb(bytes));
+    if (entry.workerStart > 0) parts.push("via SW");
+    return parts.join(" ");
   } catch {
     return "";
   }

@@ -23,6 +23,8 @@ import { supabase } from "../lib/supabase";
 // The one exception is "Try on customer", whose result can be pushed to the TV on request.
 
 const OUTPUT_BUCKET = "generated-outputs";
+// Full-size looks get longer than a thumbnail before a load counts as stuck.
+const FULL_IMAGE_TIMEOUT_MS = 30000;
 const DESCRIPTION_MAX_LENGTH = 300;
 
 function sortBrowseLooks(rows: BrowseLookRow[]): BrowseLookRow[] {
@@ -413,7 +415,13 @@ export function BrowsePage() {
             </button>
           ) : null}
           <div className="mt-browse-detail-frame">
-            <SignedImage bucket={OUTPUT_BUCKET} path={detailLook.output_path} alt="Look detail" eager />
+            <SignedImage
+              bucket={OUTPUT_BUCKET}
+              path={detailLook.output_path}
+              alt="Look detail"
+              eager
+              timeoutMs={FULL_IMAGE_TIMEOUT_MS}
+            />
             {detailLook.is_hero ? (
               <span className="mt-browse-hero-badge mt-browse-hero-badge-lg" aria-label="Hero look">
                 ★

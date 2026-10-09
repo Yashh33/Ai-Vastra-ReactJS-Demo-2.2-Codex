@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 
-import { debugImageSize, debugLog, debugTileState, isDebugEnabled } from "../lib/debugLog";
+import { debugImageInfo, debugLog, debugTileState, isDebugEnabled } from "../lib/debugLog";
 import { getCachedSignedUrl, signUrlsBatch } from "../lib/storage";
 
 type Bucket = Parameters<typeof signUrlsBatch>[0];
@@ -14,6 +14,8 @@ type Props = {
   className?: string;
   /** Load straight away instead of when the image nears the viewport. */
   eager?: boolean;
+  /** How long a load may take before it counts as failed. Give full-size images more than the default. */
+  timeoutMs?: number;
   /** Names this image (a grid tile number) in the ?debug=1 diagnostics. No effect otherwise. */
   debugLabel?: string;
 };
@@ -21,13 +23,28 @@ type Props = {
 // primary -> primary re-signed (in case the URL expired) -> fallback -> placeholder
 type Stage = "primary" | "primary-retry" | "fallback" | "failed";
 
+// Some old WebViews leave an image request hanging with neither onLoad nor onError.
+const DEFAULT_TIMEOUT_MS = 8000;
+// The fallback is the full-size image, which legitimately takes longer on a slow connection.
+const FULL_IMAGE_TIMEOUT_MS = 30000;
+
 // Kept in the layout while loading: a lazy image that is display:none never starts loading.
 const LOADING_STYLE: CSSProperties = { position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" };
 
-function SignedImageInner({ bucket, path, fallbackPath, alt, className, eager, debugLabel }: Props) {
+function SignedImageInner({
+  bucket,
+  path,
+  fallbackPath,
+  alt,
+  className,
+  eager,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  debugLabel
+}: Props) {
   const [stage, setStage] = useState<Stage>("primary");
   const [url, setUrl] = useState<string | null>(() => getCachedSignedUrl(bucket, path));
   const [loaded, setLoaded] = useState(false);
+  const imageRef = useRef<HTMLImageElement | null>(null);
 
   // ?debug=1 diagnostics only; `debug` is null in normal use and nothing below it runs.
   const debug = debugLabel && isDebugEnabled() ? debugLabel : null;
@@ -59,7 +76,7 @@ function SignedImageInner({ bucket, path, fallbackPath, alt, className, eager, d
     // The ref callback and onLoad can both see the same image; report it once.
     if (reportedUrlRef.current !== loadedUrl) {
       reportedUrlRef.current = loadedUrl;
-      report(true, debugImageSize(loadedUrl).trim());
+      report(true, debugImageInfo(loadedUrl));
     }
     setLoaded(true);
   }
@@ -103,14 +120,47 @@ function SignedImageInner({ bucket, path, fallbackPath, alt, className, eager, d
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage, bucket, path, fallbackPath]);
 
-  function handleError() {
+  function handleFailure(reason: string) {
     const next: Stage =
       stage === "primary" ? "primary-retry" : stage === "primary-retry" && fallbackPath ? "fallback" : "failed";
-    report(false, "image load error", next === "failed");
+    report(false, reason, next === "failed");
     setUrl(null);
     setLoaded(false);
     setStage(next);
   }
+
+  // Load timeout. A lazy image only starts loading near the viewport, so its clock
+  // starts when it scrolls into view rather than when it is mounted.
+  useEffect(() => {
+    if (!url || loaded || stage === "failed") return;
+    const limit = stage === "fallback" ? Math.max(timeoutMs, FULL_IMAGE_TIMEOUT_MS) : timeoutMs;
+    let timer: number | undefined;
+    let observer: IntersectionObserver | undefined;
+
+    function startClock() {
+      if (timer === undefined) timer = window.setTimeout(() => handleFailure("TIMEOUT"), limit);
+    }
+
+    const image = imageRef.current;
+    if (eager) {
+      startClock();
+    } else if (image && typeof IntersectionObserver === "function") {
+      observer = new IntersectionObserver((entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          startClock();
+          observer?.disconnect();
+        }
+      });
+      observer.observe(image);
+    }
+
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      observer?.disconnect();
+    };
+    // handleFailure reads only `stage` and `fallbackPath`, which are covered below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url, loaded, stage, eager, timeoutMs, fallbackPath]);
 
   if (stage === "failed") {
     return <span className="signed-image-placeholder" role="img" aria-label={alt} />;
@@ -123,6 +173,7 @@ function SignedImageInner({ bucket, path, fallbackPath, alt, className, eager, d
         <img
           key={url}
           ref={(element) => {
+            imageRef.current = element;
             // An image served from the browser cache can be complete before onLoad is attached.
             if (element?.complete && element.naturalWidth > 0) markLoaded(url);
           }}
@@ -130,9 +181,10 @@ function SignedImageInner({ bucket, path, fallbackPath, alt, className, eager, d
           src={url}
           alt={alt}
           loading={eager ? "eager" : "lazy"}
+          decoding="async"
           style={loaded ? undefined : LOADING_STYLE}
           onLoad={() => markLoaded(url)}
-          onError={handleError}
+          onError={() => handleFailure("image load error")}
         />
       ) : null}
     </>
