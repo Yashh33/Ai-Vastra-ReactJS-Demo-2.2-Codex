@@ -7,12 +7,15 @@ import { PhotoPickStatus } from "./PhotoPickStatus";
 
 type Props = {
   onClose: () => void;
-  onSubmit: (customerPhotoFile: File) => Promise<string>;
+  /** Runs the try-on and returns a URL for the result image. */
+  onSubmit?: (customerPhotoFile: File) => Promise<string>;
+  /** Alternative to onSubmit: the caller picks the endpoint and hands back the result image. */
+  submitTryOn?: (photo: File, consent: boolean) => Promise<Blob>;
   onPushToScreen?: (resultBlob: Blob) => Promise<void>;
   onShowCarousel?: () => Promise<void>;
 };
 
-export function TryOnFlow({ onClose, onSubmit, onPushToScreen, onShowCarousel }: Props) {
+export function TryOnFlow({ onClose, onSubmit, submitTryOn, onPushToScreen, onShowCarousel }: Props) {
   const [customerPhoto, setCustomerPhoto] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
@@ -72,8 +75,12 @@ export function TryOnFlow({ onClose, onSubmit, onPushToScreen, onShowCarousel }:
     setBusy(true);
     setError(null);
     try {
-      const url = await onSubmit(customerPhoto);
-      setResultUrl(url);
+      if (submitTryOn) {
+        // This flow only opens after the consent step, so consent is always given here.
+        setResultUrl(URL.createObjectURL(await submitTryOn(customerPhoto, true)));
+      } else if (onSubmit) {
+        setResultUrl(await onSubmit(customerPhoto));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {

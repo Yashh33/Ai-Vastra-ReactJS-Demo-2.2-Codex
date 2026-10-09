@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
 import { ColorStudio } from "../components/ColorStudio";
+import { CustomerConsentModal } from "../components/CustomerConsentModal";
 import { LookDetails } from "../components/LookDetails";
-import { apiFetch } from "../lib/api";
+import { TryOnFlow } from "../components/TryOnFlow";
+import { apiFetch, apiFetchBinary } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { restoreOriginalColor, saveColorCorrected } from "../lib/colorStudio/saveCorrected";
 import { useMe } from "../lib/queries";
@@ -16,7 +18,8 @@ import { createSignedUrl } from "../lib/storage";
 import { supabase } from "../lib/supabase";
 
 // Mirrors the TV's browse mode (ScreenPage) using the same shared queries, but is driven by
-// local state only: it never reads or writes shop_screen_state, so it can't change the TV.
+// local state only: browsing never reads or writes shop_screen_state, so it can't change the TV.
+// The one exception is "Try on customer", whose result can be pushed to the TV on request.
 
 const SIGNED_URL_TTL_SECONDS = 6 * 60 * 60;
 const DESCRIPTION_MAX_LENGTH = 300;
@@ -99,6 +102,8 @@ export function BrowsePage() {
   const [restoring, setRestoring] = useState(false);
   const [colourNote, setColourNote] = useState<string | null>(null);
   const [colourError, setColourError] = useState<string | null>(null);
+  const [tryOnConsentOpen, setTryOnConsentOpen] = useState(false);
+  const [tryOnOpen, setTryOnOpen] = useState(false);
 
   const urlMapRef = useRef<Map<string, string>>(new Map());
 
@@ -163,6 +168,8 @@ export function BrowsePage() {
     function handleKeyDown(event: KeyboardEvent) {
       // The Match colour modal sits on top and owns the keyboard (its sliders use the arrows).
       if (colourStudioOpen) return;
+      // Same for the customer try-on, which covers the whole screen.
+      if (tryOnConsentOpen || tryOnOpen) return;
       // While the details form is open the arrow keys belong to its inputs.
       if (editingDetails) {
         if (event.key === "Escape" && !detailsSaving) cancelEditDetails();
@@ -179,7 +186,7 @@ export function BrowsePage() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [detailLook, looks, editingDetails, detailsSaving, colourStudioOpen]);
+  }, [detailLook, looks, editingDetails, detailsSaving, colourStudioOpen, tryOnConsentOpen, tryOnOpen]);
 
   function cancelEditDetails() {
     setEditingDetails(false);
@@ -274,6 +281,31 @@ export function BrowsePage() {
     } finally {
       setRestoring(false);
     }
+  }
+
+  // The customer photo goes straight to the try-on endpoint and is never stored.
+  function submitLookTryOn(look: BrowseLookRow, photo: File, consent: boolean) {
+    if (!accessToken) throw new Error("Not authenticated");
+    const formData = new FormData();
+    formData.set("generation_id", look.id);
+    formData.set("consent_confirmed", consent ? "true" : "false");
+    formData.set("customer_photo", photo);
+    return apiFetchBinary("/tryon/v2", accessToken, { method: "POST", body: formData });
+  }
+
+  async function pushTryOnToScreen(look: BrowseLookRow, blob: Blob) {
+    if (!accessToken) throw new Error("Not authenticated");
+    const formData = new FormData();
+    formData.set("result_image", blob, "tryon.jpg");
+    formData.set("folder_id", look.folder_id);
+    formData.set("source_generation_id", look.id);
+    await apiFetch("/tryon/push-to-screen", accessToken, { method: "POST", body: formData });
+  }
+
+  async function showCarouselOnTv() {
+    if (!shopId) return;
+    const { error } = await supabase.rpc("set_screen_mode", { p_shop_id: shopId, p_mode: "catalog" });
+    if (error) throw new Error(error.message);
   }
 
   async function navigateDetail(direction: 1 | -1) {
@@ -477,6 +509,9 @@ export function BrowsePage() {
           ) : (
             <>
               <LookDetails barcode={detailLook.barcode} mrp={detailLook.mrp} description={detailLook.description} />
+              <button type="button" className="mt-browse-tryon-btn" onClick={() => setTryOnConsentOpen(true)}>
+                👤 Try on customer
+              </button>
               <div className="mt-browse-detail-actions">
                 <button type="button" className="mt-browse-edit-btn" onClick={() => startEditDetails(detailLook)}>
                   Edit details
@@ -525,6 +560,23 @@ export function BrowsePage() {
             defaultSegment
             onSave={(blob) => handleColourSaved(detailLook, blob)}
             onClose={() => setColourStudioOpen(false)}
+          />
+        ) : null}
+        {tryOnConsentOpen ? (
+          <CustomerConsentModal
+            onConsent={() => {
+              setTryOnConsentOpen(false);
+              setTryOnOpen(true);
+            }}
+            onCancel={() => setTryOnConsentOpen(false)}
+          />
+        ) : null}
+        {tryOnOpen ? (
+          <TryOnFlow
+            onClose={() => setTryOnOpen(false)}
+            submitTryOn={(photo, consent) => submitLookTryOn(detailLook, photo, consent)}
+            onPushToScreen={(blob) => pushTryOnToScreen(detailLook, blob)}
+            onShowCarousel={showCarouselOnTv}
           />
         ) : null}
       </div>
@@ -785,6 +837,20 @@ export function BrowsePage() {
         }
         .mt-browse-edit-btn:hover,
         .mt-browse-edit-cancel:hover { background: #EFEDE8; }
+        .mt-browse-tryon-btn {
+          width: 100%;
+          min-height: 52px;
+          font: inherit;
+          font-size: clamp(1rem, 1.5vw, 1.2rem);
+          font-weight: 700;
+          color: var(--gold);
+          background: var(--navy);
+          border: none;
+          border-radius: 14px;
+          padding: 10px 22px;
+          cursor: pointer;
+        }
+        .mt-browse-tryon-btn:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
         .mt-browse-edit-save { background: var(--gold); border-color: var(--gold); }
         .mt-browse-edit-btn:focus-visible,
         .mt-browse-edit-save:focus-visible,
