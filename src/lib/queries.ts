@@ -26,7 +26,11 @@ export function useGarmentTypes() {
   return useQuery({
     queryKey: ["garment-types"],
     queryFn: () => apiFetch<GarmentType[]>("/garment-types", accessToken as string, { method: "GET" }),
-    enabled: !!accessToken
+    enabled: !!accessToken,
+    // The rows carry signed hero URLs that expire; keep them fresh on a screen left open.
+    refetchInterval: 40 * 60 * 1000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true
   });
 }
 

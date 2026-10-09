@@ -28,6 +28,8 @@ export type GarmentType = {
   prompt_template: string;
   default_hero_image_id: string | null;
   hero_image_signed_url: string | null;
+  /** Small display version of the hero; absent when the backend could not provide one. */
+  hero_thumb_signed_url?: string | null;
   fabric_slots?: GarmentFabricSlot[];
 };
 

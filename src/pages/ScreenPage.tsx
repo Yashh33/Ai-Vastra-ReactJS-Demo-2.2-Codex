@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { LookDetails } from "../components/LookDetails";
+import { SignedImage } from "../components/SignedImage";
 import { supabase } from "../lib/supabase";
-import { createSignedUrl } from "../lib/storage";
+import { lookThumbnailPathFor, preloadSignedImages } from "../lib/storage";
+import { useCarouselSlides } from "../lib/useCarouselSlides";
 import {
   subscribeToShopGenerations,
   subscribeToShopScreenState,
@@ -20,15 +22,11 @@ import {
 } from "../lib/screenData";
 
 const SIGNED_URL_TTL_SECONDS = 6 * 60 * 60;
+const OUTPUT_BUCKET = "generated-outputs";
 const CAROUSEL_LIMIT = 30;
 const CAROUSEL_INTERVAL_MS = 6000;
 const POLL_INTERVAL_MS = 5000;
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-type CarouselItem = {
-  id: string;
-  url: string;
-};
 
 type ScreenMode = "idle" | "catalog" | "live" | "browse";
 
@@ -71,46 +69,16 @@ function useStageSize() {
   return size;
 }
 
-function BrowseTile({
-  look,
-  urlMapRef,
-  onOpen
-}: {
-  look: BrowseLookRow;
-  urlMapRef: { current: Map<string, string> };
-  onOpen: (look: BrowseLookRow, url: string) => void;
-}) {
-  const [url, setUrl] = useState<string | null>(() => urlMapRef.current.get(look.id) ?? null);
-
-  useEffect(() => {
-    if (url) return;
-    let cancelled = false;
-
-    async function sign() {
-      try {
-        const signedUrl = await createSignedUrl("generated-outputs", look.output_path, SIGNED_URL_TTL_SECONDS);
-        urlMapRef.current.set(look.id, signedUrl);
-        if (!cancelled) setUrl(signedUrl);
-      } catch (err) {
-        console.error("ScreenPage: failed to sign browse tile", look.id, err);
-      }
-    }
-
-    void sign();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [look.id, look.output_path, url, urlMapRef]);
-
+// Grid tiles show the small thumbnail; a look without one falls back to its full image.
+function BrowseTile({ look, onOpen }: { look: BrowseLookRow; onOpen: (look: BrowseLookRow) => void }) {
   return (
-    <button
-      type="button"
-      className="tv-browse-tile"
-      tabIndex={0}
-      onClick={() => url && onOpen(look, url)}
-    >
-      {url ? <img src={url} alt="Look" /> : <div className="tv-browse-tile-placeholder" />}
+    <button type="button" className="tv-browse-tile" tabIndex={0} onClick={() => onOpen(look)}>
+      <SignedImage
+        bucket={OUTPUT_BUCKET}
+        path={lookThumbnailPathFor(look.output_path)}
+        fallbackPath={look.output_path}
+        alt="Look"
+      />
       {look.is_hero ? (
         <span className="tv-browse-hero-badge" aria-label="Hero look">
           ★
@@ -126,17 +94,14 @@ export function ScreenPage() {
 
   const [screenState, setScreenState] = useState<ScreenState>("loading");
   const [mode, setMode] = useState<ScreenMode | null>(null);
-  const [liveUrl, setLiveUrl] = useState<string | null>(null);
+  const [livePath, setLivePath] = useState<string | null>(null);
   const [liveHasBanner, setLiveHasBanner] = useState(false);
   const [carouselRows, setCarouselRows] = useState<CarouselRow[]>([]);
-  const [carouselIndex, setCarouselIndex] = useState(0);
-  const [currentCarouselImage, setCurrentCarouselImage] = useState<CarouselItem | null>(null);
   const [resolvedShopId, setResolvedShopId] = useState<string | null>(null);
   const [browseGarmentTypes, setBrowseGarmentTypes] = useState<BrowseGarmentType[]>([]);
   const [browseSelectedGarmentTypeId, setBrowseSelectedGarmentTypeId] = useState<string | null>(null);
   const [browseLooks, setBrowseLooks] = useState<BrowseLookRow[]>([]);
   const [browseDetailLook, setBrowseDetailLook] = useState<BrowseLookRow | null>(null);
-  const [browseDetailUrl, setBrowseDetailUrl] = useState<string | null>(null);
   const [browseHeroPending, setBrowseHeroPending] = useState(false);
   const [browseHeroError, setBrowseHeroError] = useState<string | null>(null);
   const [browseRefreshKey, setBrowseRefreshKey] = useState(0);
@@ -145,11 +110,16 @@ export function ScreenPage() {
 
   const liveGenerationIdRef = useRef<string | null>(null);
   const liveIsRealRef = useRef(false);
-  const carouselUrlMapRef = useRef<Map<string, string>>(new Map());
   const carouselRowsRef = useRef<CarouselRow[]>([]);
-  const browseUrlMapRef = useRef<Map<string, string>>(new Map());
   const appliedModeRef = useRef<ScreenMode | null>(null);
   const loadInitialRef = useRef<(() => Promise<void>) | null>(null);
+
+  const carouselSlide = useCarouselSlides(
+    carouselRows,
+    mode === "catalog",
+    CAROUSEL_INTERVAL_MS,
+    SIGNED_URL_TTL_SECONDS
+  );
 
   useEffect(() => {
     if (!shopId) return;
@@ -191,21 +161,19 @@ export function ScreenPage() {
 
     liveGenerationIdRef.current = null;
     liveIsRealRef.current = false;
-    carouselUrlMapRef.current = new Map();
     carouselRowsRef.current = [];
-    browseUrlMapRef.current = new Map();
     appliedModeRef.current = null;
 
     function clearLiveTracking() {
       if (liveGenerationIdRef.current !== null) {
         liveGenerationIdRef.current = null;
         liveIsRealRef.current = false;
-        setLiveUrl(null);
+        setLivePath(null);
         setLiveHasBanner(false);
       }
     }
 
-    async function activateLiveFallback() {
+    function activateLiveFallback() {
       const newest = carouselRowsRef.current[0];
 
       if (!newest) {
@@ -216,22 +184,9 @@ export function ScreenPage() {
 
       if (liveGenerationIdRef.current === newest.id && !liveIsRealRef.current) return;
 
-      let url = carouselUrlMapRef.current.get(newest.id);
-      if (!url) {
-        try {
-          url = await createSignedUrl("generated-outputs", newest.output_path, SIGNED_URL_TTL_SECONDS);
-          carouselUrlMapRef.current.set(newest.id, url);
-        } catch (err) {
-          console.error("ScreenPage: failed to sign fallback live image", newest.id, err);
-          return;
-        }
-      }
-
-      if (cancelled) return;
-
       liveGenerationIdRef.current = newest.id;
       liveIsRealRef.current = false;
-      setLiveUrl(url);
+      setLivePath(newest.output_path);
       setLiveHasBanner(false);
       setScreenState("live");
     }
@@ -248,21 +203,15 @@ export function ScreenPage() {
       if (cancelled) return;
 
       if (!genRow?.output_path) {
-        await activateLiveFallback();
+        activateLiveFallback();
         return;
       }
 
-      try {
-        const url = await createSignedUrl("generated-outputs", genRow.output_path, SIGNED_URL_TTL_SECONDS);
-        if (cancelled) return;
-        liveGenerationIdRef.current = generationId;
-        liveIsRealRef.current = true;
-        setLiveUrl(url);
-        setLiveHasBanner(true);
-        setScreenState("live");
-      } catch (err) {
-        console.error("ScreenPage: failed to sign live generation URL", err);
-      }
+      liveGenerationIdRef.current = generationId;
+      liveIsRealRef.current = true;
+      setLivePath(genRow.output_path);
+      setLiveHasBanner(true);
+      setScreenState("live");
     }
 
     function applyState(rawMode: string | null | undefined, liveGenId: string | null) {
@@ -285,7 +234,7 @@ export function ScreenPage() {
         if (liveGenId) {
           void activateLive(liveGenId);
         } else {
-          void activateLiveFallback();
+          activateLiveFallback();
         }
         return;
       }
@@ -293,28 +242,20 @@ export function ScreenPage() {
       if (normalizedMode === "browse") {
         if (modeChanged) {
           setBrowseDetailLook(null);
-          setBrowseDetailUrl(null);
           setBrowseHeroError(null);
         }
         setScreenState("browse");
         return;
       }
 
-      if (modeChanged) {
-        setCarouselIndex(0);
-        setScreenState("loading");
-      }
+      // Catalog: the carousel restarts from the first look and takes over once its image has loaded.
+      if (modeChanged) setScreenState("loading");
     }
 
     async function loadInitial() {
       const rows: CarouselRow[] = await fetchCarouselLooks(supabase, shopId, CAROUSEL_LIMIT);
 
       if (cancelled) return;
-
-      const currentIds = new Set(rows.map((row) => row.id));
-      for (const id of Array.from(carouselUrlMapRef.current.keys())) {
-        if (!currentIds.has(id)) carouselUrlMapRef.current.delete(id);
-      }
 
       carouselRowsRef.current = rows;
       setCarouselRows((prev) => (carouselRowsEqual(prev, rows) ? prev : rows));
@@ -363,73 +304,8 @@ export function ScreenPage() {
   }, [resolvedShopId]);
 
   useEffect(() => {
-    if (mode !== "catalog") return;
-
-    if (!carouselRows.length) {
-      setCurrentCarouselImage(null);
-      return;
-    }
-
-    let cancelled = false;
-    let skipTimer: number | undefined;
-    const length = carouselRows.length;
-    const idx = ((carouselIndex % length) + length) % length;
-    const row = carouselRows[idx];
-    if (!row) return;
-
-    async function showFrame() {
-      if (!row) return;
-      let resolvedUrl = carouselUrlMapRef.current.get(row.id);
-
-      if (!resolvedUrl) {
-        try {
-          resolvedUrl = await createSignedUrl("generated-outputs", row.output_path, SIGNED_URL_TTL_SECONDS);
-          carouselUrlMapRef.current.set(row.id, resolvedUrl);
-        } catch (err) {
-          console.error("ScreenPage: failed to sign carousel item", row.id, err);
-          if (!cancelled) {
-            // Don't let one bad frame hold the screen for a full interval — hop past it quickly.
-            skipTimer = window.setTimeout(() => {
-              setCarouselIndex((prev) => (prev + 1) % length);
-            }, 1500);
-          }
-          return;
-        }
-      }
-
-      if (cancelled) return;
-
-      const url = resolvedUrl;
-      const rowId = row.id;
-      setCurrentCarouselImage((prev) => (prev && prev.id === rowId && prev.url === url ? prev : { id: rowId, url }));
-      setScreenState("carousel");
-
-      const nextRow = carouselRows[(idx + 1) % length];
-      if (nextRow && nextRow.id !== row.id && !carouselUrlMapRef.current.has(nextRow.id)) {
-        try {
-          const nextUrl = await createSignedUrl("generated-outputs", nextRow.output_path, SIGNED_URL_TTL_SECONDS);
-          if (!cancelled) carouselUrlMapRef.current.set(nextRow.id, nextUrl);
-        } catch (err) {
-          console.error("ScreenPage: failed to prefetch carousel item", nextRow.id, err);
-        }
-      }
-    }
-
-    void showFrame();
-
-    return () => {
-      cancelled = true;
-      if (skipTimer !== undefined) window.clearTimeout(skipTimer);
-    };
-  }, [mode, carouselRows, carouselIndex]);
-
-  useEffect(() => {
-    if (mode !== "catalog" || carouselRows.length <= 1) return;
-    const timer = window.setInterval(() => {
-      setCarouselIndex((prev) => (prev + 1) % carouselRows.length);
-    }, CAROUSEL_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [mode, carouselRows.length]);
+    if (mode === "catalog" && carouselSlide) setScreenState("carousel");
+  }, [mode, carouselSlide]);
 
   useEffect(() => {
     if (mode !== "browse" || !resolvedShopId) return;
@@ -499,9 +375,9 @@ export function ScreenPage() {
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "ArrowRight") {
-        void navigateBrowseDetail(1);
+        navigateBrowseDetail(1);
       } else if (event.key === "ArrowLeft") {
-        void navigateBrowseDetail(-1);
+        navigateBrowseDetail(-1);
       }
     }
 
@@ -509,7 +385,20 @@ export function ScreenPage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [browseDetailLook, browseLooks]);
 
-  async function navigateBrowseDetail(direction: 1 | -1) {
+  // The arrows flip to the neighbouring looks, so have their full images ready.
+  useEffect(() => {
+    if (!browseDetailLook || browseLooks.length <= 1) return;
+    const index = browseLooks.findIndex((look) => look.id === browseDetailLook.id);
+    if (index === -1) return;
+    const neighbours = [
+      browseLooks[(index + 1) % browseLooks.length],
+      browseLooks[(index - 1 + browseLooks.length) % browseLooks.length]
+    ];
+    const paths = neighbours.flatMap((look) => (look && look.id !== browseDetailLook.id ? [look.output_path] : []));
+    void preloadSignedImages(OUTPUT_BUCKET, paths);
+  }, [browseDetailLook?.id, browseLooks]);
+
+  function navigateBrowseDetail(direction: 1 | -1) {
     if (!browseDetailLook || browseLooks.length <= 1) return;
 
     const currentIndex = browseLooks.findIndex((look) => look.id === browseDetailLook.id);
@@ -519,20 +408,8 @@ export function ScreenPage() {
     const nextLook = browseLooks[nextIndex];
     if (!nextLook) return;
 
-    let url = browseUrlMapRef.current.get(nextLook.id);
-    if (!url) {
-      try {
-        url = await createSignedUrl("generated-outputs", nextLook.output_path, SIGNED_URL_TTL_SECONDS);
-        browseUrlMapRef.current.set(nextLook.id, url);
-      } catch (err) {
-        console.error("ScreenPage: failed to sign browse detail navigation image", nextLook.id, err);
-        return;
-      }
-    }
-
     setBrowseHeroError(null);
     setBrowseDetailLook(nextLook);
-    setBrowseDetailUrl(url);
   }
 
   async function toggleHero(look: BrowseLookRow) {
@@ -787,7 +664,6 @@ export function ScreenPage() {
           background: var(--card);
         }
         .tv-browse-tile img { width: 100%; height: 100%; object-fit: cover; display: block; animation: tv-fade-in 0.4s ease; }
-        .tv-browse-tile-placeholder { width: 100%; height: 100%; background: linear-gradient(135deg, var(--page), #EFEDE8); }
         .tv-browse-tile:hover { outline: 3px solid var(--gold); outline-offset: -3px; }
         .tv-browse-tile:focus-visible { outline: 4px solid var(--gold); outline-offset: -4px; }
 
@@ -859,6 +735,14 @@ export function ScreenPage() {
         /* Side padding keeps the details card clear of the mode FAB in the bottom-right corner. */
         .tv-browse-detail-info { flex-shrink: 0; padding: 0 clamp(76px, 12vw, 130px) clamp(16px, 3vw, 32px); }
         .tv-browse-detail-media img { max-width: 92%; max-height: 92%; object-fit: contain; animation: tv-fade-in 0.4s ease; border-radius: 8px; }
+        /* Holds the space at roughly a look's shape until the full image arrives. */
+        .tv-browse-detail-media .signed-image-skeleton,
+        .tv-browse-detail-media .signed-image-placeholder {
+          width: auto;
+          height: 92%;
+          aspect-ratio: 3 / 4;
+          border-radius: 8px;
+        }
         .tv-browse-nav-btn {
           position: absolute;
           top: 50%;
@@ -933,18 +817,18 @@ export function ScreenPage() {
                     </button>
                   </div>
                 </div>
-              ) : screenState === "live" && liveUrl ? (
+              ) : screenState === "live" && livePath ? (
                 <div className="tv-media">
-                  <img key={liveUrl} src={liveUrl} alt="Your generated look" />
+                  <SignedImage bucket={OUTPUT_BUCKET} path={livePath} alt="Your generated look" eager />
                   {liveHasBanner ? <div className="tv-banner">Looks good on you! 😍</div> : null}
                 </div>
-              ) : screenState === "carousel" && currentCarouselImage ? (
+              ) : screenState === "carousel" && carouselSlide ? (
                 <div className="tv-media">
-                  <img key={currentCarouselImage.id} src={currentCarouselImage.url} alt="Approved look" />
+                  <img key={carouselSlide.id} src={carouselSlide.url} alt="Approved look" />
                 </div>
               ) : screenState === "browse" ? (
                 <div className="tv-browse">
-                  {browseDetailLook && browseDetailUrl ? (
+                  {browseDetailLook ? (
                     <div className="tv-browse-detail">
                       <div className="tv-browse-detail-header">
                         <button
@@ -953,7 +837,6 @@ export function ScreenPage() {
                           tabIndex={0}
                           onClick={() => {
                             setBrowseDetailLook(null);
-                            setBrowseDetailUrl(null);
                             setBrowseHeroError(null);
                           }}
                         >
@@ -979,12 +862,17 @@ export function ScreenPage() {
                             className="tv-browse-nav-btn tv-browse-nav-prev"
                             tabIndex={0}
                             aria-label="Previous look"
-                            onClick={() => void navigateBrowseDetail(-1)}
+                            onClick={() => navigateBrowseDetail(-1)}
                           >
                             ‹
                           </button>
                         ) : null}
-                        <img src={browseDetailUrl} alt="Look detail" />
+                        <SignedImage
+                          bucket={OUTPUT_BUCKET}
+                          path={browseDetailLook.output_path}
+                          alt="Look detail"
+                          eager
+                        />
                         {browseDetailLook.is_hero ? (
                           <span className="tv-browse-hero-badge tv-browse-hero-badge-lg" aria-label="Hero look">
                             ★
@@ -996,7 +884,7 @@ export function ScreenPage() {
                             className="tv-browse-nav-btn tv-browse-nav-next"
                             tabIndex={0}
                             aria-label="Next look"
-                            onClick={() => void navigateBrowseDetail(1)}
+                            onClick={() => navigateBrowseDetail(1)}
                           >
                             ›
                           </button>
@@ -1040,11 +928,9 @@ export function ScreenPage() {
                             <BrowseTile
                               key={look.id}
                               look={look}
-                              urlMapRef={browseUrlMapRef}
-                              onOpen={(openedLook, url) => {
+                              onOpen={(openedLook) => {
                                 setBrowseHeroError(null);
                                 setBrowseDetailLook(openedLook);
-                                setBrowseDetailUrl(url);
                               }}
                             />
                           ))

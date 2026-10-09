@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useMe } from "../lib/queries";
 import { fetchCarouselLooks, type CarouselRow } from "../lib/screenData";
-import { createSignedUrl } from "../lib/storage";
 import { supabase } from "../lib/supabase";
+import { useCarouselSlides } from "../lib/useCarouselSlides";
 
 // Mirrors the TV's catalog carousel (ScreenPage) using the same shared query, limit and
 // interval, but with local state only: it never reads or writes shop_screen_state.
@@ -12,11 +12,6 @@ const SIGNED_URL_TTL_SECONDS = 6 * 60 * 60;
 const CAROUSEL_LIMIT = 30;
 const CAROUSEL_INTERVAL_MS = 6000;
 const POLL_INTERVAL_MS = 5000;
-
-type CarouselItem = {
-  id: string;
-  url: string;
-};
 
 function carouselRowsEqual(a: CarouselRow[], b: CarouselRow[]) {
   if (a === b) return true;
@@ -30,10 +25,7 @@ export function CarouselPage() {
 
   const [rows, setRows] = useState<CarouselRow[]>([]);
   const [rowsLoaded, setRowsLoaded] = useState(false);
-  const [index, setIndex] = useState(0);
-  const [currentImage, setCurrentImage] = useState<CarouselItem | null>(null);
-
-  const urlMapRef = useRef<Map<string, string>>(new Map());
+  const slide = useCarouselSlides(rows, true, CAROUSEL_INTERVAL_MS, SIGNED_URL_TTL_SECONDS);
 
   useEffect(() => {
     if (!shopId) return;
@@ -44,11 +36,6 @@ export function CarouselPage() {
       try {
         const nextRows = await fetchCarouselLooks(supabase, currentShopId, CAROUSEL_LIMIT);
         if (cancelled) return;
-
-        const currentIds = new Set(nextRows.map((row) => row.id));
-        for (const id of Array.from(urlMapRef.current.keys())) {
-          if (!currentIds.has(id)) urlMapRef.current.delete(id);
-        }
 
         setRows((prev) => (carouselRowsEqual(prev, nextRows) ? prev : nextRows));
       } catch (err) {
@@ -69,74 +56,6 @@ export function CarouselPage() {
     };
   }, [shopId]);
 
-  useEffect(() => {
-    if (!rows.length) {
-      setCurrentImage(null);
-      return;
-    }
-
-    let cancelled = false;
-    let skipTimer: number | undefined;
-    const length = rows.length;
-    const idx = ((index % length) + length) % length;
-    const row = rows[idx];
-    if (!row) return;
-
-    async function showFrame() {
-      if (!row) return;
-      let resolvedUrl = urlMapRef.current.get(row.id);
-
-      if (!resolvedUrl) {
-        try {
-          resolvedUrl = await createSignedUrl("generated-outputs", row.output_path, SIGNED_URL_TTL_SECONDS);
-          urlMapRef.current.set(row.id, resolvedUrl);
-        } catch (err) {
-          console.error("CarouselPage: failed to sign carousel item", row.id, err);
-          if (!cancelled) {
-            // Don't let one bad frame hold the screen for a full interval — hop past it quickly.
-            skipTimer = window.setTimeout(() => {
-              setIndex((prev) => (prev + 1) % length);
-            }, 1500);
-          }
-          return;
-        }
-      }
-
-      if (cancelled) return;
-
-      const url = resolvedUrl;
-      const rowId = row.id;
-      setCurrentImage((prev) => (prev && prev.id === rowId && prev.url === url ? prev : { id: rowId, url }));
-
-      const nextRow = rows[(idx + 1) % length];
-      if (nextRow && nextRow.id !== row.id && !urlMapRef.current.has(nextRow.id)) {
-        try {
-          const nextUrl = await createSignedUrl("generated-outputs", nextRow.output_path, SIGNED_URL_TTL_SECONDS);
-          if (!cancelled) urlMapRef.current.set(nextRow.id, nextUrl);
-        } catch (err) {
-          console.error("CarouselPage: failed to prefetch carousel item", nextRow.id, err);
-        }
-      }
-    }
-
-    void showFrame();
-
-    return () => {
-      cancelled = true;
-      if (skipTimer !== undefined) window.clearTimeout(skipTimer);
-    };
-  }, [rows, index]);
-
-  useEffect(() => {
-    if (rows.length <= 1) return;
-    const timer = window.setInterval(() => {
-      setIndex((prev) => (prev + 1) % rows.length);
-    }, CAROUSEL_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [rows.length]);
-
-  const position = rows.length ? (((index % rows.length) + rows.length) % rows.length) + 1 : 0;
-
   let body: JSX.Element;
   if (meLoading || (shopId && !rowsLoaded)) {
     body = <div className="spinner" aria-label="Loading" />;
@@ -152,13 +71,13 @@ export function CarouselPage() {
         <span>No looks yet</span>
       </div>
     );
-  } else if (currentImage) {
+  } else if (slide) {
     body = (
       <>
-        <img key={currentImage.id} className="mt-carousel-image" src={currentImage.url} alt="Approved look" />
+        <img key={slide.id} className="mt-carousel-image" src={slide.url} alt="Approved look" />
         {rows.length > 1 ? (
           <span className="mt-carousel-counter">
-            {position} / {rows.length}
+            {slide.index + 1} / {rows.length}
           </span>
         ) : null}
       </>

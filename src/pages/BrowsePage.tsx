@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { ColorStudio } from "../components/ColorStudio";
 import { CustomerConsentModal } from "../components/CustomerConsentModal";
 import { LookDetails } from "../components/LookDetails";
+import { SignedImage } from "../components/SignedImage";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -14,14 +15,14 @@ import {
   type BrowseGarmentType,
   type BrowseLookRow
 } from "../lib/screenData";
-import { createSignedUrl } from "../lib/storage";
+import { lookThumbnailPathFor, preloadSignedImages, signUrlsBatch } from "../lib/storage";
 import { supabase } from "../lib/supabase";
 
 // Mirrors the TV's browse mode (ScreenPage) using the same shared queries, but is driven by
 // local state only: browsing never reads or writes shop_screen_state, so it can't change the TV.
 // The one exception is "Try on customer", whose result can be pushed to the TV on request.
 
-const SIGNED_URL_TTL_SECONDS = 6 * 60 * 60;
+const OUTPUT_BUCKET = "generated-outputs";
 const DESCRIPTION_MAX_LENGTH = 300;
 
 function sortBrowseLooks(rows: BrowseLookRow[]): BrowseLookRow[] {
@@ -31,41 +32,16 @@ function sortBrowseLooks(rows: BrowseLookRow[]): BrowseLookRow[] {
   });
 }
 
-function BrowseTile({
-  look,
-  urlMapRef,
-  onOpen
-}: {
-  look: BrowseLookRow;
-  urlMapRef: { current: Map<string, string> };
-  onOpen: (look: BrowseLookRow, url: string) => void;
-}) {
-  const [url, setUrl] = useState<string | null>(() => urlMapRef.current.get(look.id) ?? null);
-
-  useEffect(() => {
-    if (url) return;
-    let cancelled = false;
-
-    async function sign() {
-      try {
-        const signedUrl = await createSignedUrl("generated-outputs", look.output_path, SIGNED_URL_TTL_SECONDS);
-        urlMapRef.current.set(look.id, signedUrl);
-        if (!cancelled) setUrl(signedUrl);
-      } catch (err) {
-        console.error("BrowsePage: failed to sign browse tile", look.id, err);
-      }
-    }
-
-    void sign();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [look.id, look.output_path, url, urlMapRef]);
-
+// Grid tiles show the small thumbnail; a look without one falls back to its full image.
+function BrowseTile({ look, onOpen }: { look: BrowseLookRow; onOpen: (look: BrowseLookRow) => void }) {
   return (
-    <button type="button" className="mt-browse-tile" onClick={() => url && onOpen(look, url)}>
-      {url ? <img src={url} alt="Look" /> : <div className="mt-browse-tile-placeholder" />}
+    <button type="button" className="mt-browse-tile" onClick={() => onOpen(look)}>
+      <SignedImage
+        bucket={OUTPUT_BUCKET}
+        path={lookThumbnailPathFor(look.output_path)}
+        fallbackPath={look.output_path}
+        alt="Look"
+      />
       {look.is_hero ? (
         <span className="mt-browse-hero-badge" aria-label="Hero look">
           ★
@@ -87,7 +63,6 @@ export function BrowsePage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [detailLook, setDetailLook] = useState<BrowseLookRow | null>(null);
-  const [detailUrl, setDetailUrl] = useState<string | null>(null);
   const [heroPending, setHeroPending] = useState(false);
   const [heroError, setHeroError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -99,13 +74,12 @@ export function BrowsePage() {
   const [detailsSaving, setDetailsSaving] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [colourStudioOpen, setColourStudioOpen] = useState(false);
+  const [colourSourceUrl, setColourSourceUrl] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [colourNote, setColourNote] = useState<string | null>(null);
   const [colourError, setColourError] = useState<string | null>(null);
   const [tryOnConsentOpen, setTryOnConsentOpen] = useState(false);
   const [tryOnOpen, setTryOnOpen] = useState(false);
-
-  const urlMapRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     if (!shopId) return;
@@ -176,9 +150,9 @@ export function BrowsePage() {
         return;
       }
       if (event.key === "ArrowRight") {
-        void navigateDetail(1);
+        navigateDetail(1);
       } else if (event.key === "ArrowLeft") {
-        void navigateDetail(-1);
+        navigateDetail(-1);
       } else if (event.key === "Escape") {
         closeDetail();
       }
@@ -187,6 +161,16 @@ export function BrowsePage() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [detailLook, looks, editingDetails, detailsSaving, colourStudioOpen, tryOnConsentOpen, tryOnOpen]);
+
+  // The arrows flip to the neighbouring looks, so have their full images ready.
+  useEffect(() => {
+    if (!detailLook || looks.length <= 1) return;
+    const index = looks.findIndex((look) => look.id === detailLook.id);
+    if (index === -1) return;
+    const neighbours = [looks[(index + 1) % looks.length], looks[(index - 1 + looks.length) % looks.length]];
+    const paths = neighbours.flatMap((look) => (look && look.id !== detailLook.id ? [look.output_path] : []));
+    void preloadSignedImages(OUTPUT_BUCKET, paths);
+  }, [detailLook?.id, looks]);
 
   function cancelEditDetails() {
     setEditingDetails(false);
@@ -241,7 +225,6 @@ export function BrowsePage() {
 
   function closeDetail() {
     setDetailLook(null);
-    setDetailUrl(null);
     setHeroError(null);
     setDeleteError(null);
     clearColourMessages();
@@ -249,18 +232,30 @@ export function BrowsePage() {
   }
 
   // Points the detail view and the grid tile at a look's new image.
-  async function applyNewOutputPath(lookId: string, outputPath: string) {
-    const url = await createSignedUrl("generated-outputs", outputPath, SIGNED_URL_TTL_SECONDS);
-    urlMapRef.current.set(lookId, url);
+  function applyNewOutputPath(lookId: string, outputPath: string) {
     setLooks((prev) => prev.map((row) => (row.id === lookId ? { ...row, output_path: outputPath } : row)));
     setDetailLook((prev) => (prev && prev.id === lookId ? { ...prev, output_path: outputPath } : prev));
-    if (detailLook?.id === lookId) setDetailUrl(url);
+  }
+
+  // Match colour edits the full image, read through a freshly checked signed URL.
+  async function openColourStudio(look: BrowseLookRow) {
+    clearColourMessages();
+    try {
+      const urls = await signUrlsBatch(OUTPUT_BUCKET, [look.output_path]);
+      const url = urls[look.output_path];
+      if (!url) throw new Error("Couldn't load this look. Try again.");
+      setColourSourceUrl(url);
+      setColourStudioOpen(true);
+    } catch (err) {
+      console.error("BrowsePage: failed to sign look for Match colour", look.id, err);
+      setColourError(err instanceof Error ? err.message : "Couldn't load this look. Try again.");
+    }
   }
 
   async function handleColourSaved(look: BrowseLookRow, blob: Blob) {
     if (!accessToken) throw new Error("Not authenticated");
     const saved = await saveColorCorrected(accessToken, look.id, blob);
-    await applyNewOutputPath(look.id, saved.output_path);
+    applyNewOutputPath(look.id, saved.output_path);
     setColourError(null);
     setColourNote("Colour updated");
     setColourStudioOpen(false);
@@ -273,7 +268,7 @@ export function BrowsePage() {
     try {
       if (!accessToken) throw new Error("Not authenticated");
       const restored = await restoreOriginalColor(accessToken, look.id);
-      await applyNewOutputPath(look.id, restored.output_path);
+      applyNewOutputPath(look.id, restored.output_path);
       setColourNote("Original restored");
     } catch (err) {
       console.error("BrowsePage: failed to restore original", look.id, err);
@@ -308,7 +303,7 @@ export function BrowsePage() {
     if (error) throw new Error(error.message);
   }
 
-  async function navigateDetail(direction: 1 | -1) {
+  function navigateDetail(direction: 1 | -1) {
     if (!detailLook || looks.length <= 1) return;
 
     const currentIndex = looks.findIndex((look) => look.id === detailLook.id);
@@ -318,23 +313,11 @@ export function BrowsePage() {
     const nextLook = looks[nextIndex];
     if (!nextLook) return;
 
-    let url = urlMapRef.current.get(nextLook.id);
-    if (!url) {
-      try {
-        url = await createSignedUrl("generated-outputs", nextLook.output_path, SIGNED_URL_TTL_SECONDS);
-        urlMapRef.current.set(nextLook.id, url);
-      } catch (err) {
-        console.error("BrowsePage: failed to sign detail navigation image", nextLook.id, err);
-        return;
-      }
-    }
-
     setHeroError(null);
     setDeleteError(null);
     clearColourMessages();
     cancelEditDetails();
     setDetailLook(nextLook);
-    setDetailUrl(url);
   }
 
   async function deleteLook(look: BrowseLookRow) {
@@ -349,7 +332,6 @@ export function BrowsePage() {
     try {
       if (!accessToken) throw new Error("Not authenticated");
       await apiFetch(`/generations/${look.id}`, accessToken, { method: "DELETE" });
-      urlMapRef.current.delete(look.id);
       const remaining = looks.filter((row) => row.id !== look.id);
       setLooks(remaining);
       closeDetail();
@@ -402,7 +384,7 @@ export function BrowsePage() {
     );
   } else if (meError || !shopId) {
     body = <div className="mt-browse-center mt-browse-empty">Couldn't load your shop. Please try again.</div>;
-  } else if (detailLook && detailUrl) {
+  } else if (detailLook) {
     body = (
       <div className="mt-browse-detail">
         <div className="mt-browse-detail-header">
@@ -425,13 +407,13 @@ export function BrowsePage() {
               type="button"
               className="mt-browse-nav-btn mt-browse-nav-prev"
               aria-label="Previous look"
-              onClick={() => void navigateDetail(-1)}
+              onClick={() => navigateDetail(-1)}
             >
               ‹
             </button>
           ) : null}
           <div className="mt-browse-detail-frame">
-            <img src={detailUrl} alt="Look detail" />
+            <SignedImage bucket={OUTPUT_BUCKET} path={detailLook.output_path} alt="Look detail" eager />
             {detailLook.is_hero ? (
               <span className="mt-browse-hero-badge mt-browse-hero-badge-lg" aria-label="Hero look">
                 ★
@@ -443,7 +425,7 @@ export function BrowsePage() {
               type="button"
               className="mt-browse-nav-btn mt-browse-nav-next"
               aria-label="Next look"
-              onClick={() => void navigateDetail(1)}
+              onClick={() => navigateDetail(1)}
             >
               ›
             </button>
@@ -519,10 +501,7 @@ export function BrowsePage() {
                 <button
                   type="button"
                   className="mt-browse-edit-btn"
-                  onClick={() => {
-                    clearColourMessages();
-                    setColourStudioOpen(true);
-                  }}
+                  onClick={() => void openColourStudio(detailLook)}
                 >
                   🎨 Match colour
                 </button>
@@ -551,9 +530,9 @@ export function BrowsePage() {
             {deleting ? "Deleting…" : "Delete look"}
           </button>
         </div>
-        {colourStudioOpen ? (
+        {colourStudioOpen && colourSourceUrl ? (
           <ColorStudio
-            source={detailUrl}
+            source={colourSourceUrl}
             generationId={detailLook.id}
             garmentTypeName={garmentTypes.find((garmentType) => garmentType.id === selectedGarmentTypeId)?.name}
             allowSegment
@@ -621,13 +600,11 @@ export function BrowsePage() {
                 // A corrected / restored look gets a new output_path; remount to pick up its new URL.
                 key={`${look.id}:${look.output_path}`}
                 look={look}
-                urlMapRef={urlMapRef}
-                onOpen={(openedLook, url) => {
+                onOpen={(openedLook) => {
                   setHeroError(null);
                   clearColourMessages();
                   cancelEditDetails();
                   setDetailLook(openedLook);
-                  setDetailUrl(url);
                 }}
               />
             ))
@@ -725,7 +702,6 @@ export function BrowsePage() {
           background: var(--card);
         }
         .mt-browse-tile img { width: 100%; height: 100%; object-fit: cover; display: block; animation: mt-browse-fade-in 0.4s ease; }
-        .mt-browse-tile-placeholder { width: 100%; height: 100%; background: linear-gradient(135deg, var(--page), #EFEDE8); }
         .mt-browse-tile:hover { outline: 3px solid var(--gold); outline-offset: -3px; }
         .mt-browse-tile:focus-visible { outline: 4px solid var(--gold); outline-offset: -4px; }
 
@@ -809,6 +785,14 @@ export function BrowsePage() {
           max-height: calc(100svh - 310px);
           object-fit: contain;
           animation: mt-browse-fade-in 0.4s ease;
+          border-radius: 8px;
+        }
+        /* Holds the frame open at roughly a look's shape until the full image arrives. */
+        .mt-browse-detail-frame .signed-image-skeleton,
+        .mt-browse-detail-frame .signed-image-placeholder {
+          width: min(72vw, calc((100svh - 310px) * 0.75));
+          height: auto;
+          aspect-ratio: 3 / 4;
           border-radius: 8px;
         }
         .mt-browse-detail-info {

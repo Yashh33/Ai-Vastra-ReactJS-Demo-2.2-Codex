@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { ColorStudio } from "../components/ColorStudio";
 import { CustomerConsentModal } from "../components/CustomerConsentModal";
+import { HeroPreviewImage } from "../components/HeroPreviewImage";
 import { PhotoPickStatus } from "../components/PhotoPickStatus";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
@@ -164,8 +165,12 @@ export function GeneratePage() {
     sortedFabricSlots.every((slot) => isSlotFilled(multiSelections[slot.id]));
 
   const selectedFabricImageId = existingFabricImage?.id ?? "";
+  // Display only: the small hero thumbnail when there is one, else the full hero image.
   const selectedHeroPreviewUrl =
-    heroReplacementPreviewUrl || selectedGarment?.hero_image_signed_url || null;
+    heroReplacementPreviewUrl ||
+    selectedGarment?.hero_thumb_signed_url ||
+    selectedGarment?.hero_image_signed_url ||
+    null;
 
   const fabricReady = !!fabricFile || !!existingFabricImage?.id;
   const heroReady = !!heroReplacementFile || !!selectedGarment?.default_hero_image_id;
@@ -986,23 +991,28 @@ export function GeneratePage() {
 
           {selectedGarment ? (
             <>
-              <div className="model-preview-box">
-                {selectedHeroPreviewUrl ? (
-                  <img className="model-preview-img" src={selectedHeroPreviewUrl} alt={`${selectedGarment.name} hero`} />
-                ) : (
-                  <div className="model-preview-placeholder">No hero preview available</div>
-                )}
-                <button
-                  className="model-change-btn"
-                  type="button"
-                  onClick={() => setHeroChangeOpen((prev) => !prev)}
-                  disabled={actionBusy}
-                >
-                  Change
-                </button>
-              </div>
+              {selectedHeroPreviewUrl ? (
+                <div className="model-preview-box">
+                  <HeroPreviewImage
+                    key={selectedGarment.id}
+                    thumbUrl={heroReplacementPreviewUrl || selectedGarment.hero_thumb_signed_url}
+                    fullUrl={heroReplacementPreviewUrl ? null : selectedGarment.hero_image_signed_url}
+                    alt={`${selectedGarment.name} hero`}
+                    onUrlsExpired={() => void queryClient.invalidateQueries({ queryKey: ["garment-types"] })}
+                  />
+                  <button
+                    className="model-change-btn"
+                    type="button"
+                    onClick={() => setHeroChangeOpen((prev) => !prev)}
+                    disabled={actionBusy}
+                  >
+                    Change
+                  </button>
+                </div>
+              ) : null}
 
-              {heroChangeOpen ? (
+              {/* A garment with no hero goes straight to the upload prompt instead of an empty box. */}
+              {heroChangeOpen || !selectedHeroPreviewUrl ? (
                 <label className="field">
                   <span>Replacement Hero Image</span>
                   <input

@@ -351,6 +351,8 @@ h2 { font-size: 1rem; font-weight: 700; }
   display: block;
 }
 
+.model-preview-skeleton { height: 200px; }
+
 .model-preview-placeholder {
   min-height: 160px;
   display: flex;
@@ -661,6 +663,24 @@ h2 { font-size: 1rem; font-weight: 700; }
 }
 
 .spinner-small { width: 18px; height: 18px; border-width: 2px; }
+
+/* Shown while an image loads (skeleton) and when it cannot be loaded at all (placeholder). */
+.signed-image-skeleton,
+.signed-image-placeholder {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #F5F4F1, #EFEDE8);
+}
+.signed-image-skeleton {
+  background: linear-gradient(100deg, #EFEDE8 30%, #F8F7F4 50%, #EFEDE8 70%);
+  background-size: 200% 100%;
+  animation: signed-image-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes signed-image-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
 
 /* File inputs opened from a button. Kept in the layout (not display:none / hidden) because
    iOS Safari can ignore click() and change events on inputs that are not rendered. */
