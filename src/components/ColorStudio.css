@@ -1,20 +1,26 @@
-/* ColorStudio - "Match colour" modal (MyTryonAi light theme).
-   Full-screen on phones, a centred 520px sheet on larger screens. */
+/* ColorStudio - "Match colour" editor (MyTryonAi light theme).
+   One screen, no page scroll: header, Fix row, pinned image, 5 vertical
+   sliders, footer. Full-screen on phones; a centred 480px sheet on larger screens. */
 .cs-modal {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100vh;
+  height: 100dvh;
   z-index: 200;
   display: flex;
   justify-content: center;
   background: var(--mt-page);
   color: var(--mt-navy);
+  overscroll-behavior: contain;
 }
 
 .cs-sheet {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 520px;
+  max-width: 480px;
   min-width: 0;
   height: 100%;
   background: var(--mt-page);
@@ -28,8 +34,7 @@
   }
 
   .cs-sheet {
-    height: auto;
-    max-height: 100%;
+    height: min(100%, 860px);
     border-radius: 18px;
     overflow: hidden;
     box-shadow: 0 18px 50px rgba(0, 0, 0, 0.3);
@@ -42,7 +47,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 8px;
+  padding: 4px 8px;
   background: var(--mt-card);
   border-bottom: 1px solid var(--mt-border);
 }
@@ -56,7 +61,6 @@
   padding: 0 8px;
   border: none;
   background: transparent;
-  color: #1b1b2f;
   color: var(--mt-navy);
   font-family: inherit;
   font-size: 16px;
@@ -85,13 +89,13 @@
 .cs-body {
   flex: 1;
   min-height: 0;
+  /* Everything fits on a phone; scrolling is only a fallback for very short (landscape) screens. */
   overflow-x: hidden;
   overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 12px;
+  gap: 8px;
+  padding: 8px 12px;
 }
 
 .cs-body > * {
@@ -99,23 +103,17 @@
   min-width: 0;
 }
 
-.cs-title {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 700;
-}
-
 .cs-footer {
   flex-shrink: 0;
   display: flex;
   gap: 8px;
-  padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
   background: var(--mt-card);
   border-top: 1px solid var(--mt-border);
 }
 
 .cs-footer .btn-secondary {
-  min-height: 50px;
+  min-height: 48px;
   padding: 0 18px;
   white-space: nowrap;
 }
@@ -124,18 +122,149 @@
   flex: 1;
   width: auto;
   min-width: 0;
-  min-height: 50px;
+  min-height: 48px;
 }
 
-/* Image. The grey stage spans the full width; the box inside gets its exact
-   pixel size from JS (image aspect ratio, "contain" within the stage), so the
-   photo can never be stretched or squeezed. */
-.cs-stage {
+/* Fix: Whole image / One part */
+.cs-scope {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cs-scope-label {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.cs-chip {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--mt-navy);
+  border-radius: 999px;
+  background: var(--mt-card);
+  color: var(--mt-navy);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.cs-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cs-chip.is-active {
+  background: var(--mt-navy);
+  color: var(--mt-gold);
+}
+
+.cs-chip:disabled,
+.cs-chip.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* The real <select> covers the chip invisibly, so a tap opens the phone's own list. */
+.cs-chip-select select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  border: none;
+  /* 16px stops iOS Safari zooming the page when the select is focused. */
+  font-size: 16px;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.cs-chip-select select:disabled {
+  cursor: not-allowed;
+}
+
+/* Not right? + Add / − Remove / Select again / Clear */
+.cs-fix {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.cs-fix::-webkit-scrollbar {
+  display: none;
+}
+
+.cs-fix-label {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mt-muted);
+}
+
+.cs-fix-btn {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1.5px solid var(--mt-border);
+  border-radius: 10px;
+  background: var(--mt-card);
+  color: var(--mt-navy);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cs-fix-btn.is-add {
+  color: #17743d;
+}
+
+.cs-fix-btn.is-remove {
+  color: #b3261e;
+}
+
+.cs-fix-btn.is-add.is-active {
+  background: #1e9e52;
+  border-color: #1e9e52;
+  color: #fff;
+}
+
+.cs-fix-btn.is-remove.is-active {
+  background: #d23b30;
+  border-color: #d23b30;
+  color: #fff;
+}
+
+.cs-fix-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Image. The stage takes the height left over; the box inside gets its exact
+   pixel size from JS ("contain" within the stage), so the photo is never
+   cropped, stretched or squeezed. */
+.cs-body > .cs-stage {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 140px;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
-  min-height: 120px;
   border-radius: 14px;
   background: #e9e7e2;
   overflow: hidden;
@@ -145,6 +274,7 @@
   position: relative;
   flex: none;
   max-width: 100%;
+  max-height: 100%;
 }
 
 .cs-canvas {
@@ -193,6 +323,61 @@
   pointer-events: none;
 }
 
+/* Press and hold: shows the original while held. */
+.cs-compare {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--gold-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--mt-navy);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.cs-compare:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.cs-notice {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.cs-notice.is-info {
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--mt-navy);
+}
+
+.cs-notice.is-warn {
+  border: 1px solid var(--gold-border);
+  background: var(--gold-light);
+  color: var(--gold-muted);
+}
+
+.cs-notice.is-error {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
 .cs-finding {
   position: absolute;
   inset: 0;
@@ -213,346 +398,53 @@
   background: #e9e7e2;
 }
 
-/* Step 1 */
-.cs-scope {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-.cs-scope-btn {
-  min-width: 0;
-  min-height: 54px;
-  padding: 0 8px;
-  border: 1.5px solid #1b1b2f;
-  border: 1.5px solid var(--mt-navy);
-  border-radius: 14px;
-  background: #fff;
-  color: #1b1b2f;
-  color: var(--mt-navy);
-  font-family: inherit;
-  font-size: 15px;
-  font-weight: 700;
-  cursor: pointer;
-  -webkit-appearance: none;
-  appearance: none;
-}
-
-.cs-scope-btn.is-active {
-  background: #1b1b2f;
-  background: var(--mt-navy);
-  color: #c9a84c;
-  color: var(--mt-gold);
-}
-
-.cs-scope-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* Part picker: one native <select>, so phones show their own full-screen wheel / list. */
-.cs-part {
-  display: grid;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.cs-part select {
-  width: 100%;
-  min-width: 0;
-  min-height: 52px;
-  padding: 0 40px 0 14px;
-  border: 1.5px solid #1b1b2f;
-  border: 1.5px solid var(--mt-navy);
-  border-radius: 14px;
-  background-color: #fff;
-  /* Chevron drawn in CSS, since appearance:none removes the native arrow. */
-  background-image: linear-gradient(45deg, transparent 50%, #1b1b2f 50%),
-    linear-gradient(135deg, #1b1b2f 50%, transparent 50%);
-  background-position: calc(100% - 21px) 50%, calc(100% - 15px) 50%;
-  background-size: 6px 6px, 6px 6px;
-  background-repeat: no-repeat;
-  color: #1b1b2f;
-  color: var(--mt-navy);
-  font-family: inherit;
-  /* 16px stops iOS Safari zooming the page when the select is focused. */
-  font-size: 16px;
-  font-weight: 700;
-  cursor: pointer;
-  -webkit-appearance: none;
-  appearance: none;
-}
-
-.cs-part select:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
+/* Sliders panel: a set height, so the image keeps the rest. */
 .cs-panel {
-  display: grid;
-  gap: 10px;
-  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: clamp(176px, 30dvh, 230px);
+  padding: 8px 6px;
   background: var(--mt-card);
   border: 1px solid var(--mt-border);
   border-radius: 14px;
 }
 
-.cs-fix {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.cs-fix-label {
-  margin-right: auto;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.cs-fix-btn {
-  min-height: 40px;
-  padding: 0 14px;
-  border: 1.5px solid var(--mt-border);
-  border-radius: 10px;
-  background: #fff;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.cs-fix-btn.is-add {
-  color: #17743d;
-}
-
-.cs-fix-btn.is-remove {
-  color: #b3261e;
-}
-
-.cs-fix-btn.is-add.is-active {
-  background: #1e9e52;
-  border-color: #1e9e52;
-  color: #fff;
-}
-
-.cs-fix-btn.is-remove.is-active {
-  background: #d23b30;
-  border-color: #d23b30;
-  color: #fff;
-}
-
-.cs-fix-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.cs-fix-action {
+.cs-sliders {
   flex: 1;
-  min-height: 40px;
-  padding: 0 10px;
-  font-size: 13px;
-}
-
-.cs-hint {
-  font-size: 12px;
-  color: var(--mt-muted);
-}
-
-.cs-warning {
-  padding: 10px 12px;
-  border: 1px solid var(--gold-border);
-  border-radius: 12px;
-  background: var(--gold-light);
-  color: var(--gold-muted);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-/* Step 2 */
-.cs-compare {
-  width: 100%;
-  touch-action: none;
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-touch-callout: none;
-}
-
-.cs-more {
-  justify-self: start;
-  min-height: 36px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--mt-navy);
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.cs-link {
-  align-self: center;
-  min-height: 36px;
-  padding: 0 8px;
-  border: none;
-  background: transparent;
-  color: var(--mt-navy);
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  text-decoration: underline;
-  cursor: pointer;
-}
-
-/* Sliders */
-.cs-slider {
+  min-height: 0;
   display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 2px;
-  min-width: 0;
 }
 
-.cs-slider.is-disabled {
-  opacity: 0.45;
-}
-
-.cs-slider-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.cs-slider-value {
-  min-width: 44px;
-  padding: 2px 8px;
-  border: 1px solid var(--mt-border);
-  border-radius: 999px;
-  background: var(--mt-page);
-  color: var(--mt-navy);
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.cs-slider-value:disabled {
-  color: var(--mt-muted);
-  cursor: default;
-}
-
-.cs-slider-track {
-  position: relative;
-  display: flex;
-  align-items: center;
-  height: 32px;
-}
-
-.cs-slider-track::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 6px;
-  transform: translateY(-50%);
-  border-radius: 999px;
-  background: var(--cs-track, var(--mt-border));
-}
-
-/* Marks the "original" position at the centre of every slider. */
-.cs-slider-tick {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 2px;
-  height: 18px;
-  transform: translate(-50%, -50%);
-  border-radius: 1px;
-  background: var(--mt-navy);
-  opacity: 0.5;
-}
-
-.cs-slider-track input {
-  position: relative;
-  width: 100%;
-  height: 32px;
-  margin: 0;
-  background: transparent;
-  -webkit-appearance: none;
-  appearance: none;
-  cursor: pointer;
-}
-
-.cs-slider-track input:disabled {
-  cursor: not-allowed;
-}
-
-.cs-slider-track input::-webkit-slider-runnable-track {
-  height: 6px;
-  background: transparent;
-}
-
-.cs-slider-track input::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 24px;
-  height: 24px;
-  margin-top: -9px;
-  border: 2px solid var(--mt-navy);
-  border-radius: 50%;
-  background: var(--mt-card);
-  box-shadow: 0 1px 3px rgba(27, 27, 47, 0.25);
-}
-
-.cs-slider-track input::-moz-range-track {
-  height: 6px;
-  background: transparent;
-}
-
-.cs-slider-track input::-moz-range-thumb {
-  width: 20px;
-  height: 20px;
-  border: 2px solid var(--mt-navy);
-  border-radius: 50%;
-  background: var(--mt-card);
-  box-shadow: 0 1px 3px rgba(27, 27, 47, 0.25);
-}
-
-.cs-slider-ends {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--mt-muted);
-}
-
-.cs-slider-ends span:last-child {
-  text-align: right;
-}
-
+/* Near-colourless fabric: which shade "Shade" should lean to. */
 .cs-dots {
-  display: grid;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
   gap: 8px;
+  padding: 0 6px;
 }
 
 .cs-dots-label {
-  font-size: 12px;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--mt-muted);
 }
 
 .cs-dots-row {
+  flex: 1;
   display: flex;
   justify-content: space-between;
-  gap: 6px;
+  gap: 4px;
 }
 
 .cs-dot {
-  width: 40px;
-  height: 40px;
-  flex: 0 1 40px;
+  width: 28px;
+  height: 28px;
+  flex: 0 1 28px;
   min-width: 0;
   padding: 0;
   border: 1px solid var(--mt-border);
@@ -562,5 +454,127 @@
 
 .cs-dot.is-active {
   border-color: var(--mt-navy);
+  box-shadow: 0 0 0 2px var(--mt-card), 0 0 0 4px var(--mt-navy);
+}
+
+/* Vertical slider (VerticalSlider.tsx). */
+.cs-vslider {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.cs-vslider.is-disabled {
+  opacity: 0.45;
+}
+
+.cs-vslider-value {
+  min-width: 40px;
+  padding: 1px 6px;
+  border: 1px solid var(--mt-border);
+  border-radius: 999px;
+  background: var(--mt-page);
+  color: var(--mt-navy);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.cs-vslider-value:disabled {
+  color: var(--mt-muted);
+  cursor: default;
+}
+
+.cs-vslider-hint {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-hint);
+}
+
+.cs-vslider-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--mt-navy);
+}
+
+/* The whole column width is the touch target; dragging never scrolls the page. */
+.cs-vslider-track {
+  position: relative;
+  flex: 1;
+  min-height: 48px;
+  width: 100%;
+  max-width: 56px;
+  margin: 13px 0;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cs-vslider.is-disabled .cs-vslider-track {
+  cursor: not-allowed;
+}
+
+.cs-vslider-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 4px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: var(--cs-track, var(--mt-border));
+}
+
+.cs-vslider-fill {
+  position: absolute;
+  left: 50%;
+  width: 4px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: var(--mt-gold);
+}
+
+/* "Original" (0) at the middle of every slider. */
+.cs-vslider-tick {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 2px;
+  transform: translate(-50%, -50%);
+  border-radius: 1px;
+  background: var(--mt-navy);
+  opacity: 0.5;
+}
+
+.cs-vslider-thumb {
+  position: absolute;
+  left: 50%;
+  width: 26px;
+  height: 26px;
+  transform: translate(-50%, 50%);
+  border: 2px solid var(--mt-navy);
+  border-radius: 50%;
+  background: var(--mt-gold);
+  outline: none;
+}
+
+.cs-vslider-thumb:focus-visible {
   box-shadow: 0 0 0 2px var(--mt-card), 0 0 0 4px var(--mt-navy);
 }

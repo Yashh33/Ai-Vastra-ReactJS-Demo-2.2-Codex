@@ -4,7 +4,6 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { ColorStudio } from "../components/ColorStudio";
 import { CustomerConsentModal } from "../components/CustomerConsentModal";
-import { HeroPreviewImage } from "../components/HeroPreviewImage";
 import { PhotoPickStatus } from "../components/PhotoPickStatus";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
@@ -179,11 +178,7 @@ export function GeneratePage() {
     sortedFabricSlots.every((slot) => isSlotFilled(multiSelections[slot.id]));
 
   const selectedFabricImageId = existingFabricImage?.id ?? "";
-  const selectedHeroPreviewUrl =
-    heroReplacementPreviewUrl ||
-    selectedGarment?.hero_thumb_signed_url ||
-    selectedGarment?.hero_image_signed_url ||
-    null;
+  const garmentHasHero = !!(selectedGarment?.hero_thumb_signed_url || selectedGarment?.hero_image_signed_url);
 
   const fabricReady = !!fabricFile || !!existingFabricImage?.id;
   const fabricsReady = isMulti ? allMultiSlotsFilled : fabricReady;
@@ -1095,20 +1090,8 @@ export function GeneratePage() {
 
           {selectedGarment ? (
             <>
-              {selectedHeroPreviewUrl ? (
-                <div className="hero-full-box">
-                  <HeroPreviewImage
-                    key={selectedGarment.id}
-                    thumbUrl={heroReplacementPreviewUrl || selectedGarment.hero_thumb_signed_url}
-                    fullUrl={heroReplacementPreviewUrl ? null : selectedGarment.hero_image_signed_url}
-                    alt={`${selectedGarment.name} hero`}
-                    onUrlsExpired={() => void queryClient.invalidateQueries({ queryKey: ["garment-types"] })}
-                  />
-                </div>
-              ) : null}
-
-              {/* A garment with no hero goes straight to the upload prompt instead of an empty box. */}
-              {heroChangeOpen || !selectedHeroPreviewUrl ? (
+              {/* A garment with no hero of its own asks for a model photo here. */}
+              {heroChangeOpen || !garmentHasHero ? (
                 <label className="field">
                   <span>Replacement Hero Image</span>
                   <input
@@ -1120,6 +1103,7 @@ export function GeneratePage() {
                   />
                 </label>
               ) : null}
+              {!garmentHasHero && heroReplacementFile ? <p className="tiny muted">Model photo added ✓</p> : null}
               <PhotoPickStatus
                 preparing={preparingPhoto === "hero"}
                 error={photoError?.picker === "hero" ? photoError.message : null}
