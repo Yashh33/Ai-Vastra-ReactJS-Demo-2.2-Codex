@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ColorStudio } from "../components/ColorStudio";
 import { CustomerConsentModal } from "../components/CustomerConsentModal";
@@ -26,6 +26,16 @@ const OUTPUT_BUCKET = "generated-outputs";
 // Full-size looks get longer than a thumbnail before a load counts as stuck.
 const FULL_IMAGE_TIMEOUT_MS = 30000;
 const DESCRIPTION_MAX_LENGTH = 300;
+// Remembers the open garment type for this browser session, so it survives switching tabs.
+const BROWSE_GARMENT_STORAGE_KEY = "aivastra-browse-garment-type";
+
+function readStoredGarmentTypeId(): string | null {
+  try {
+    return sessionStorage.getItem(BROWSE_GARMENT_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
 
 function sortBrowseLooks(rows: BrowseLookRow[]): BrowseLookRow[] {
   return [...rows].sort((a, b) => {
@@ -59,7 +69,9 @@ export function BrowsePage() {
   const shopId = me?.shop_id ?? null;
 
   const [garmentTypes, setGarmentTypes] = useState<BrowseGarmentType[]>([]);
-  const [selectedGarmentTypeId, setSelectedGarmentTypeId] = useState<string | null>(null);
+  const [selectedGarmentTypeId, setSelectedGarmentTypeId] = useState<string | null>(readStoredGarmentTypeId);
+  const chipRowRef = useRef<HTMLDivElement | null>(null);
+  const chipRowScrolledRef = useRef(false);
   const [looks, setLooks] = useState<BrowseLookRow[]>([]);
   const [tabsLoading, setTabsLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -82,6 +94,29 @@ export function BrowsePage() {
   const [colourError, setColourError] = useState<string | null>(null);
   const [tryOnConsentOpen, setTryOnConsentOpen] = useState(false);
   const [tryOnOpen, setTryOnOpen] = useState(false);
+
+  useEffect(() => {
+    if (!selectedGarmentTypeId) return;
+    try {
+      sessionStorage.setItem(BROWSE_GARMENT_STORAGE_KEY, selectedGarmentTypeId);
+    } catch {
+      // ignore storage errors
+    }
+  }, [selectedGarmentTypeId]);
+
+  // Phones: keep the selected chip in view (centred), instantly on open and smoothly after.
+  useEffect(() => {
+    const row = chipRowRef.current;
+    if (!row || !selectedGarmentTypeId || !row.clientWidth) return;
+    const chip = Array.from(row.querySelectorAll<HTMLElement>("[data-garment-id]")).find(
+      (element) => element.dataset.garmentId === selectedGarmentTypeId
+    );
+    if (!chip) return;
+    const left = chip.offsetLeft - (row.clientWidth - chip.offsetWidth) / 2;
+    row.scrollTo({ left: Math.max(0, left), behavior: chipRowScrolledRef.current ? "smooth" : "auto" });
+    chipRowScrolledRef.current = true;
+    // detailLook: the row remounts when a look's detail view closes.
+  }, [selectedGarmentTypeId, garmentTypes, detailLook]);
 
   useEffect(() => {
     if (!shopId) return;
@@ -573,6 +608,44 @@ export function BrowsePage() {
   } else {
     body = (
       <div className="mt-browse-body">
+        {/* Phones: one swipeable row of chips instead of the rail. */}
+        <div className="mt-browse-chips" ref={chipRowRef} role="tablist" aria-label="Garment types">
+          {garmentTypes.map((garmentType) => (
+            <button
+              key={garmentType.id}
+              type="button"
+              role="tab"
+              aria-selected={garmentType.id === selectedGarmentTypeId}
+              data-garment-id={garmentType.id}
+              className={`style-pill mt-browse-chip${garmentType.id === selectedGarmentTypeId ? " active" : ""}`}
+              onClick={() => setSelectedGarmentTypeId(garmentType.id)}
+            >
+              {garmentType.name}
+            </button>
+          ))}
+          <button
+            type="button"
+            className={`mt-browse-chip-refresh${refreshing ? " is-refreshing" : ""}`}
+            onClick={() => setRefreshKey((prev) => prev + 1)}
+            disabled={refreshing}
+            aria-label="Refresh"
+            title="Refresh"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              aria-hidden
+            >
+              <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+              <path d="M21 3v5h-5" />
+            </svg>
+          </button>
+        </div>
         <div className="mt-browse-rail">
           <div className="mt-browse-rail-list" role="tablist">
             {garmentTypes.map((garmentType) => (
@@ -581,12 +654,13 @@ export function BrowsePage() {
                 type="button"
                 role="tab"
                 aria-selected={garmentType.id === selectedGarmentTypeId}
+                title={garmentType.name}
                 className={`mt-browse-rail-item${
                   garmentType.id === selectedGarmentTypeId ? " mt-browse-rail-item-active" : ""
                 }`}
                 onClick={() => setSelectedGarmentTypeId(garmentType.id)}
               >
-                {garmentType.name}
+                <span className="mt-browse-rail-name">{garmentType.name}</span>
               </button>
             ))}
           </div>
@@ -668,6 +742,17 @@ export function BrowsePage() {
           padding: 14px 16px;
           cursor: pointer;
           transition: background 0.15s ease, border-color 0.15s ease;
+          min-width: 0;
+          overflow: hidden;
+        }
+        /* Long names wrap to 2 lines, then end with "..."; the full name is in the tooltip. */
+        .mt-browse-rail-name {
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+          overflow-wrap: anywhere;
+          line-height: 1.25;
         }
         .mt-browse-rail-item:hover { background: #EFEDE8; }
         .mt-browse-rail-item:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
@@ -689,6 +774,54 @@ export function BrowsePage() {
         }
         .mt-browse-refresh:hover { background: #EFEDE8; }
         .mt-browse-refresh:disabled { opacity: 0.6; cursor: default; }
+
+        /* Chip row: phones only (see the media query below). */
+        .mt-browse-chips { display: none; }
+        .mt-browse-chip {
+          flex: 0 0 auto;
+          white-space: nowrap;
+          scroll-snap-align: start;
+        }
+        .mt-browse-chip-refresh {
+          flex: 0 0 auto;
+          width: 34px;
+          height: 34px;
+          border-radius: 50%;
+          border: 1px solid var(--border);
+          background: var(--card);
+          color: var(--navy);
+          display: grid;
+          place-items: center;
+          padding: 0;
+          cursor: pointer;
+        }
+        .mt-browse-chip-refresh:disabled { cursor: default; opacity: 0.7; }
+        .mt-browse-chip-refresh.is-refreshing svg { animation: mt-browse-spin 0.9s linear infinite; }
+
+        @media (max-width: 767.98px) {
+          .mt-browse-body { flex-direction: column; }
+          .mt-browse-rail { display: none; }
+          .mt-browse-chips {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            overflow-x: auto;
+            scroll-snap-type: x proximity;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+            padding: 10px 12px;
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            background: var(--page);
+            border-bottom: 1px solid var(--border);
+          }
+          .mt-browse-chips::-webkit-scrollbar { display: none; }
+        }
+
+        @keyframes mt-browse-spin {
+          to { transform: rotate(360deg); }
+        }
 
         .mt-browse-grid {
           flex: 1;
