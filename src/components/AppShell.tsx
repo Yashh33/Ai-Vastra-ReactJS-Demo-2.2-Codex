@@ -11,6 +11,8 @@ import {
 import { supabase } from "../lib/supabase";
 
 const STARTER_PACK_ID = "starter";
+/** The buy entry point is hidden for now; the payment code stays in place. */
+const SHOW_BUY_CREDITS = false;
 
 function formatCredits(value: number | null | undefined) {
   if (value === null || value === undefined) return "?";
@@ -127,22 +129,30 @@ export function AppShell() {
     <div className="app-shell">
       <header className="app-shell-header">
         <div className="app-brand">
-          <span className="app-wordmark" aria-label="MyTryonAi">
-            <span className="app-wordmark-primary">MyTryon</span>
-            <span className="app-wordmark-accent">Ai</span>
-          </span>
-          {shopHeaderText ? <span className="app-brand-shop">{shopHeaderText}</span> : null}
+          {shopHeaderText ? (
+            <>
+              <span className="app-brand-name">{shopHeaderText}</span>
+              <span className="app-brand-powered">Powered by MyTryonAi</span>
+            </>
+          ) : (
+            <span className="app-wordmark" aria-label="MyTryonAi">
+              <span className="app-wordmark-primary">MyTryon</span>
+              <span className="app-wordmark-accent">Ai</span>
+            </span>
+          )}
         </div>
         <div className="app-header-actions">
           <span className="credits-chip">{creditBalance} credits</span>
-          <button
-            className="buy-credits-btn"
-            type="button"
-            onClick={() => void handleBuyCredits()}
-            disabled={buyCreditsBusy}
-          >
-            {buyCreditsBusy ? "Starting..." : "Buy 5 looks - Rs.70"}
-          </button>
+          {SHOW_BUY_CREDITS ? (
+            <button
+              className="buy-credits-btn"
+              type="button"
+              onClick={() => void handleBuyCredits()}
+              disabled={buyCreditsBusy}
+            >
+              {buyCreditsBusy ? "Starting..." : "Buy 5 looks - Rs.70"}
+            </button>
+          ) : null}
           <button
             className="catalog-icon-btn"
             type="button"

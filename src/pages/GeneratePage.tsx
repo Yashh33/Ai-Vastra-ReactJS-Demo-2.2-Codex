@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { ColorStudio } from "../components/ColorStudio";
@@ -9,7 +9,7 @@ import { PhotoPickStatus } from "../components/PhotoPickStatus";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { useFabricImages, useGarmentTypes, useMe } from "../lib/queries";
+import { useGarmentTypes, useMe } from "../lib/queries";
 import { subscribeToGeneration } from "../lib/realtime";
 import { createSignedUrl, uploadToStorage } from "../lib/storage";
 import { supabase } from "../lib/supabase";
@@ -36,6 +36,21 @@ function mapGarmentToApplyTo(garment: GarmentType): ApplyToTarget {
   if (context.includes("upper")) return "suit_upper";
 
   return "suit_full_body";
+}
+
+function sortSlots(slots: GarmentFabricSlot[] | undefined) {
+  return [...(slots ?? [])].sort((a, b) => a.sort_order - b.sort_order);
+}
+
+/** Plain message for a failed look; the raw backend error only goes to the console. */
+function friendlyGenerateError(garmentName: string, slotCount: number) {
+  const check =
+    slotCount === 0
+      ? "Check that the fabric is added"
+      : slotCount === 2
+        ? "Check that both fabrics are added"
+        : "Check that all fabrics are added";
+  return `Couldn't create the ${garmentName} look. ${check} and try again.`;
 }
 
 const MULTI_DRAFT_STORAGE_KEY = "aivastra-multi-draft";
@@ -67,23 +82,24 @@ type MultiDraft = {
   multiSelections?: Record<string, MultiDraftSelection>;
 };
 
-const FINE_CHECKS_SVG = `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-  <rect width="64" height="64" fill="#B8C8E0"/>
-  ${Array.from({ length: 15 }, (_, i) => `<line x1="0" y1="${(i + 1) * 4}" x2="64" y2="${(i + 1) * 4}" stroke="#2B4B8A" stroke-width="0.7" opacity="0.7"/>`).join("")}
-  ${Array.from({ length: 15 }, (_, i) => `<line x1="${(i + 1) * 4}" y1="0" x2="${(i + 1) * 4}" y2="64" stroke="#2B4B8A" stroke-width="0.7" opacity="0.7"/>`).join("")}
-</svg>`;
+/** Style card thumbnail; falls back to a plain tile when the image is missing or fails. */
+function StyleCardImage({ url, alt, onUrlExpired }: { url: string | null; alt: string; onUrlExpired: () => void }) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
 
-const MEDIUM_CHECKS_SVG = `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-  <rect width="64" height="64" fill="#B8C8E0"/>
-  ${Array.from({ length: 7 }, (_, i) => `<line x1="0" y1="${(i + 1) * 8}" x2="64" y2="${(i + 1) * 8}" stroke="#2B4B8A" stroke-width="1.5" opacity="0.8"/>`).join("")}
-  ${Array.from({ length: 7 }, (_, i) => `<line x1="${(i + 1) * 8}" y1="0" x2="${(i + 1) * 8}" y2="64" stroke="#2B4B8A" stroke-width="1.5" opacity="0.8"/>`).join("")}
-</svg>`;
-
-const BOLD_CHECKS_SVG = `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-  <rect width="64" height="64" fill="#B8C8E0"/>
-  ${Array.from({ length: 3 }, (_, i) => `<line x1="0" y1="${(i + 1) * 16}" x2="64" y2="${(i + 1) * 16}" stroke="#2B4B8A" stroke-width="3" opacity="0.9"/>`).join("")}
-  ${Array.from({ length: 3 }, (_, i) => `<line x1="${(i + 1) * 16}" y1="0" x2="${(i + 1) * 16}" y2="64" stroke="#2B4B8A" stroke-width="3" opacity="0.9"/>`).join("")}
-</svg>`;
+  if (!url || failedUrl === url) return <span className="style-card-img style-card-img-empty" aria-hidden />;
+  return (
+    <img
+      className="style-card-img"
+      src={url}
+      alt={alt}
+      loading="lazy"
+      onError={() => {
+        setFailedUrl(url);
+        onUrlExpired();
+      }}
+    />
+  );
+}
 
 export function GeneratePage() {
   const { accessToken } = useAuth();
@@ -95,8 +111,13 @@ export function GeneratePage() {
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
   const multiCameraInputRef = useRef<HTMLInputElement | null>(null);
   const multiGalleryInputRef = useRef<HTMLInputElement | null>(null);
+  /** Slot the multi Capture / Gallery picker was opened for. */
+  const multiPickSlotRef = useRef<string | null>(null);
   const hydratedMultiDraftRef = useRef(false);
   const handledMultiReturnParamsRef = useRef(false);
+  const styleThumbRefreshRef = useRef(false);
+  /** Message shown if the running generation fails; set when the job is created. */
+  const failureMessageRef = useRef("");
 
   const pickedFabricImageId =
     searchParams.get("fabric_image_id") ?? searchParams.get("selectedFabricImageId") ?? "";
@@ -108,30 +129,26 @@ export function GeneratePage() {
     error: garmentTypesError,
     refetch: refetchGarmentTypes
   } = useGarmentTypes();
-  const { data: fabricImagesData } = useFabricImages();
   const garmentTypes = garmentTypesData ?? [];
   const shopContext = me ?? null;
-  const creditBalance = me?.credits_balance !== null && me?.credits_balance !== undefined ? String(me.credits_balance) : "-";
   const [selectedGarmentId, setSelectedGarmentId] = useState("");
 
   const [fabricFile, setFabricFile] = useState<File | null>(null);
   const [existingFabricImage, setExistingFabricImage] = useState<FabricImageRow | null>(null);
   const [fabricPreviewUrl, setFabricPreviewUrl] = useState<string | null>(null);
-  const [saveToSilo, setSaveToSilo] = useState(false);
-  const [fabricCode, setFabricCode] = useState("");
-  const [fabricColor, setFabricColor] = useState("");
-  const [hasPattern, setHasPattern] = useState(false);
-  const [fabricScale, setFabricScale] = useState<"fine" | "medium" | "bold" | null>(null);
   const [fabricColourAdjusted, setFabricColourAdjusted] = useState(false);
   const [colourTarget, setColourTarget] = useState<ColourTarget | null>(null);
   const [preparingPhoto, setPreparingPhoto] = useState<PhotoPicker | null>(null);
   const [photoError, setPhotoError] = useState<{ picker: PhotoPicker; message: string } | null>(null);
+  /** Slot the multi photo spinner / read error belongs to. */
+  const [photoSlotId, setPhotoSlotId] = useState<string | null>(null);
 
   const [productDetailsOpen, setProductDetailsOpen] = useState(false);
   const [lookBarcode, setLookBarcode] = useState("");
   const [lookMrp, setLookMrp] = useState("");
   const [lookDescription, setLookDescription] = useState("");
 
+  // The "Change" hero button is not shown; the replacement flow stays for garments with no hero.
   const [heroChangeOpen, setHeroChangeOpen] = useState(false);
   const [heroReplacementFile, setHeroReplacementFile] = useState<File | null>(null);
   const [heroReplacementPreviewUrl, setHeroReplacementPreviewUrl] = useState<string | null>(null);
@@ -139,17 +156,12 @@ export function GeneratePage() {
   const [loadingPickedFabric, setLoadingPickedFabric] = useState(false);
   const [creatingGeneration, setCreatingGeneration] = useState(false);
   const [visualizingGenerationId, setVisualizingGenerationId] = useState<string | null>(null);
-  const [statusText, setStatusText] = useState("Preparing Generate screen...");
+  const [statusText, setStatusText] = useState("");
+  const [errorText, setErrorText] = useState<string | null>(null);
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [showTryOnFlow, setShowTryOnFlow] = useState(false);
 
-  const [generateMode, setGenerateMode] = useState<"single" | "multi">(
-    searchParams.get("tab") === "multi" ? "multi" : "single"
-  );
   const [multiSelections, setMultiSelections] = useState<Record<string, MultiFabricSelection>>({});
-  const [multiPickerSlotId, setMultiPickerSlotId] = useState<string | null>(null);
-  const [multiUploading, setMultiUploading] = useState(false);
-  const [multiRecentPreviewUrls, setMultiRecentPreviewUrls] = useState<Record<string, string>>({});
 
   const selectedGarment = useMemo(
     () => garmentTypes.find((garment) => garment.id === selectedGarmentId) ?? null,
@@ -157,15 +169,16 @@ export function GeneratePage() {
   );
 
   const sortedFabricSlots: GarmentFabricSlot[] = useMemo(
-    () => [...(selectedGarment?.fabric_slots ?? [])].sort((a, b) => a.sort_order - b.sort_order),
+    () => sortSlots(selectedGarment?.fabric_slots),
     [selectedGarment]
   );
+  // The garment type decides the flow: fabric slots mean one fabric per slot.
+  const isMulti = sortedFabricSlots.length > 0;
   const allMultiSlotsFilled =
     sortedFabricSlots.length > 0 &&
     sortedFabricSlots.every((slot) => isSlotFilled(multiSelections[slot.id]));
 
   const selectedFabricImageId = existingFabricImage?.id ?? "";
-  // Display only: the small hero thumbnail when there is one, else the full hero image.
   const selectedHeroPreviewUrl =
     heroReplacementPreviewUrl ||
     selectedGarment?.hero_thumb_signed_url ||
@@ -173,16 +186,23 @@ export function GeneratePage() {
     null;
 
   const fabricReady = !!fabricFile || !!existingFabricImage?.id;
+  const fabricsReady = isMulti ? allMultiSlotsFilled : fabricReady;
   const heroReady = !!heroReplacementFile || !!selectedGarment?.default_hero_image_id;
   const actionBusy = loadingGarmentTypes || loadingPickedFabric || creatingGeneration || !!visualizingGenerationId;
-  const canGenerate =
-    fabricReady &&
-    !!selectedGarment &&
-    heroReady &&
-    (!saveToSilo || !!fabricCode.trim()) &&
-    !actionBusy;
+  const canGenerate = fabricReady && !!selectedGarment && heroReady && !actionBusy;
+  const canGenerateMulti = !!selectedGarment && allMultiSlotsFilled && heroReady && !actionBusy;
+  const canSew = isMulti ? canGenerateMulti : canGenerate;
+  const canTryOn = !!selectedGarment && fabricsReady && !actionBusy;
 
-  const canGenerateMulti = !!selectedGarment && allMultiSlotsFilled && !actionBusy;
+  const actionHint = !selectedGarment
+    ? "Pick a style to continue"
+    : !fabricsReady
+      ? isMulti
+        ? "Add all fabrics to continue"
+        : "Add the fabric to continue"
+      : !heroReady
+        ? "Add a model photo for this style to continue"
+        : null;
 
   useEffect(() => {
     if (!fabricPreviewUrl?.startsWith("blob:")) return;
@@ -195,13 +215,8 @@ export function GeneratePage() {
   }, [heroReplacementPreviewUrl]);
 
   useEffect(() => {
-    if (loadingGarmentTypes) return;
-    if (garmentTypesError) {
-      setStatusText(`Load failed: ${garmentTypesError instanceof Error ? garmentTypesError.message : "Unknown error"}`);
-      return;
-    }
-    setStatusText(garmentTypes.length ? "Ready to generate." : "No garment types found.");
-  }, [loadingGarmentTypes, garmentTypesError, garmentTypes.length]);
+    if (garmentTypesError) console.error("[generate] garment types load failed", garmentTypesError);
+  }, [garmentTypesError]);
 
   useEffect(() => {
     if (!accessToken || !pickedFabricImageId) return;
@@ -220,7 +235,7 @@ export function GeneratePage() {
         if (cancelled) return;
 
         if (!row) {
-          setStatusText("Selected fabric was not found.");
+          setErrorText("That fabric couldn't be found. Please add it again.");
           return;
         }
 
@@ -231,12 +246,10 @@ export function GeneratePage() {
         setFabricFile(null);
         setFabricColourAdjusted(false);
         setFabricPreviewUrl(signed);
-        setHasPattern(false);
-        setFabricScale(null);
-        setStatusText("Fabric selected from silo.");
       } catch (err) {
         if (!cancelled) {
-          setStatusText(`Selected fabric failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+          console.error("[generate] selected fabric load failed", err);
+          setErrorText("Couldn't load the selected fabric. Please add it again.");
         }
       } finally {
         if (!cancelled) setLoadingPickedFabric(false);
@@ -271,8 +284,10 @@ export function GeneratePage() {
       }
 
       if (row.status === "failed") {
+        console.error("[generate] generation failed", row.error);
         setVisualizingGenerationId(null);
-        setStatusText(row.error || "Generation failed.");
+        setStatusText("");
+        setErrorText(failureMessageRef.current || "Couldn't create the look. Please try again.");
         return;
       }
 
@@ -288,9 +303,8 @@ export function GeneratePage() {
         });
         handleStatusRow(row);
       } catch (err) {
-        if (!cancelled) {
-          setStatusText(`Generation status failed: ${err instanceof Error ? err.message : "Unknown error"}`);
-        }
+        // A missed status check is not a failed look; realtime or the next poll catches up.
+        if (!cancelled) console.error("[generate] generation status check failed", err);
       }
     };
 
@@ -307,6 +321,14 @@ export function GeneratePage() {
 
   function assignFabricToSlot(slotId: string, selection: MultiFabricSelection) {
     setMultiSelections((prev) => ({ ...prev, [slotId]: selection }));
+  }
+
+  function removeSlotFabric(slotId: string) {
+    setMultiSelections((prev) => {
+      const next = { ...prev };
+      delete next[slotId];
+      return next;
+    });
   }
 
   useEffect(() => {
@@ -414,36 +436,42 @@ export function GeneratePage() {
     };
   }, [accessToken, searchParams]);
 
-  useEffect(() => {
-    if (!multiPickerSlotId) return;
-    let cancelled = false;
-
-    const rows = (fabricImagesData ?? []).slice(0, 15);
-    rows.forEach((row) => {
-      if (multiRecentPreviewUrls[row.id]) return;
-      createSignedUrl("fabric-images", row.storage_path, 3600)
-        .then((url) => {
-          if (cancelled) return;
-          setMultiRecentPreviewUrls((prev) => ({ ...prev, [row.id]: url }));
-        })
-        .catch(() => {
-          // tolerate a failed thumbnail sign
-        });
-    });
-
-    return () => {
-      cancelled = true;
-    };
-    // multiRecentPreviewUrls intentionally omitted: re-running per cached URL would re-scan all rows unnecessarily.
-  }, [multiPickerSlotId, fabricImagesData]);
-
   function clearFabricSelection() {
     setFabricFile(null);
     setFabricColourAdjusted(false);
     setExistingFabricImage(null);
     setFabricPreviewUrl(null);
-    setHasPattern(false);
-    setFabricScale(null);
+  }
+
+  /** Switches style; fabrics are kept only while the number of fabric parts stays the same. */
+  function selectGarment(garment: GarmentType) {
+    if (garment.id === selectedGarmentId) return;
+
+    const prevSlots = sortedFabricSlots;
+    const nextSlots = sortSlots(garment.fabric_slots);
+    if (prevSlots.length === nextSlots.length && nextSlots.length > 0) {
+      setMultiSelections((prev) => {
+        const next: Record<string, MultiFabricSelection> = {};
+        prevSlots.forEach((slot, index) => {
+          const selection = prev[slot.id];
+          const target = nextSlots[index];
+          if (selection && target) next[target.id] = selection;
+        });
+        return next;
+      });
+    } else if (prevSlots.length !== nextSlots.length) {
+      clearFabricSelection();
+      setMultiSelections({});
+    }
+
+    setSelectedGarmentId(garment.id);
+    setColourTarget(null);
+    setHeroChangeOpen(false);
+    setHeroReplacementFile(null);
+    setHeroReplacementPreviewUrl(null);
+    setErrorText(null);
+    setStatusText("");
+    setPhotoError(null);
   }
 
   /** Converts a just-picked photo to JPEG, showing a spinner meanwhile. Null (with a message shown) if unreadable. */
@@ -468,9 +496,7 @@ export function GeneratePage() {
     setFabricColourAdjusted(false);
     setExistingFabricImage(null);
     setFabricPreviewUrl(URL.createObjectURL(compressed));
-    setHasPattern(false);
-    setFabricScale(null);
-    setStatusText("Fabric image selected.");
+    setErrorText(null);
   }
 
   function onFabricCameraChange(event: ChangeEvent<HTMLInputElement>) {
@@ -497,7 +523,6 @@ export function GeneratePage() {
     if (!compressed) return;
     setHeroReplacementFile(compressed);
     setHeroReplacementPreviewUrl(URL.createObjectURL(compressed));
-    setStatusText("Replacement hero selected for this generation.");
   }
 
   async function uploadFabricImage(file: File) {
@@ -506,16 +531,15 @@ export function GeneratePage() {
     const ext = guessFileExtension(file.name, file.type);
     const filename = `${Date.now()}-${makeRandomSuffix()}.${ext}`;
     const storagePath = `${shopContext.shop_id}/${filename}`;
-    const originalFilename = saveToSilo && fabricCode.trim() ? fabricCode.trim() : file.name || filename;
 
-    setStatusText(saveToSilo ? "Saving fabric image..." : "Uploading fabric image...");
+    setStatusText("Uploading fabric image...");
     await uploadToStorage("fabric-images", storagePath, file);
 
     return apiFetch<FabricImageRow>("/fabric-images", accessToken, {
       method: "POST",
       body: JSON.stringify({
         storage_path: storagePath,
-        original_filename: originalFilename,
+        original_filename: file.name || filename,
         mime_type: file.type || "image/jpeg",
         file_size_bytes: file.size,
         width: null,
@@ -561,11 +585,12 @@ export function GeneratePage() {
 
     if (garment.default_hero_image_id) return garment.default_hero_image_id;
 
-    throw new Error("This garment type has no default hero image. Use Change to select one.");
+    throw new Error("This garment type has no default hero image.");
   }
 
   async function handleCreateGeneration() {
     if (!accessToken || !selectedGarment) return;
+    setErrorText(null);
 
     // Optional product details: only the filled fields are sent with the create request.
     const productDetails: { barcode?: string; mrp?: number; description?: string } = {};
@@ -574,12 +599,13 @@ export function GeneratePage() {
     if (lookMrp.trim()) {
       const mrp = Number(lookMrp.trim());
       if (!Number.isFinite(mrp) || mrp < 0) {
-        setStatusText("Generate failed: enter a valid MRP.");
+        setErrorText("Enter a valid MRP, or leave it empty.");
         return;
       }
       productDetails.mrp = mrp;
     }
 
+    const failureMessage = friendlyGenerateError(selectedGarment.name, 0);
     setCreatingGeneration(true);
     try {
       const fabricImage = await ensureFabricImage();
@@ -588,9 +614,8 @@ export function GeneratePage() {
       const fabricAssignment: GenerationFabricAssignmentPayload = {
         fabric_image_id: fabricImage.id,
         apply_to: mapGarmentToApplyTo(selectedGarment),
-        fabric_code: saveToSilo ? fabricCode.trim() : "unknown",
-        fabric_color: saveToSilo ? fabricColor.trim() || null : null,
-        fabric_scale: hasPattern && fabricScale ? fabricScale : null
+        fabric_code: "unknown",
+        fabric_color: null
       };
 
       setStatusText("Creating generation job...");
@@ -613,10 +638,13 @@ export function GeneratePage() {
       }
       void queryClient.invalidateQueries({ queryKey: ["me"] });
 
+      failureMessageRef.current = failureMessage;
       setVisualizingGenerationId(response.id);
       setStatusText("Generating look...");
     } catch (err) {
-      setStatusText(`Generate failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+      console.error("[generate] create failed", err);
+      setStatusText("");
+      setErrorText(failureMessage);
     } finally {
       setCreatingGeneration(false);
     }
@@ -707,6 +735,7 @@ export function GeneratePage() {
   async function handleMultiFabricPicked(file: File | null, slotId: string) {
     if (!file) return;
 
+    setPhotoSlotId(slotId);
     const compressed = await preparePhoto(file, "multi");
     if (!compressed) return;
     assignFabricToSlot(slotId, {
@@ -715,7 +744,7 @@ export function GeneratePage() {
       label: "New fabric",
       pendingFile: compressed
     });
-    setMultiPickerSlotId(null);
+    setErrorText(null);
   }
 
   /** Uploads every slot photo still held locally and returns the selections with real ids. */
@@ -732,21 +761,6 @@ export function GeneratePage() {
       setMultiSelections((prev) => (prev[slotId]?.pendingFile === pendingFile ? { ...prev, [slotId]: next } : prev));
     }
     return resolved;
-  }
-
-  async function openFabricSiloForSlot(slotId: string) {
-    // Leaving this page drops local photos, so upload them first.
-    setMultiUploading(true);
-    try {
-      await uploadPendingMultiFabrics();
-    } catch (err) {
-      setStatusText(`Fabric upload failed: ${err instanceof Error ? err.message : "Unknown error"}`);
-      setMultiPickerSlotId(null);
-      return;
-    } finally {
-      setMultiUploading(false);
-    }
-    navigate(`/fabric-silo?picker=1&returnTab=multi&slotId=${encodeURIComponent(slotId)}`);
   }
 
   const colourSourceFile =
@@ -783,33 +797,31 @@ export function GeneratePage() {
     setColourTarget(null);
   }
 
+  function openMultiPicker(slotId: string, source: "camera" | "gallery") {
+    debugLog("input clicked");
+    multiPickSlotRef.current = slotId;
+    (source === "camera" ? multiCameraInputRef : multiGalleryInputRef).current?.click();
+  }
+
   function onMultiCameraChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
     debugLogPicked(file);
     event.target.value = "";
-    if (multiPickerSlotId) void handleMultiFabricPicked(file, multiPickerSlotId);
+    if (multiPickSlotRef.current) void handleMultiFabricPicked(file, multiPickSlotRef.current);
   }
 
   function onMultiGalleryChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
     debugLogPicked(file);
     event.target.value = "";
-    if (multiPickerSlotId) void handleMultiFabricPicked(file, multiPickerSlotId);
-  }
-
-  function chooseRecentFabric(row: FabricImageRow) {
-    if (!multiPickerSlotId) return;
-    assignFabricToSlot(multiPickerSlotId, {
-      fabricImageId: row.id,
-      previewUrl: multiRecentPreviewUrls[row.id] ?? null,
-      label: row.original_filename?.trim() || "Fabric"
-    });
-    setMultiPickerSlotId(null);
+    if (multiPickSlotRef.current) void handleMultiFabricPicked(file, multiPickSlotRef.current);
   }
 
   async function handleCreateMultiGeneration() {
     if (!accessToken || !selectedGarment || !allMultiSlotsFilled) return;
+    setErrorText(null);
 
+    const failureMessage = friendlyGenerateError(selectedGarment.name, sortedFabricSlots.length);
     setCreatingGeneration(true);
     try {
       const selections = await uploadPendingMultiFabrics();
@@ -823,8 +835,7 @@ export function GeneratePage() {
           fabric_image_id: selection.fabricImageId,
           apply_to: slot.apply_to as ApplyToTarget,
           fabric_code: selection.label !== "New fabric" ? selection.label : "unknown",
-          fabric_color: null,
-          fabric_scale: null
+          fabric_color: null
         };
       });
 
@@ -846,10 +857,13 @@ export function GeneratePage() {
       }
       void queryClient.invalidateQueries({ queryKey: ["me"] });
 
+      failureMessageRef.current = failureMessage;
       setVisualizingGenerationId(response.id);
       setStatusText("Generating look...");
     } catch (err) {
-      setStatusText(`Generate failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+      console.error("[generate] create failed", err);
+      setStatusText("");
+      setErrorText(failureMessage);
     } finally {
       setCreatingGeneration(false);
     }
@@ -857,12 +871,12 @@ export function GeneratePage() {
 
   async function handlePushToScreen(blob: Blob): Promise<void> {
     if (!accessToken) throw new Error("Not authenticated");
-    const folderId = generateMode === "multi" ? selectedGarment?.id : selectedGarmentId;
+    const folderId = isMulti ? selectedGarment?.id : selectedGarmentId;
     if (!folderId) throw new Error("Select a garment type first.");
     const fd = new FormData();
     fd.set("result_image", blob, "tryon.jpg");
     fd.set("folder_id", folderId);
-    if (generateMode !== "multi" && selectedFabricImageId) fd.set("fabric_image_id", selectedFabricImageId);
+    if (!isMulti && selectedFabricImageId) fd.set("fabric_image_id", selectedFabricImageId);
     await apiFetch("/tryon/push-to-screen", accessToken, { method: "POST", body: fd });
   }
 
@@ -903,6 +917,96 @@ export function GeneratePage() {
     return URL.createObjectURL(blob);
   }
 
+  /** Try-on errors shown in the flow are plain text; the raw error goes to the console. */
+  async function handleTryOnSubmit(customerPhotoFile: File): Promise<string> {
+    try {
+      return await (isMulti ? handleMultiTryOnSubmit(customerPhotoFile) : handleQuickTryOnSubmit(customerPhotoFile));
+    } catch (err) {
+      console.error("[try-on] failed", err);
+      if (err instanceof Error && err.message === PHOTO_READ_ERROR) throw err;
+      throw new Error(
+        `Couldn't create the try-on for ${selectedGarment?.name ?? "this style"}. Check the fabrics and try again.`
+      );
+    }
+  }
+
+  function renderFabricCard(card: {
+    key: string;
+    title: string;
+    tag?: string;
+    previewUrl: string | null;
+    previewAlt: string;
+    onRemove: (() => void) | null;
+    onCapture: () => void;
+    onGallery: () => void;
+    onMatchColour: (() => void) | null;
+    colourAdjusted: boolean;
+    status: ReactNode;
+  }) {
+    return (
+      <div key={card.key} className="fabric-card">
+        <div className="fabric-card-head">
+          <span className="fabric-card-title">{card.title}</span>
+          {card.tag ? <span className="slot-tag">{card.tag}</span> : null}
+        </div>
+
+        <div className="fabric-card-body">
+          <div className="fabric-card-thumb-wrap">
+            {card.previewUrl ? (
+              <img className="fabric-card-thumb" src={card.previewUrl} alt={card.previewAlt} />
+            ) : (
+              <div className="fabric-card-thumb fabric-card-thumb-empty" aria-hidden>
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </div>
+            )}
+            {card.onRemove ? (
+              <button
+                type="button"
+                className="fabric-card-remove"
+                onClick={card.onRemove}
+                disabled={actionBusy}
+                aria-label="Remove fabric"
+              >
+                &times;
+              </button>
+            ) : null}
+          </div>
+
+          <div className="fabric-card-actions">
+            <div className="row">
+              <button className="btn btn-light flex-1" type="button" onClick={card.onCapture} disabled={actionBusy}>
+                Capture
+              </button>
+              <button className="btn btn-light flex-1" type="button" onClick={card.onGallery} disabled={actionBusy}>
+                Gallery
+              </button>
+            </div>
+            {card.onMatchColour || card.colourAdjusted ? (
+              <div className="row">
+                {card.onMatchColour ? (
+                  <button
+                    className="btn btn-light"
+                    type="button"
+                    style={{ minHeight: "36px", padding: "0 12px", fontSize: "12px" }}
+                    onClick={card.onMatchColour}
+                    disabled={actionBusy}
+                  >
+                    🎨 Match colour
+                  </button>
+                ) : null}
+                {card.colourAdjusted ? <span className="chip">Colour adjusted</span> : null}
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        {card.status}
+      </div>
+    );
+  }
+
   return (
     <main className="screen">
       <section className="page-shell">
@@ -912,32 +1016,9 @@ export function GeneratePage() {
           </div>
         </header>
 
-        <div className="pill-row">
-          <button
-            type="button"
-            className={`style-pill ${generateMode === "single" ? "active" : ""}`}
-            onClick={() => setGenerateMode("single")}
-          >
-            Single fabric
-          </button>
-          <button
-            type="button"
-            className={`style-pill ${generateMode === "multi" ? "active" : ""}`}
-            onClick={() => setGenerateMode("multi")}
-          >
-            Multi fabric
-          </button>
-        </div>
-
-        {generateMode === "single" && (
-        <>
         <section className="card stack-sm">
-          <p className="tiny muted">{statusText}</p>
-        </section>
-
-        <section className="card stack-sm">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-            <span className="section-label">Select Style</span>
+          <div className="between">
+            <span className="section-label">1 · Pick a style</span>
             <button
               onClick={() => void refetchGarmentTypes()}
               style={{
@@ -968,31 +1049,54 @@ export function GeneratePage() {
             </button>
           </div>
 
-          <div className="pill-row">
-            {garmentTypes.map((garment) => (
-              <button
-                key={garment.id}
-                className={`style-pill ${selectedGarmentId === garment.id ? "active" : ""}`}
-                type="button"
-                onClick={() => {
-                  setSelectedGarmentId(garment.id);
-                  setHeroChangeOpen(false);
-                  setHeroReplacementFile(null);
-                  setHeroReplacementPreviewUrl(null);
-                }}
-                disabled={actionBusy || loadingGarmentTypes}
-              >
-                {garment.name}
-              </button>
-            ))}
-          </div>
+          {garmentTypes.length ? (
+            <div className="style-card-row">
+              {garmentTypes.map((garment) => {
+                const selected = selectedGarmentId === garment.id;
+                return (
+                  <button
+                    key={garment.id}
+                    className={`style-card ${selected ? "selected" : ""}`}
+                    type="button"
+                    onClick={() => selectGarment(garment)}
+                    disabled={actionBusy}
+                    aria-pressed={selected}
+                  >
+                    <span className="style-card-frame">
+                      <StyleCardImage
+                        url={garment.hero_thumb_signed_url || garment.hero_image_signed_url || null}
+                        alt=""
+                        onUrlExpired={() => {
+                          if (styleThumbRefreshRef.current) return;
+                          styleThumbRefreshRef.current = true;
+                          void queryClient.invalidateQueries({ queryKey: ["garment-types"] });
+                        }}
+                      />
+                      {selected ? (
+                        <span className="style-card-check" aria-hidden>
+                          <svg viewBox="0 0 24 24" focusable="false">
+                            <path d="m5 12 5 5 9-10" />
+                          </svg>
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="style-card-name">{garment.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
 
-          {loadingGarmentTypes ? <p className="tiny muted">Loading garment types...</p> : null}
+          {loadingGarmentTypes ? <p className="tiny muted">Loading styles...</p> : null}
+          {garmentTypesError ? <p className="error-box">Couldn't load styles. Tap refresh to try again.</p> : null}
+          {!loadingGarmentTypes && !garmentTypesError && !garmentTypes.length ? (
+            <p className="tiny muted">No styles found.</p>
+          ) : null}
 
           {selectedGarment ? (
             <>
               {selectedHeroPreviewUrl ? (
-                <div className="model-preview-box">
+                <div className="hero-full-box">
                   <HeroPreviewImage
                     key={selectedGarment.id}
                     thumbUrl={heroReplacementPreviewUrl || selectedGarment.hero_thumb_signed_url}
@@ -1000,14 +1104,6 @@ export function GeneratePage() {
                     alt={`${selectedGarment.name} hero`}
                     onUrlsExpired={() => void queryClient.invalidateQueries({ queryKey: ["garment-types"] })}
                   />
-                  <button
-                    className="model-change-btn"
-                    type="button"
-                    onClick={() => setHeroChangeOpen((prev) => !prev)}
-                    disabled={actionBusy}
-                  >
-                    Change
-                  </button>
                 </div>
               ) : null}
 
@@ -1032,324 +1128,127 @@ export function GeneratePage() {
           ) : null}
         </section>
 
-        <section className="card stack-sm">
-          <h2>Choose Cloth</h2>
+        {selectedGarment ? (
+          <section className="card stack-sm">
+            <span className="section-label">{isMulti ? "2 · Add the cloth for each part" : "2 · Add the cloth"}</span>
 
-          <div className="fabric-scroll">
-            <div className="fabric-tile">
-              <button
-                className="fabric-thumb-new"
-                type="button"
-                onClick={() => {
-                  debugLog("input clicked");
-                  cameraInputRef.current?.click();
-                }}
-                disabled={actionBusy}
-                aria-label="Add new cloth"
-                title="Add new cloth"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden focusable="false">
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
-              </button>
-              <span className="fabric-label">New</span>
-            </div>
-
-            {fabricPreviewUrl ? (
-              <div className="fabric-tile">
-                <div style={{ position: "relative", display: "inline-block" }}>
-                  <img className="fabric-thumb selected" src={fabricPreviewUrl} alt="selected fabric" />
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      clearFabricSelection();
-                    }}
-                    style={{
-                      position: "absolute",
-                      top: "-6px",
-                      right: "-6px",
-                      width: "20px",
-                      height: "20px",
-                      borderRadius: "50%",
-                      background: "#1B1B2F",
-                      border: "2px solid var(--white)",
-                      color: "#C9A84C",
-                      fontSize: "12px",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      lineHeight: 1,
-                      padding: 0
-                    }}
-                    aria-label="Remove fabric selection"
-                  >
-                    &times;
-                  </button>
-                </div>
-                <div className="fabric-label">
-                  {existingFabricImage?.original_filename?.trim() || fabricFile?.name || "Selected"}
-                </div>
-              </div>
-            ) : null}
-          </div>
-
-          {fabricFile ? (
-            <div className="row">
-              <button
-                className="btn btn-light"
-                type="button"
-                style={{ minHeight: "36px", padding: "0 12px", fontSize: "12px" }}
-                onClick={() => setColourTarget({ kind: "single" })}
-                disabled={actionBusy}
-              >
-                🎨 Match colour
-              </button>
-              {fabricColourAdjusted ? <span className="chip">Colour adjusted</span> : null}
-            </div>
-          ) : null}
-
-          <div className="row">
-            <button
-              className="btn btn-light flex-1"
-              type="button"
-              onClick={() => {
-                debugLog("input clicked");
-                cameraInputRef.current?.click();
-              }}
-              disabled={actionBusy}
-            >
-              Capture
-            </button>
-            <button
-              className="btn btn-light flex-1"
-              type="button"
-              onClick={() => {
-                debugLog("input clicked");
-                galleryInputRef.current?.click();
-              }}
-              disabled={actionBusy}
-            >
-              Gallery
-            </button>
-            <button
-              className="btn btn-light flex-1"
-              type="button"
-              onClick={() => navigate("/fabric-silo?picker=true")}
-              disabled={actionBusy}
-            >
-              Fabric Silo
-            </button>
-          </div>
-
-          <PhotoPickStatus
-            preparing={preparingPhoto === "fabric"}
-            error={photoError?.picker === "fabric" ? photoError.message : null}
-          />
-
-          <label className="silo-toggle-row">
-            <input
-              type="checkbox"
-              checked={saveToSilo}
-              onChange={(event) => setSaveToSilo(event.target.checked)}
-              disabled={actionBusy}
-            />
-            <span>Save new cloth to My Fabrics</span>
-          </label>
-
-          {/* Pattern selector */}
-          <div style={{
-            background: "var(--white)",
-            border: "0.5px solid var(--border)",
-            borderRadius: "12px",
-            padding: "12px"
-          }}>
-            <label style={{
-              display: "flex", alignItems: "center", gap: "10px", cursor: "pointer"
-            }}>
-              <input
-                type="checkbox"
-                checked={hasPattern}
-                onChange={(e) => {
-                  setHasPattern(e.target.checked);
-                  if (!e.target.checked) setFabricScale(null);
-                }}
-                style={{ width: "16px", height: "16px", accentColor: "#1B1B2F" }}
-              />
-              <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-primary)" }}>
-                This fabric has a pattern (checks, stripes, print)
-              </span>
-            </label>
-
-            {hasPattern && (
-              <div style={{ marginTop: "12px", display: "grid", gap: "8px" }}>
-                <span style={{
-                  fontSize: "11px", fontWeight: 600,
-                  color: "var(--text-muted)",
-                  textTransform: "uppercase", letterSpacing: "0.06em"
-                }}>
-                  How large is the pattern?
-                </span>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "8px" }}>
-                  {([
-                    { key: "fine", label: "Fine", hint: "Small, tight" },
-                    { key: "medium", label: "Medium", hint: "Classic size" },
-                    { key: "bold", label: "Bold", hint: "Large, wide" },
-                  ] as const).map((opt) => (
-                    <button
-                      key={opt.key}
-                      type="button"
-                      onClick={() => setFabricScale(opt.key)}
-                      style={{
-                        border: fabricScale === opt.key
-                          ? "2px solid #C9A84C"
-                          : "1px solid var(--border)",
-                        borderRadius: "12px",
-                        padding: "8px 6px",
-                        background: fabricScale === opt.key ? "#FDF6E8" : "var(--white)",
-                        cursor: "pointer",
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        gap: "6px",
-                      }}
-                    >
-                      <div style={{
-                        width: "56px", height: "56px", borderRadius: "8px",
-                        overflow: "hidden", border: "0.5px solid var(--border)"
-                      }}
-                        dangerouslySetInnerHTML={{
-                          __html:
-                            opt.key === "fine" ? FINE_CHECKS_SVG :
-                              opt.key === "medium" ? MEDIUM_CHECKS_SVG :
-                                BOLD_CHECKS_SVG
-                        }}
+            {isMulti
+              ? sortedFabricSlots.map((slot, index) => {
+                  const selection = multiSelections[slot.id];
+                  return renderFabricCard({
+                    key: slot.id,
+                    title: `${index + 1}. ${slot.label}`,
+                    tag: slot.apply_to,
+                    previewUrl: selection?.previewUrl ?? null,
+                    previewAlt: selection?.label ?? slot.label,
+                    onRemove: selection ? () => removeSlotFabric(slot.id) : null,
+                    onCapture: () => openMultiPicker(slot.id, "camera"),
+                    onGallery: () => openMultiPicker(slot.id, "gallery"),
+                    onMatchColour: selection?.pendingFile
+                      ? () => setColourTarget({ kind: "multi", slotId: slot.id })
+                      : null,
+                    colourAdjusted: !!selection?.colourAdjusted,
+                    status: (
+                      <PhotoPickStatus
+                        preparing={preparingPhoto === "multi" && photoSlotId === slot.id}
+                        error={photoError?.picker === "multi" && photoSlotId === slot.id ? photoError.message : null}
                       />
-                      <span style={{
-                        fontSize: "12px", fontWeight: 600,
-                        color: fabricScale === opt.key ? "#8B6914" : "var(--text-primary)"
-                      }}>{opt.label}</span>
-                      <span style={{
-                        fontSize: "10px",
-                        color: "var(--text-muted)"
-                      }}>{opt.hint}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+                    )
+                  });
+                })
+              : renderFabricCard({
+                  key: "single",
+                  title: "Fabric",
+                  previewUrl: fabricPreviewUrl,
+                  previewAlt: existingFabricImage?.original_filename?.trim() || fabricFile?.name || "Selected fabric",
+                  onRemove: fabricPreviewUrl || fabricReady ? clearFabricSelection : null,
+                  onCapture: () => {
+                    debugLog("input clicked");
+                    cameraInputRef.current?.click();
+                  },
+                  onGallery: () => {
+                    debugLog("input clicked");
+                    galleryInputRef.current?.click();
+                  },
+                  onMatchColour: fabricFile ? () => setColourTarget({ kind: "single" }) : null,
+                  colourAdjusted: fabricColourAdjusted,
+                  status: (
+                    <PhotoPickStatus
+                      preparing={preparingPhoto === "fabric"}
+                      error={photoError?.picker === "fabric" ? photoError.message : null}
+                    />
+                  )
+                })}
+          </section>
+        ) : null}
 
-          {saveToSilo ? (
-            <>
-              <label className="field">
-                <span>Fabric Code <strong>*</strong></span>
-                <input
-                  type="text"
-                  value={fabricCode}
-                  onChange={(event) => setFabricCode(event.target.value)}
-                  placeholder="e.g. F123"
-                  disabled={actionBusy}
-                />
-              </label>
-              <label className="field">
-                <span>Fabric Color (optional)</span>
-                <input
-                  type="text"
-                  value={fabricColor}
-                  onChange={(event) => setFabricColor(event.target.value)}
-                  placeholder="e.g. Navy Blue"
-                  disabled={actionBusy}
-                />
-              </label>
-            </>
-          ) : null}
+        {/* Product details are sent with the single-fabric request only, as before. */}
+        {selectedGarment && !isMulti ? (
+          <section className="card stack-sm">
+            <button
+              type="button"
+              aria-expanded={productDetailsOpen}
+              onClick={() => setProductDetailsOpen((prev) => !prev)}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#1B1B2F",
+                fontWeight: 600,
+                fontSize: "13px",
+                fontFamily: "inherit",
+                cursor: "pointer",
+                padding: 0,
+                textAlign: "left"
+              }}
+            >
+              {productDetailsOpen ? "▾" : "▸"} Add product details (optional)
+            </button>
 
-          <input
-            ref={cameraInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="visually-hidden-input"
-            tabIndex={-1}
-            aria-hidden
-            onChange={onFabricCameraChange}
-          />
-          <input
-            ref={galleryInputRef}
-            type="file"
-            accept="image/*"
-            className="visually-hidden-input"
-            tabIndex={-1}
-            aria-hidden
-            onChange={onFabricGalleryChange}
-          />
-        </section>
+            {productDetailsOpen ? (
+              <>
+                <label className="field">
+                  <span>Barcode</span>
+                  <input
+                    type="text"
+                    value={lookBarcode}
+                    onChange={(event) => setLookBarcode(event.target.value)}
+                    disabled={actionBusy}
+                  />
+                </label>
+                <label className="field">
+                  <span>MRP (₹)</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    step="any"
+                    value={lookMrp}
+                    onChange={(event) => setLookMrp(event.target.value)}
+                    placeholder="e.g. 1299"
+                    disabled={actionBusy}
+                  />
+                </label>
+                <label className="field">
+                  <span>Description</span>
+                  <textarea
+                    rows={3}
+                    maxLength={300}
+                    value={lookDescription}
+                    onChange={(event) => setLookDescription(event.target.value)}
+                    disabled={actionBusy}
+                  />
+                </label>
+              </>
+            ) : null}
+          </section>
+        ) : null}
 
         <section className="card stack-sm">
-          <button
-            type="button"
-            aria-expanded={productDetailsOpen}
-            onClick={() => setProductDetailsOpen((prev) => !prev)}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "#1B1B2F",
-              fontWeight: 600,
-              fontSize: "13px",
-              fontFamily: "inherit",
-              cursor: "pointer",
-              padding: 0,
-              textAlign: "left"
-            }}
-          >
-            {productDetailsOpen ? "▾" : "▸"} Add product details (optional)
-          </button>
-
-          {productDetailsOpen ? (
-            <>
-              <label className="field">
-                <span>Barcode</span>
-                <input
-                  type="text"
-                  value={lookBarcode}
-                  onChange={(event) => setLookBarcode(event.target.value)}
-                  disabled={actionBusy}
-                />
-              </label>
-              <label className="field">
-                <span>MRP (₹)</span>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min="0"
-                  step="any"
-                  value={lookMrp}
-                  onChange={(event) => setLookMrp(event.target.value)}
-                  placeholder="e.g. 1299"
-                  disabled={actionBusy}
-                />
-              </label>
-              <label className="field">
-                <span>Description</span>
-                <textarea
-                  rows={3}
-                  maxLength={300}
-                  value={lookDescription}
-                  onChange={(event) => setLookDescription(event.target.value)}
-                  disabled={actionBusy}
-                />
-              </label>
-            </>
-          ) : null}
-
           <button
             className="btn-primary"
             type="button"
-            disabled={!canGenerate}
-            onClick={() => void handleCreateGeneration()}
+            disabled={!canSew}
+            onClick={() => void (isMulti ? handleCreateMultiGeneration() : handleCreateGeneration())}
           >
             {creatingGeneration ? (
               "Sewing..."
@@ -1360,308 +1259,58 @@ export function GeneratePage() {
                   <circle cx="6" cy="18" r="3" />
                   <path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12" />
                 </svg>
-                Sew this Look
+                Sew this look
               </>
             )}
           </button>
 
+          {actionHint && !actionBusy ? <p className="action-hint">{actionHint}</p> : null}
+
           <button
+            className="btn-outline-navy"
+            type="button"
             onClick={() => {
-              if (!selectedFabricImageId && !fabricFile) {
-                alert("Please select a fabric first");
-                return;
-              }
-              if (!selectedGarmentId) {
-                alert("Please select a garment type first");
-                return;
-              }
+              if (!canTryOn) return;
               setShowConsentModal(true);
             }}
-            style={{
-              width: "100%",
-              minHeight: "48px",
-              background: "transparent",
-              color: "#1B1B2F",
-              border: "1.5px solid #1B1B2F",
-              borderRadius: "14px",
-              fontSize: "14px",
-              fontWeight: 700,
-              cursor: "pointer",
-              fontFamily: "inherit",
-              marginTop: "8px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "8px",
-            }}
+            disabled={!canTryOn}
           >
-            👤 Try On Customer
+            👤 Try on customer
           </button>
 
-          {visualizingGenerationId ? (
+          {actionBusy && !loadingGarmentTypes ? (
             <div className="loading-box">
               <div className="spinner" />
-              <p className="tiny muted">Generating look...</p>
+              <p className="tiny muted">{statusText || "Working..."}</p>
             </div>
           ) : null}
-        </section>
-        </>
-        )}
 
-        {generateMode === "multi" && (
-        <>
-        <section className="card stack-sm">
-          <p className="tiny muted">{statusText}</p>
-        </section>
-
-        <section className="card stack-sm">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-            <span className="section-label">Select Style</span>
-            <button
-              onClick={() => void refetchGarmentTypes()}
-              style={{
-                width: "32px",
-                height: "32px",
-                borderRadius: "50%",
-                border: "0.5px solid var(--border)",
-                background: "var(--white)",
-                cursor: "pointer",
-                display: "grid",
-                placeItems: "center",
-                color: "var(--text-muted)"
-              }}
-              aria-label="Refresh garment types"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                width="16"
-                height="16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              >
-                <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
-                <path d="M21 3v5h-5" />
-              </svg>
-            </button>
-          </div>
-
-          <div className="pill-row">
-            {garmentTypes.map((garment) => (
-              <button
-                key={garment.id}
-                className={`style-pill ${selectedGarmentId === garment.id ? "active" : ""}`}
-                type="button"
-                onClick={() => {
-                  setSelectedGarmentId(garment.id);
-                  setHeroChangeOpen(false);
-                  setHeroReplacementFile(null);
-                  setHeroReplacementPreviewUrl(null);
-                }}
-                disabled={actionBusy || loadingGarmentTypes}
-              >
-                {garment.name}
-              </button>
-            ))}
-          </div>
-
-          {loadingGarmentTypes ? <p className="tiny muted">Loading garment types...</p> : null}
-        </section>
-
-        {selectedGarment && sortedFabricSlots.length === 0 && (
-          <section className="card stack-sm">
-            <p className="tiny muted">
-              No fabric slots configured for this garment type. Ask admin to set up slots.
+          {errorText ? (
+            <p className="error-box" role="alert">
+              {errorText}
             </p>
-          </section>
-        )}
+          ) : null}
+        </section>
 
-        {selectedGarment && sortedFabricSlots.length > 0 && (
-          <>
-            {sortedFabricSlots.map((slot, index) => {
-              const selection = multiSelections[slot.id];
-              return (
-                <section key={slot.id} className="card" style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                  <div
-                    style={{
-                      width: "28px",
-                      height: "28px",
-                      borderRadius: "50%",
-                      background: "#1B1B2F",
-                      color: "#C9A84C",
-                      fontSize: "13px",
-                      fontWeight: 700,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flexShrink: 0
-                    }}
-                  >
-                    {index + 1}
-                  </div>
-
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px", flexWrap: "wrap" }}>
-                      <span style={{ fontSize: "14px", fontWeight: 700, color: "var(--text-primary)" }}>{slot.label}</span>
-                      <span
-                        style={{
-                          fontSize: "10px",
-                          fontWeight: 600,
-                          color: "#8B6914",
-                          border: "1px solid #C9A84C",
-                          background: "transparent",
-                          borderRadius: "12px",
-                          padding: "2px 8px"
-                        }}
-                      >
-                        {slot.apply_to}
-                      </span>
-                    </div>
-
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      {selection?.previewUrl ? (
-                        <img
-                          src={selection.previewUrl}
-                          alt={selection.label}
-                          style={{
-                            width: "64px",
-                            height: "64px",
-                            borderRadius: "10px",
-                            objectFit: "cover",
-                            border: "0.5px solid var(--border)",
-                            flexShrink: 0
-                          }}
-                        />
-                      ) : (
-                        <div
-                          style={{
-                            width: "64px",
-                            height: "64px",
-                            borderRadius: "10px",
-                            border: "1.5px dashed #C9A84C",
-                            flexShrink: 0
-                          }}
-                        />
-                      )}
-
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        {selection ? (
-                          <>
-                            <div
-                              style={{
-                                fontSize: "12px",
-                                color: "var(--text-primary)",
-                                fontWeight: 600,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap"
-                              }}
-                            >
-                              {selection.label}
-                            </div>
-                            <button
-                              type="button"
-                              className="btn btn-light"
-                              style={{ marginTop: "6px", padding: "6px 12px", fontSize: "12px" }}
-                              onClick={() => setMultiPickerSlotId(slot.id)}
-                              disabled={actionBusy}
-                            >
-                              Change
-                            </button>
-                            {selection.pendingFile ? (
-                              <button
-                                type="button"
-                                className="btn btn-light"
-                                style={{ marginTop: "6px", marginLeft: "6px", padding: "6px 12px", fontSize: "12px" }}
-                                onClick={() => setColourTarget({ kind: "multi", slotId: slot.id })}
-                                disabled={actionBusy}
-                              >
-                                🎨 Match colour
-                              </button>
-                            ) : null}
-                            {selection.colourAdjusted ? (
-                              <div style={{ marginTop: "6px" }}>
-                                <span className="chip">Colour adjusted</span>
-                              </div>
-                            ) : null}
-                          </>
-                        ) : (
-                          <button
-                            type="button"
-                            className="btn btn-light"
-                            onClick={() => setMultiPickerSlotId(slot.id)}
-                            disabled={actionBusy}
-                          >
-                            Choose
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </section>
-              );
-            })}
-
-            <section className="card stack-sm">
-              <button
-                className="btn-primary"
-                type="button"
-                disabled={!canGenerateMulti}
-                onClick={() => void handleCreateMultiGeneration()}
-              >
-                {creatingGeneration ? (
-                  "Sewing..."
-                ) : (
-                  <>
-                    <svg viewBox="0 0 24 24" aria-hidden focusable="false">
-                      <circle cx="6" cy="6" r="3" />
-                      <circle cx="6" cy="18" r="3" />
-                      <path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12" />
-                    </svg>
-                    Sew this Look
-                  </>
-                )}
-              </button>
-
-              <button
-                onClick={() => {
-                  if (!allMultiSlotsFilled || !selectedGarment) return;
-                  setShowConsentModal(true);
-                }}
-                disabled={!allMultiSlotsFilled || !selectedGarment}
-                style={{
-                  width: "100%",
-                  minHeight: "48px",
-                  background: "transparent",
-                  color: "#1B1B2F",
-                  border: "1.5px solid #1B1B2F",
-                  borderRadius: "14px",
-                  fontSize: "14px",
-                  fontWeight: 700,
-                  cursor: allMultiSlotsFilled && selectedGarment ? "pointer" : "not-allowed",
-                  fontFamily: "inherit",
-                  marginTop: "8px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "8px",
-                  opacity: allMultiSlotsFilled && selectedGarment ? 1 : 0.5
-                }}
-              >
-                👤 Try On Customer
-              </button>
-
-              {visualizingGenerationId ? (
-                <div className="loading-box">
-                  <div className="spinner" />
-                  <p className="tiny muted">Generating look...</p>
-                </div>
-              ) : null}
-            </section>
-          </>
-        )}
-
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="visually-hidden-input"
+          tabIndex={-1}
+          aria-hidden
+          onChange={onFabricCameraChange}
+        />
+        <input
+          ref={galleryInputRef}
+          type="file"
+          accept="image/*"
+          className="visually-hidden-input"
+          tabIndex={-1}
+          aria-hidden
+          onChange={onFabricGalleryChange}
+        />
         <input
           ref={multiCameraInputRef}
           type="file"
@@ -1681,116 +1330,7 @@ export function GeneratePage() {
           aria-hidden
           onChange={onMultiGalleryChange}
         />
-        </>
-        )}
       </section>
-
-      {multiPickerSlotId && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 100,
-            background: "rgba(0,0,0,0.6)",
-            display: "flex",
-            alignItems: "flex-end",
-            justifyContent: "center"
-          }}
-          onClick={() => setMultiPickerSlotId(null)}
-        >
-          <div
-            style={{
-              background: "var(--white)",
-              borderRadius: "20px 20px 0 0",
-              padding: "20px 16px 32px",
-              width: "100%",
-              maxWidth: "480px",
-              maxHeight: "80vh",
-              overflowY: "auto",
-              display: "grid",
-              gap: "14px"
-            }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div style={{ width: "40px", height: "4px", borderRadius: "2px", background: "var(--border)", margin: "0 auto" }} />
-
-            <span className="section-label">Choose Fabric</span>
-
-            <div className="row">
-              <button
-                className="btn btn-light flex-1"
-                type="button"
-                onClick={() => {
-                  debugLog("input clicked");
-                  multiCameraInputRef.current?.click();
-                }}
-                disabled={multiUploading || preparingPhoto === "multi"}
-              >
-                Camera
-              </button>
-              <button
-                className="btn btn-light flex-1"
-                type="button"
-                onClick={() => {
-                  debugLog("input clicked");
-                  multiGalleryInputRef.current?.click();
-                }}
-                disabled={multiUploading || preparingPhoto === "multi"}
-              >
-                Gallery
-              </button>
-            </div>
-
-            {multiUploading ? <p className="tiny muted">Uploading...</p> : null}
-            <PhotoPickStatus
-              preparing={preparingPhoto === "multi"}
-              error={photoError?.picker === "multi" ? photoError.message : null}
-            />
-
-            <span className="section-label">Recent fabrics</span>
-            <div className="fabric-scroll">
-              {(fabricImagesData ?? []).slice(0, 15).map((row) => (
-                <div
-                  key={row.id}
-                  className="fabric-tile"
-                  style={{ cursor: "pointer" }}
-                  onClick={() => chooseRecentFabric(row)}
-                >
-                  {multiRecentPreviewUrls[row.id] ? (
-                    <img className="fabric-thumb" src={multiRecentPreviewUrls[row.id]} alt={row.original_filename ?? "Fabric"} />
-                  ) : (
-                    <div className="fabric-thumb" style={{ display: "grid", placeItems: "center", color: "var(--text-muted)", fontSize: "10px" }}>
-                      ...
-                    </div>
-                  )}
-                  <div className="fabric-label">{row.original_filename || "Fabric"}</div>
-                </div>
-              ))}
-            </div>
-
-            <button
-              type="button"
-              disabled={multiUploading}
-              onClick={() => {
-                if (multiPickerSlotId) void openFabricSiloForSlot(multiPickerSlotId);
-              }}
-              style={{
-                background: "transparent",
-                border: "none",
-                color: "#1B1B2F",
-                fontWeight: 600,
-                fontSize: "13px",
-                textDecoration: "underline",
-                cursor: "pointer",
-                padding: 0,
-                justifySelf: "start"
-              }}
-            >
-              Browse all fabrics
-            </button>
-          </div>
-        </div>
-      )}
 
       {colourTarget && colourSourceFile && (
         <ColorStudio
@@ -1815,7 +1355,7 @@ export function GeneratePage() {
       {showTryOnFlow && (
         <TryOnFlow
           onClose={() => setShowTryOnFlow(false)}
-          onSubmit={generateMode === "multi" ? handleMultiTryOnSubmit : handleQuickTryOnSubmit}
+          onSubmit={handleTryOnSubmit}
           onPushToScreen={handlePushToScreen}
           onShowCarousel={handleShowCarousel}
         />
