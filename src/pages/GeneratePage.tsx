@@ -7,6 +7,7 @@ import { CustomerConsentModal } from "../components/CustomerConsentModal";
 import { PhotoPickStatus } from "../components/PhotoPickStatus";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
+import { type Attempt, attemptRef, newAttempt, refFromId, reportNoResponse, withMessage } from "../lib/attempt";
 import { useAuth } from "../lib/auth";
 import { useGarmentTypes, useMe } from "../lib/queries";
 import { subscribeToGeneration } from "../lib/realtime";
@@ -117,6 +118,10 @@ export function GeneratePage() {
   const styleThumbRefreshRef = useRef(false);
   /** Message shown if the running generation fails; set when the job is created. */
   const failureMessageRef = useRef("");
+  /** Short attempt-log id shown with that message. */
+  const failureRefRef = useRef<string | null>(null);
+  /** X-Client-Request-Id of the latest try-on; push-to-screen sends it to link the stored result. */
+  const tryOnRequestIdRef = useRef<string | null>(null);
 
   const pickedFabricImageId =
     searchParams.get("fabric_image_id") ?? searchParams.get("selectedFabricImageId") ?? "";
@@ -157,6 +162,8 @@ export function GeneratePage() {
   const [visualizingGenerationId, setVisualizingGenerationId] = useState<string | null>(null);
   const [statusText, setStatusText] = useState("");
   const [errorText, setErrorText] = useState<string | null>(null);
+  /** "Ref" line for a generation error; only shown while that same error text is on screen. */
+  const [errorRef, setErrorRef] = useState<{ forText: string; ref: string } | null>(null);
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [showTryOnFlow, setShowTryOnFlow] = useState(false);
 
@@ -282,7 +289,7 @@ export function GeneratePage() {
         console.error("[generate] generation failed", row.error);
         setVisualizingGenerationId(null);
         setStatusText("");
-        setErrorText(failureMessageRef.current || "Couldn't create the look. Please try again.");
+        showGenerationError(failureMessageRef.current || "Couldn't create the look. Please try again.", failureRefRef.current);
         return;
       }
 
@@ -313,6 +320,11 @@ export function GeneratePage() {
       window.clearInterval(timer);
     };
   }, [accessToken, navigate, visualizingGenerationId]);
+
+  function showGenerationError(message: string, ref: string | null) {
+    setErrorText(message);
+    setErrorRef(ref ? { forText: message, ref } : null);
+  }
 
   function assignFabricToSlot(slotId: string, selection: MultiFabricSelection) {
     setMultiSelections((prev) => ({ ...prev, [slotId]: selection }));
@@ -601,6 +613,7 @@ export function GeneratePage() {
     }
 
     const failureMessage = friendlyGenerateError(selectedGarment.name, 0);
+    const attempt = newAttempt("look", selectedGarment.id);
     setCreatingGeneration(true);
     try {
       const fabricImage = await ensureFabricImage();
@@ -622,7 +635,7 @@ export function GeneratePage() {
           fabrics: [fabricAssignment],
           ...productDetails
         })
-      });
+      }, attempt);
 
       void queryClient.invalidateQueries({ queryKey: ["generations"] });
 
@@ -634,18 +647,20 @@ export function GeneratePage() {
       void queryClient.invalidateQueries({ queryKey: ["me"] });
 
       failureMessageRef.current = failureMessage;
+      failureRefRef.current = refFromId(response.request_id ?? attempt.requestId);
       setVisualizingGenerationId(response.id);
       setStatusText("Generating look...");
     } catch (err) {
       console.error("[generate] create failed", err);
       setStatusText("");
-      setErrorText(failureMessage);
+      reportNoResponse(accessToken, err, failureMessage);
+      showGenerationError(failureMessage, attemptRef(err));
     } finally {
       setCreatingGeneration(false);
     }
   }
 
-  async function handleQuickTryOnSubmit(customerPhotoFile: File): Promise<string> {
+  async function handleQuickTryOnSubmit(customerPhotoFile: File, attempt: Attempt): Promise<string> {
     if (!accessToken) throw new Error("Not authenticated");
     if (!selectedFabricImageId && !fabricFile) {
       throw new Error("Please select a fabric first");
@@ -698,7 +713,7 @@ export function GeneratePage() {
     const blob = await apiFetchBinary("/tryon/quick/v2", accessToken, {
       method: "POST",
       body: formData,
-    });
+    }, attempt);
 
     return URL.createObjectURL(blob);
   }
@@ -817,6 +832,7 @@ export function GeneratePage() {
     setErrorText(null);
 
     const failureMessage = friendlyGenerateError(selectedGarment.name, sortedFabricSlots.length);
+    const attempt = newAttempt("look", selectedGarment.id);
     setCreatingGeneration(true);
     try {
       const selections = await uploadPendingMultiFabrics();
@@ -841,7 +857,7 @@ export function GeneratePage() {
           hero_image_id: heroImageId,
           fabrics
         })
-      });
+      }, attempt);
 
       void queryClient.invalidateQueries({ queryKey: ["generations"] });
 
@@ -853,12 +869,14 @@ export function GeneratePage() {
       void queryClient.invalidateQueries({ queryKey: ["me"] });
 
       failureMessageRef.current = failureMessage;
+      failureRefRef.current = refFromId(response.request_id ?? attempt.requestId);
       setVisualizingGenerationId(response.id);
       setStatusText("Generating look...");
     } catch (err) {
       console.error("[generate] create failed", err);
       setStatusText("");
-      setErrorText(failureMessage);
+      reportNoResponse(accessToken, err, failureMessage);
+      showGenerationError(failureMessage, attemptRef(err));
     } finally {
       setCreatingGeneration(false);
     }
@@ -872,7 +890,9 @@ export function GeneratePage() {
     fd.set("result_image", blob, "tryon.jpg");
     fd.set("folder_id", folderId);
     if (!isMulti && selectedFabricImageId) fd.set("fabric_image_id", selectedFabricImageId);
-    await apiFetch("/tryon/push-to-screen", accessToken, { method: "POST", body: fd });
+    const headers: Record<string, string> = {};
+    if (tryOnRequestIdRef.current) headers["X-Client-Request-Id"] = tryOnRequestIdRef.current;
+    await apiFetch("/tryon/push-to-screen", accessToken, { method: "POST", body: fd, headers });
   }
 
   async function handleShowCarousel(): Promise<void> {
@@ -881,7 +901,7 @@ export function GeneratePage() {
     if (error) throw new Error(error.message);
   }
 
-  async function handleMultiTryOnSubmit(customerPhotoFile: File): Promise<string> {
+  async function handleMultiTryOnSubmit(customerPhotoFile: File, attempt: Attempt): Promise<string> {
     if (!accessToken) throw new Error("Not authenticated");
     if (!selectedGarment) throw new Error("Select a garment type first.");
     if (!allMultiSlotsFilled) throw new Error("Fill all fabric slots first.");
@@ -907,21 +927,26 @@ export function GeneratePage() {
     const blob = await apiFetchBinary("/tryon/multi/v2", accessToken, {
       method: "POST",
       body: formData
-    });
+    }, attempt);
 
     return URL.createObjectURL(blob);
   }
 
   /** Try-on errors shown in the flow are plain text; the raw error goes to the console. */
   async function handleTryOnSubmit(customerPhotoFile: File): Promise<string> {
+    // One id per Generate Preview click.
+    const attempt = newAttempt("tryon", isMulti ? selectedGarment?.id : selectedGarmentId);
+    tryOnRequestIdRef.current = attempt.requestId;
     try {
-      return await (isMulti ? handleMultiTryOnSubmit(customerPhotoFile) : handleQuickTryOnSubmit(customerPhotoFile));
+      return await (isMulti
+        ? handleMultiTryOnSubmit(customerPhotoFile, attempt)
+        : handleQuickTryOnSubmit(customerPhotoFile, attempt));
     } catch (err) {
       console.error("[try-on] failed", err);
       if (err instanceof Error && err.message === PHOTO_READ_ERROR) throw err;
-      throw new Error(
-        `Couldn't create the try-on for ${selectedGarment?.name ?? "this style"}. Check the fabrics and try again.`
-      );
+      const message = `Couldn't create the try-on for ${selectedGarment?.name ?? "this style"}. Check the fabrics and try again.`;
+      reportNoResponse(accessToken, err, message);
+      throw withMessage(err, message);
     }
   }
 
@@ -1274,6 +1299,7 @@ export function GeneratePage() {
               {errorText}
             </p>
           ) : null}
+          {errorText && errorRef?.forText === errorText ? <p className="tiny muted">Ref: {errorRef.ref}</p> : null}
         </section>
 
         <input

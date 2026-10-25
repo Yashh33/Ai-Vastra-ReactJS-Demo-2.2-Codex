@@ -5,6 +5,7 @@ import { ColorStudio } from "../components/ColorStudio";
 import { CustomerConsentModal } from "../components/CustomerConsentModal";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
+import { newAttempt, reportNoResponse } from "../lib/attempt";
 import { useAuth } from "../lib/auth";
 import { saveColorCorrected } from "../lib/colorStudio/saveCorrected";
 import { useGarmentTypes } from "../lib/queries";
@@ -276,17 +277,25 @@ export function OutputViewerPage() {
     if (!accessToken) throw new Error("Not authenticated");
     if (!generationId) throw new Error("No generation selected");
 
+    // One id per Generate Preview click.
+    const attempt = newAttempt("look_tryon", generation?.id === generationId ? generation.folder_id : null);
     const formData = new FormData();
     formData.set("generation_id", generationId);
     formData.set("consent_confirmed", "true");
     formData.set("customer_photo", customerPhotoFile);
 
-    const blob = await apiFetchBinary("/tryon/v2", accessToken, {
-      method: "POST",
-      body: formData,
-    });
+    try {
+      const blob = await apiFetchBinary("/tryon/v2", accessToken, {
+        method: "POST",
+        body: formData,
+      }, attempt);
 
-    return URL.createObjectURL(blob);
+      return URL.createObjectURL(blob);
+    } catch (err) {
+      // TryOnFlow shows this error's message as is.
+      reportNoResponse(accessToken, err, err instanceof Error ? err.message : "Something went wrong");
+      throw err;
+    }
   }
 
   // Style (garment type) the look was sewn in; pre-selects the part in Match colour.

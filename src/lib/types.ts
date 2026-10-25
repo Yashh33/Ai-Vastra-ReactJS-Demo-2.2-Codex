@@ -107,6 +107,8 @@ export type GenerationCreateResponse = {
   balance_after: number;
   prompt_saved: boolean;
   warning?: string;
+  /** Attempt-log id (newer backends only). */
+  request_id?: string;
 };
 
 export type DownloadUrlResponse = {

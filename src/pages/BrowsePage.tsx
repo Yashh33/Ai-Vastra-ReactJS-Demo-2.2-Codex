@@ -6,6 +6,7 @@ import { LookDetails } from "../components/LookDetails";
 import { SignedImage } from "../components/SignedImage";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
+import { newAttempt, reportNoResponse } from "../lib/attempt";
 import { useAuth } from "../lib/auth";
 import { restoreOriginalColor, saveColorCorrected } from "../lib/colorStudio/saveCorrected";
 import { useMe } from "../lib/queries";
@@ -72,6 +73,8 @@ export function BrowsePage() {
   const [selectedGarmentTypeId, setSelectedGarmentTypeId] = useState<string | null>(readStoredGarmentTypeId);
   const chipRowRef = useRef<HTMLDivElement | null>(null);
   const chipRowScrolledRef = useRef(false);
+  /** X-Client-Request-Id of the latest try-on; push-to-screen sends it to link the stored result. */
+  const tryOnRequestIdRef = useRef<string | null>(null);
   const [looks, setLooks] = useState<BrowseLookRow[]>([]);
   const [tabsLoading, setTabsLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -316,13 +319,22 @@ export function BrowsePage() {
   }
 
   // The customer photo goes straight to the try-on endpoint and is never stored.
-  function submitLookTryOn(look: BrowseLookRow, photo: File, consent: boolean) {
+  async function submitLookTryOn(look: BrowseLookRow, photo: File, consent: boolean) {
     if (!accessToken) throw new Error("Not authenticated");
+    // One id per Generate Preview click.
+    const attempt = newAttempt("look_tryon", look.folder_id);
+    tryOnRequestIdRef.current = attempt.requestId;
     const formData = new FormData();
     formData.set("generation_id", look.id);
     formData.set("consent_confirmed", consent ? "true" : "false");
     formData.set("customer_photo", photo);
-    return apiFetchBinary("/tryon/v2", accessToken, { method: "POST", body: formData });
+    try {
+      return await apiFetchBinary("/tryon/v2", accessToken, { method: "POST", body: formData }, attempt);
+    } catch (err) {
+      // TryOnFlow shows this error's message as is.
+      reportNoResponse(accessToken, err, err instanceof Error ? err.message : "Something went wrong");
+      throw err;
+    }
   }
 
   async function pushTryOnToScreen(look: BrowseLookRow, blob: Blob) {
@@ -331,7 +343,9 @@ export function BrowsePage() {
     formData.set("result_image", blob, "tryon.jpg");
     formData.set("folder_id", look.folder_id);
     formData.set("source_generation_id", look.id);
-    await apiFetch("/tryon/push-to-screen", accessToken, { method: "POST", body: formData });
+    const headers: Record<string, string> = {};
+    if (tryOnRequestIdRef.current) headers["X-Client-Request-Id"] = tryOnRequestIdRef.current;
+    await apiFetch("/tryon/push-to-screen", accessToken, { method: "POST", body: formData, headers });
   }
 
   async function showCarouselOnTv() {

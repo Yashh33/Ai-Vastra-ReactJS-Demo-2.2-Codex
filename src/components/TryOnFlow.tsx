@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
+import { attemptRef } from "../lib/attempt";
 import { compressImage, PHOTO_READ_ERROR } from "../lib/compressImage";
 import { debugLog, debugLogPicked } from "../lib/debugLog";
 import { ColorStudio } from "./ColorStudio";
@@ -21,6 +22,8 @@ export function TryOnFlow({ onClose, onSubmit, submitTryOn, onPushToScreen, onSh
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Short attempt-log id shown under a try-on error, so the shop can read it out. */
+  const [errorRef, setErrorRef] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [pushedLive, setPushedLive] = useState(false);
@@ -68,12 +71,14 @@ export function TryOnFlow({ onClose, onSubmit, submitTryOn, onPushToScreen, onSh
     setPreviewUrl(URL.createObjectURL(compressed));
     setResultUrl(null);
     setError(null);
+    setErrorRef(null);
   }
 
   async function handleGenerate() {
     if (!customerPhoto) return;
     setBusy(true);
     setError(null);
+    setErrorRef(null);
     try {
       if (submitTryOn) {
         // This flow only opens after the consent step, so consent is always given here.
@@ -83,6 +88,7 @@ export function TryOnFlow({ onClose, onSubmit, submitTryOn, onPushToScreen, onSh
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
+      setErrorRef(attemptRef(err));
     } finally {
       setBusy(false);
     }
@@ -515,6 +521,17 @@ export function TryOnFlow({ onClose, onSubmit, submitTryOn, onPushToScreen, onSh
                     }}
                   >
                     {error}
+                  </p>
+                )}
+                {error && errorRef && (
+                  <p
+                    style={{
+                      fontSize: "12px",
+                      color: "var(--text-muted)",
+                      margin: 0,
+                    }}
+                  >
+                    Ref: {errorRef}
                   </p>
                 )}
 
