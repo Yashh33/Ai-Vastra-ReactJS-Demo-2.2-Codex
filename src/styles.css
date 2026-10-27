@@ -569,6 +569,63 @@ h2 { font-size: 1rem; font-weight: 700; }
   gap: 8px;
 }
 
+.fabric-card-optional {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--mt-muted);
+}
+
+/* Empty optional slot: plain White / Black fabric instead */
+.default-fabric-row {
+  display: grid;
+  gap: 6px;
+}
+
+.default-fabric-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mt-muted);
+}
+
+.default-fabric-options {
+  display: flex;
+  gap: 8px;
+}
+
+.default-fabric-toggle {
+  flex: 1;
+  min-height: 36px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--gold-border);
+  border-radius: 10px;
+  background: var(--mt-card);
+  color: var(--mt-navy);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.default-fabric-toggle.selected {
+  border: 1.5px solid var(--mt-navy);
+  background: var(--gold-light);
+  font-weight: 700;
+}
+.default-fabric-toggle:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.default-fabric-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid #CBD5E1;
+  flex-shrink: 0;
+}
+.default-fabric-swatch.white { background: #FFFFFF; }
+.default-fabric-swatch.black { background: #111111; border-color: #111111; }
+
 /* Generate: bottom actions */
 .action-hint {
   margin-top: -4px;

@@ -75,6 +75,14 @@ function isSlotFilled(selection: MultiFabricSelection | undefined) {
   return !!selection && (!!selection.fabricImageId || !!selection.pendingFile);
 }
 
+/** Built-in plain fabric the backend uses for an optional slot left empty. */
+type DefaultFabricChoice = "white" | "black";
+
+const DEFAULT_FABRIC_OPTIONS: { value: DefaultFabricChoice; label: string }[] = [
+  { value: "white", label: "White" },
+  { value: "black", label: "Black" }
+];
+
 type MultiDraftSelection = { fabricImageId: string; label: string };
 
 type MultiDraft = {
@@ -168,6 +176,8 @@ export function GeneratePage() {
   const [showTryOnFlow, setShowTryOnFlow] = useState(false);
 
   const [multiSelections, setMultiSelections] = useState<Record<string, MultiFabricSelection>>({});
+  /** White / Black per optional slot id; a slot not listed here uses White. */
+  const [slotDefaults, setSlotDefaults] = useState<Record<string, DefaultFabricChoice>>({});
 
   const selectedGarment = useMemo(
     () => garmentTypes.find((garment) => garment.id === selectedGarmentId) ?? null,
@@ -180,19 +190,19 @@ export function GeneratePage() {
   );
   // The garment type decides the flow: fabric slots mean one fabric per slot.
   const isMulti = sortedFabricSlots.length > 0;
-  const allMultiSlotsFilled =
-    sortedFabricSlots.length > 0 &&
-    sortedFabricSlots.every((slot) => isSlotFilled(multiSelections[slot.id]));
+  // Only the first slot (lowest sort_order) needs a fabric; the others can use White / Black.
+  const requiredSlot = sortedFabricSlots[0] ?? null;
+  const requiredSlotFilled = !!requiredSlot && isSlotFilled(multiSelections[requiredSlot.id]);
 
   const selectedFabricImageId = existingFabricImage?.id ?? "";
   const garmentHasHero = !!(selectedGarment?.hero_thumb_signed_url || selectedGarment?.hero_image_signed_url);
 
   const fabricReady = !!fabricFile || !!existingFabricImage?.id;
-  const fabricsReady = isMulti ? allMultiSlotsFilled : fabricReady;
+  const fabricsReady = isMulti ? requiredSlotFilled : fabricReady;
   const heroReady = !!heroReplacementFile || !!selectedGarment?.default_hero_image_id;
   const actionBusy = loadingGarmentTypes || loadingPickedFabric || creatingGeneration || !!visualizingGenerationId;
   const canGenerate = fabricReady && !!selectedGarment && heroReady && !actionBusy;
-  const canGenerateMulti = !!selectedGarment && allMultiSlotsFilled && heroReady && !actionBusy;
+  const canGenerateMulti = !!selectedGarment && requiredSlotFilled && heroReady && !actionBusy;
   const canSew = isMulti ? canGenerateMulti : canGenerate;
   const canTryOn = !!selectedGarment && fabricsReady && !actionBusy;
 
@@ -200,7 +210,7 @@ export function GeneratePage() {
     ? "Pick a style to continue"
     : !fabricsReady
       ? isMulti
-        ? "Add all fabrics to continue"
+        ? `Add the ${requiredSlot?.label ?? "first"} fabric to continue`
         : "Add the fabric to continue"
       : !heroReady
         ? "Add a model photo for this style to continue"
@@ -336,6 +346,22 @@ export function GeneratePage() {
       delete next[slotId];
       return next;
     });
+    // The White / Black row comes back with White selected.
+    setSlotDefaults((prev) => {
+      const next = { ...prev };
+      delete next[slotId];
+      return next;
+    });
+  }
+
+  /** {apply_to: "white" | "black"} for each optional slot with no fabric; null when there are none. */
+  function buildDefaultFabrics(selections: Record<string, MultiFabricSelection>) {
+    const defaults: Record<string, DefaultFabricChoice> = {};
+    sortedFabricSlots.slice(1).forEach((slot) => {
+      if (isSlotFilled(selections[slot.id])) return;
+      defaults[slot.apply_to] = slotDefaults[slot.id] ?? "white";
+    });
+    return Object.keys(defaults).length ? defaults : null;
   }
 
   useEffect(() => {
@@ -472,6 +498,7 @@ export function GeneratePage() {
     }
 
     setSelectedGarmentId(garment.id);
+    setSlotDefaults({});
     setColourTarget(null);
     setHeroChangeOpen(false);
     setHeroReplacementFile(null);
@@ -828,7 +855,7 @@ export function GeneratePage() {
   }
 
   async function handleCreateMultiGeneration() {
-    if (!accessToken || !selectedGarment || !allMultiSlotsFilled) return;
+    if (!accessToken || !selectedGarment || !requiredSlotFilled) return;
     setErrorText(null);
 
     const failureMessage = friendlyGenerateError(selectedGarment.name, sortedFabricSlots.length);
@@ -838,24 +865,29 @@ export function GeneratePage() {
       const selections = await uploadPendingMultiFabrics();
       const heroImageId = await ensureHeroImageId(selectedGarment);
 
-      const fabrics: GenerationFabricAssignmentPayload[] = sortedFabricSlots.map((slot) => {
-        const selection = selections[slot.id];
-        if (!selection?.fabricImageId) throw new Error(`Missing fabric selection for ${slot.label}.`);
+      // Empty optional slots are not sent here; they go in default_fabrics instead.
+      const fabrics: GenerationFabricAssignmentPayload[] = sortedFabricSlots
+        .filter((slot, index) => index === 0 || isSlotFilled(selections[slot.id]))
+        .map((slot) => {
+          const selection = selections[slot.id];
+          if (!selection?.fabricImageId) throw new Error(`Missing fabric selection for ${slot.label}.`);
 
-        return {
-          fabric_image_id: selection.fabricImageId,
-          apply_to: slot.apply_to as ApplyToTarget,
-          fabric_code: selection.label !== "New fabric" ? selection.label : "unknown",
-          fabric_color: null
-        };
-      });
+          return {
+            fabric_image_id: selection.fabricImageId,
+            apply_to: slot.apply_to as ApplyToTarget,
+            fabric_code: selection.label !== "New fabric" ? selection.label : "unknown",
+            fabric_color: null
+          };
+        });
+      const defaultFabrics = buildDefaultFabrics(selections);
 
       setStatusText("Creating generation job...");
       const response = await apiFetch<GenerationCreateResponse>("/generations", accessToken, {
         method: "POST",
         body: JSON.stringify({
           hero_image_id: heroImageId,
-          fabrics
+          fabrics,
+          ...(defaultFabrics ? { default_fabrics: defaultFabrics } : {})
         })
       }, attempt);
 
@@ -904,7 +936,7 @@ export function GeneratePage() {
   async function handleMultiTryOnSubmit(customerPhotoFile: File, attempt: Attempt): Promise<string> {
     if (!accessToken) throw new Error("Not authenticated");
     if (!selectedGarment) throw new Error("Select a garment type first.");
-    if (!allMultiSlotsFilled) throw new Error("Fill all fabric slots first.");
+    if (!requiredSlotFilled) throw new Error("Add the first fabric first.");
     if (!shopContext) throw new Error("Shop context is loading.");
 
     const selections = await uploadPendingMultiFabrics();
@@ -923,6 +955,8 @@ export function GeneratePage() {
       formData.set(`fabric_image_id_${index + 1}`, selection.fabricImageId);
       formData.set(`apply_to_${index + 1}`, slot.apply_to);
     });
+    const defaultFabrics = buildDefaultFabrics(selections);
+    if (defaultFabrics) formData.set("default_fabrics", JSON.stringify(defaultFabrics));
 
     const blob = await apiFetchBinary("/tryon/multi/v2", accessToken, {
       method: "POST",
@@ -953,6 +987,7 @@ export function GeneratePage() {
   function renderFabricCard(card: {
     key: string;
     title: string;
+    optional?: boolean;
     tag?: string;
     previewUrl: string | null;
     previewAlt: string;
@@ -961,12 +996,17 @@ export function GeneratePage() {
     onGallery: () => void;
     onMatchColour: (() => void) | null;
     colourAdjusted: boolean;
+    /** Shown under Capture / Gallery (the White / Black choice of an empty optional slot). */
+    belowActions?: ReactNode;
     status: ReactNode;
   }) {
     return (
       <div key={card.key} className="fabric-card">
         <div className="fabric-card-head">
-          <span className="fabric-card-title">{card.title}</span>
+          <span className="fabric-card-title">
+            {card.title}
+            {card.optional ? <span className="fabric-card-optional"> (optional)</span> : null}
+          </span>
           {card.tag ? <span className="slot-tag">{card.tag}</span> : null}
         </div>
 
@@ -1019,6 +1059,7 @@ export function GeneratePage() {
                 {card.colourAdjusted ? <span className="chip">Colour adjusted</span> : null}
               </div>
             ) : null}
+            {card.belowActions}
           </div>
         </div>
 
@@ -1144,9 +1185,12 @@ export function GeneratePage() {
             {isMulti
               ? sortedFabricSlots.map((slot, index) => {
                   const selection = multiSelections[slot.id];
+                  const optional = index > 0;
+                  const defaultChoice = slotDefaults[slot.id] ?? "white";
                   return renderFabricCard({
                     key: slot.id,
                     title: `${index + 1}. ${slot.label}`,
+                    optional,
                     tag: slot.apply_to,
                     previewUrl: selection?.previewUrl ?? null,
                     previewAlt: selection?.label ?? slot.label,
@@ -1157,6 +1201,27 @@ export function GeneratePage() {
                       ? () => setColourTarget({ kind: "multi", slotId: slot.id })
                       : null,
                     colourAdjusted: !!selection?.colourAdjusted,
+                    belowActions:
+                      optional && !isSlotFilled(selection) ? (
+                        <div className="default-fabric-row">
+                          <span className="default-fabric-label">No fabric? Use:</span>
+                          <div className="default-fabric-options" role="group" aria-label={`Plain fabric for ${slot.label}`}>
+                            {DEFAULT_FABRIC_OPTIONS.map((option) => (
+                              <button
+                                key={option.value}
+                                type="button"
+                                className={`default-fabric-toggle ${defaultChoice === option.value ? "selected" : ""}`}
+                                aria-pressed={defaultChoice === option.value}
+                                onClick={() => setSlotDefaults((prev) => ({ ...prev, [slot.id]: option.value }))}
+                                disabled={actionBusy}
+                              >
+                                <span className={`default-fabric-swatch ${option.value}`} aria-hidden />
+                                {option.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null,
                     status: (
                       <PhotoPickStatus
                         preparing={preparingPhoto === "multi" && photoSlotId === slot.id}
