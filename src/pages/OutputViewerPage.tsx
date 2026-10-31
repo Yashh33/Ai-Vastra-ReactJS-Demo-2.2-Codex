@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { ColorStudio } from "../components/ColorStudio";
 import { CustomerConsentModal } from "../components/CustomerConsentModal";
+import { PushLookToScreenButton } from "../components/PushLookToScreenButton";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
 import { newAttempt, reportNoResponse } from "../lib/attempt";
@@ -494,6 +495,13 @@ export function OutputViewerPage() {
 
         {generationMode && generationReady && !catalogMode ? (
           <div style={{ display: 'grid', gap: '10px', marginBottom: '12px' }}>
+            {imageUrl && generation?.id === generationId && (generation.generation_type ?? "look") === "look" ? (
+              <PushLookToScreenButton
+                key={`${generationId}:${generation.output_path}`}
+                generationId={generationId}
+                garmentTypeId={generation.folder_id}
+              />
+            ) : null}
             <div style={{ display: 'flex', gap: '10px' }}>
               <button
                 className="btn-primary"

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { ColorStudio } from "../components/ColorStudio";
 import { CustomerConsentModal } from "../components/CustomerConsentModal";
 import { LookDetails } from "../components/LookDetails";
+import { PushLookToScreenButton } from "../components/PushLookToScreenButton";
 import { SignedImage } from "../components/SignedImage";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
@@ -21,7 +22,8 @@ import { supabase } from "../lib/supabase";
 
 // Mirrors the TV's browse mode (ScreenPage) using the same shared queries, but is driven by
 // local state only: browsing never reads or writes shop_screen_state, so it can't change the TV.
-// The one exception is "Try on customer", whose result can be pushed to the TV on request.
+// The exceptions are "Try on customer", whose result can be pushed to the TV on request,
+// and "Push to big screen" on an open look.
 
 const OUTPUT_BUCKET = "generated-outputs";
 // Full-size looks get longer than a thumbnail before a load counts as stuck.
@@ -551,6 +553,11 @@ export function BrowsePage() {
               <button type="button" className="mt-browse-tryon-btn" onClick={() => setTryOnConsentOpen(true)}>
                 👤 Try on customer
               </button>
+              <PushLookToScreenButton
+                key={`${detailLook.id}:${detailLook.output_path}`}
+                generationId={detailLook.id}
+                garmentTypeId={detailLook.folder_id}
+              />
               <div className="mt-browse-detail-actions">
                 <button type="button" className="mt-browse-edit-btn" onClick={() => startEditDetails(detailLook)}>
                   Edit details

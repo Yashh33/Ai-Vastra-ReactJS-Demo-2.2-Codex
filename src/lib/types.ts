@@ -85,6 +85,7 @@ export type GenerationRow = {
   fabric_image_id: string;
   folder_id: string;
   status: GenerationStatus;
+  generation_type?: string;
   prompt_used: string | null;
   nano_request_id: string | null;
   output_path: string | null;
