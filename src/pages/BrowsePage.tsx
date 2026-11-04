@@ -7,7 +7,8 @@ import { PushLookToScreenButton } from "../components/PushLookToScreenButton";
 import { SignedImage } from "../components/SignedImage";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
-import { newAttempt, reportNoResponse } from "../lib/attempt";
+import { friendlyError } from "../lib/apiError";
+import { newAttempt, reportNoResponse, withMessage } from "../lib/attempt";
 import { useAuth } from "../lib/auth";
 import { restoreOriginalColor, saveColorCorrected } from "../lib/colorStudio/saveCorrected";
 import { useMe } from "../lib/queries";
@@ -333,9 +334,11 @@ export function BrowsePage() {
     try {
       return await apiFetchBinary("/tryon/v2", accessToken, { method: "POST", body: formData }, attempt);
     } catch (err) {
-      // TryOnFlow shows this error's message as is.
-      reportNoResponse(accessToken, err, err instanceof Error ? err.message : "Something went wrong");
-      throw err;
+      console.error("BrowsePage: look try-on failed", look.id, err);
+      // TryOnFlow shows this error's message as is, so it gets the plain one.
+      const message = friendlyError(err);
+      reportNoResponse(accessToken, err, message);
+      throw withMessage(err, message);
     }
   }
 
@@ -553,6 +556,7 @@ export function BrowsePage() {
               <button type="button" className="mt-browse-tryon-btn" onClick={() => setTryOnConsentOpen(true)}>
                 👤 Try on customer
               </button>
+              <p className="credit-cost-hint">Uses 50 credits</p>
               <PushLookToScreenButton
                 key={`${detailLook.id}:${detailLook.output_path}`}
                 generationId={detailLook.id}

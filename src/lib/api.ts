@@ -1,3 +1,4 @@
+import { ApiError } from "./apiError";
 import { AttemptError, type Attempt } from "./attempt";
 import { debugLog } from "./debugLog";
 import { APP_ENV } from "./env";
@@ -28,9 +29,9 @@ async function send(path: string, init: RequestInit, headers: Headers, attempt?:
     });
   } catch (err) {
     if (isUpload) debugLog("upload FAIL network");
-    if (!attempt) throw err;
     const message = err instanceof Error ? err.message : String(err);
     const name = err instanceof Error ? err.name : "Error";
+    if (!attempt) throw new ApiError(message, { status: null, noResponse: true });
     throw new AttemptError(message, { attempt, noResponse: true, clientError: `${name}: ${message}` });
   }
   if (isUpload) debugLog(`upload ${response.ok ? "OK" : "FAIL"} ${response.status}`);
@@ -50,11 +51,11 @@ function errorFor(response: Response, payload: unknown, attempt?: Attempt): Erro
   const body = typeof payload === "object" && payload !== null ? (payload as ErrorPayload) : null;
   const detail = body && "detail" in body ? String(body.detail) : `HTTP ${response.status}`;
 
-  if (!attempt) return new Error(detail);
+  if (!attempt) return new ApiError(detail, { status: response.status, noResponse: false });
   // The backend logged this attempt; its id comes back in the body or the X-Request-Id header.
   const backendRequestId =
     (typeof body?.request_id === "string" ? body.request_id : null) ?? response.headers.get("X-Request-Id");
-  return new AttemptError(detail, { attempt, noResponse: false, backendRequestId });
+  return new AttemptError(detail, { attempt, noResponse: false, status: response.status, backendRequestId });
 }
 
 /** `attempt`: a Generate / Try-on call; sends X-Client-Request-Id and throws AttemptError on failure. */

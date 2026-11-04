@@ -1,5 +1,7 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
+import { GENERIC_ERROR_MESSAGE } from "../lib/apiError";
 import { attemptRef } from "../lib/attempt";
 import { compressImage, PHOTO_READ_ERROR } from "../lib/compressImage";
 import { debugLog, debugLogPicked } from "../lib/debugLog";
@@ -17,6 +19,7 @@ type Props = {
 };
 
 export function TryOnFlow({ onClose, onSubmit, submitTryOn, onPushToScreen, onShowCarousel }: Props) {
+  const queryClient = useQueryClient();
   const [customerPhoto, setCustomerPhoto] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
@@ -87,10 +90,13 @@ export function TryOnFlow({ onClose, onSubmit, submitTryOn, onPushToScreen, onSh
         setResultUrl(await onSubmit(customerPhoto));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      // Callers hand over a plain message; anything else gets the generic one.
+      setError(err instanceof Error && err.message ? err.message : GENERIC_ERROR_MESSAGE);
       setErrorRef(attemptRef(err));
     } finally {
       setBusy(false);
+      // A try-on costs credits; a failed one may have been refunded.
+      void queryClient.invalidateQueries({ queryKey: ["me"] });
     }
   }
 
@@ -554,6 +560,16 @@ export function TryOnFlow({ onClose, onSubmit, submitTryOn, onPushToScreen, onSh
                 >
                   {busy ? "Fitting..." : "Generate Preview"}
                 </button>
+                <p
+                  style={{
+                    fontSize: "12px",
+                    color: "var(--text-muted)",
+                    margin: "-6px 0 0",
+                    textAlign: "center",
+                  }}
+                >
+                  Uses 50 credits
+                </p>
               </>
             )}
           </>

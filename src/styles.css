@@ -635,6 +635,14 @@ h2 { font-size: 1rem; font-weight: 700; }
   text-align: center;
 }
 
+/* Small "Uses 50 credits" line under a try-on button. */
+.credit-cost-hint {
+  margin: -4px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
 .btn-outline-navy {
   width: 100%;
   min-height: 48px;

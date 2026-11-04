@@ -7,6 +7,7 @@ import { CustomerConsentModal } from "../components/CustomerConsentModal";
 import { PhotoPickStatus } from "../components/PhotoPickStatus";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
+import { friendlyError, GENERIC_ERROR_MESSAGE, MissingFabricError } from "../lib/apiError";
 import { type Attempt, attemptRef, newAttempt, refFromId, reportNoResponse, withMessage } from "../lib/attempt";
 import { useAuth } from "../lib/auth";
 import { useGarmentTypes, useMe } from "../lib/queries";
@@ -42,8 +43,8 @@ function sortSlots(slots: GarmentFabricSlot[] | undefined) {
   return [...(slots ?? [])].sort((a, b) => a.sort_order - b.sort_order);
 }
 
-/** Plain message for a failed look; the raw backend error only goes to the console. */
-function friendlyGenerateError(garmentName: string, slotCount: number) {
+/** "Check the fabric(s)" message for a look whose fabric is missing / invalid; the raw backend error only goes to the console. */
+function fabricLookError(garmentName: string, slotCount: number) {
   const check =
     slotCount === 0
       ? "Check that the fabric is added"
@@ -124,9 +125,7 @@ export function GeneratePage() {
   const hydratedMultiDraftRef = useRef(false);
   const handledMultiReturnParamsRef = useRef(false);
   const styleThumbRefreshRef = useRef(false);
-  /** Message shown if the running generation fails; set when the job is created. */
-  const failureMessageRef = useRef("");
-  /** Short attempt-log id shown with that message. */
+  /** Short attempt-log id shown if the running generation fails; set when the job is created. */
   const failureRefRef = useRef<string | null>(null);
   /** X-Client-Request-Id of the latest try-on; push-to-screen sends it to link the stored result. */
   const tryOnRequestIdRef = useRef<string | null>(null);
@@ -282,6 +281,11 @@ export function GeneratePage() {
     const handleStatusRow = (row: { id: string; status: string; error: string | null }) => {
       if (cancelled) return;
 
+      if (row.status === "done" || row.status === "failed") {
+        // A failed look may have been refunded.
+        void queryClient.invalidateQueries({ queryKey: ["me"] });
+      }
+
       if (row.status === "done") {
         setVisualizingGenerationId(null);
         setStatusText("Generation ready.");
@@ -299,7 +303,7 @@ export function GeneratePage() {
         console.error("[generate] generation failed", row.error);
         setVisualizingGenerationId(null);
         setStatusText("");
-        showGenerationError(failureMessageRef.current || "Couldn't create the look. Please try again.", failureRefRef.current);
+        showGenerationError(GENERIC_ERROR_MESSAGE, failureRefRef.current);
         return;
       }
 
@@ -329,7 +333,7 @@ export function GeneratePage() {
       unsubscribe();
       window.clearInterval(timer);
     };
-  }, [accessToken, navigate, visualizingGenerationId]);
+  }, [accessToken, navigate, queryClient, visualizingGenerationId]);
 
   function showGenerationError(message: string, ref: string | null) {
     setErrorText(message);
@@ -608,7 +612,7 @@ export function GeneratePage() {
   async function ensureFabricImage() {
     if (existingFabricImage?.id) return existingFabricImage;
     if (fabricFile) return uploadFabricImage(fabricFile);
-    throw new Error("Select a fabric image first.");
+    throw new MissingFabricError("Select a fabric image first.");
   }
 
   async function ensureHeroImageId(garment: GarmentType) {
@@ -639,7 +643,7 @@ export function GeneratePage() {
       productDetails.mrp = mrp;
     }
 
-    const failureMessage = friendlyGenerateError(selectedGarment.name, 0);
+    const fabricMessage = fabricLookError(selectedGarment.name, 0);
     const attempt = newAttempt("look", selectedGarment.id);
     setCreatingGeneration(true);
     try {
@@ -673,15 +677,17 @@ export function GeneratePage() {
       }
       void queryClient.invalidateQueries({ queryKey: ["me"] });
 
-      failureMessageRef.current = failureMessage;
       failureRefRef.current = refFromId(response.request_id ?? attempt.requestId);
       setVisualizingGenerationId(response.id);
       setStatusText("Generating look...");
     } catch (err) {
       console.error("[generate] create failed", err);
       setStatusText("");
-      reportNoResponse(accessToken, err, failureMessage);
-      showGenerationError(failureMessage, attemptRef(err));
+      const message = friendlyError(err, fabricMessage);
+      reportNoResponse(accessToken, err, message);
+      showGenerationError(message, attemptRef(err));
+      // Credits may have been taken and refunded.
+      void queryClient.invalidateQueries({ queryKey: ["me"] });
     } finally {
       setCreatingGeneration(false);
     }
@@ -690,7 +696,7 @@ export function GeneratePage() {
   async function handleQuickTryOnSubmit(customerPhotoFile: File, attempt: Attempt): Promise<string> {
     if (!accessToken) throw new Error("Not authenticated");
     if (!selectedFabricImageId && !fabricFile) {
-      throw new Error("Please select a fabric first");
+      throw new MissingFabricError("Please select a fabric first");
     }
     if (!selectedGarmentId) {
       throw new Error("Please select a garment type first");
@@ -726,7 +732,7 @@ export function GeneratePage() {
     }
 
     if (!fabricImageId) {
-      throw new Error("Could not resolve fabric image");
+      throw new MissingFabricError("Could not resolve fabric image");
     }
 
     const compressedPhoto = await compressImage(customerPhotoFile, 1280);
@@ -858,7 +864,7 @@ export function GeneratePage() {
     if (!accessToken || !selectedGarment || !requiredSlotFilled) return;
     setErrorText(null);
 
-    const failureMessage = friendlyGenerateError(selectedGarment.name, sortedFabricSlots.length);
+    const fabricMessage = fabricLookError(selectedGarment.name, sortedFabricSlots.length);
     const attempt = newAttempt("look", selectedGarment.id);
     setCreatingGeneration(true);
     try {
@@ -870,7 +876,7 @@ export function GeneratePage() {
         .filter((slot, index) => index === 0 || isSlotFilled(selections[slot.id]))
         .map((slot) => {
           const selection = selections[slot.id];
-          if (!selection?.fabricImageId) throw new Error(`Missing fabric selection for ${slot.label}.`);
+          if (!selection?.fabricImageId) throw new MissingFabricError(`Missing fabric selection for ${slot.label}.`);
 
           return {
             fabric_image_id: selection.fabricImageId,
@@ -900,15 +906,17 @@ export function GeneratePage() {
       }
       void queryClient.invalidateQueries({ queryKey: ["me"] });
 
-      failureMessageRef.current = failureMessage;
       failureRefRef.current = refFromId(response.request_id ?? attempt.requestId);
       setVisualizingGenerationId(response.id);
       setStatusText("Generating look...");
     } catch (err) {
       console.error("[generate] create failed", err);
       setStatusText("");
-      reportNoResponse(accessToken, err, failureMessage);
-      showGenerationError(failureMessage, attemptRef(err));
+      const message = friendlyError(err, fabricMessage);
+      reportNoResponse(accessToken, err, message);
+      showGenerationError(message, attemptRef(err));
+      // Credits may have been taken and refunded.
+      void queryClient.invalidateQueries({ queryKey: ["me"] });
     } finally {
       setCreatingGeneration(false);
     }
@@ -936,7 +944,7 @@ export function GeneratePage() {
   async function handleMultiTryOnSubmit(customerPhotoFile: File, attempt: Attempt): Promise<string> {
     if (!accessToken) throw new Error("Not authenticated");
     if (!selectedGarment) throw new Error("Select a garment type first.");
-    if (!requiredSlotFilled) throw new Error("Add the first fabric first.");
+    if (!requiredSlotFilled) throw new MissingFabricError("Add the first fabric first.");
     if (!shopContext) throw new Error("Shop context is loading.");
 
     const selections = await uploadPendingMultiFabrics();
@@ -978,7 +986,10 @@ export function GeneratePage() {
     } catch (err) {
       console.error("[try-on] failed", err);
       if (err instanceof Error && err.message === PHOTO_READ_ERROR) throw err;
-      const message = `Couldn't create the try-on for ${selectedGarment?.name ?? "this style"}. Check the fabrics and try again.`;
+      const message = friendlyError(
+        err,
+        `Couldn't create the try-on for ${selectedGarment?.name ?? "this style"}. Check the fabrics and try again.`
+      );
       reportNoResponse(accessToken, err, message);
       throw withMessage(err, message);
     }
@@ -1351,6 +1362,7 @@ export function GeneratePage() {
           >
             👤 Try on customer
           </button>
+          <p className="credit-cost-hint">Uses 50 credits</p>
 
           {actionBusy && !loadingGarmentTypes ? (
             <div className="loading-box">

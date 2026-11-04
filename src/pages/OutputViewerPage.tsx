@@ -6,7 +6,8 @@ import { CustomerConsentModal } from "../components/CustomerConsentModal";
 import { PushLookToScreenButton } from "../components/PushLookToScreenButton";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
-import { newAttempt, reportNoResponse } from "../lib/attempt";
+import { friendlyError, GENERIC_ERROR_MESSAGE } from "../lib/apiError";
+import { newAttempt, reportNoResponse, withMessage } from "../lib/attempt";
 import { useAuth } from "../lib/auth";
 import { saveColorCorrected } from "../lib/colorStudio/saveCorrected";
 import { useGarmentTypes } from "../lib/queries";
@@ -19,6 +20,24 @@ import type {
   GenerationRow,
 } from "../lib/types";
 import { isPendingStatus } from "../lib/utils";
+
+/** A failed image link / image load is retried once, this long after, before the error shows. */
+const IMAGE_RETRY_MS = 1000;
+const IMAGE_LOAD_ERROR = "Couldn't load the image. Tap to retry.";
+
+function wait(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function withOneRetry<T>(load: () => Promise<T>): Promise<T> {
+  try {
+    return await load();
+  } catch (err) {
+    console.warn("[output-viewer] load failed, retrying once", err);
+    await wait(IMAGE_RETRY_MS);
+    return load();
+  }
+}
 
 export function OutputViewerPage() {
   const { accessToken } = useAuth();
@@ -45,9 +64,18 @@ export function OutputViewerPage() {
   const [showTryOnFlow, setShowTryOnFlow] = useState(false);
   const [showColourStudio, setShowColourStudio] = useState(false);
   const [colourUpdatedId, setColourUpdatedId] = useState<string | null>(null);
+  /** The image (or its link) failed to load, even after the automatic retry. */
+  const [loadError, setLoadError] = useState(false);
+  /** Bumped to remount the <img> when retrying a plain imageUrl. */
+  const [imageKey, setImageKey] = useState(0);
   const { data: garmentTypes } = useGarmentTypes();
 
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
+  /** Only the latest load may update the view (an older one may still be waiting to retry). */
+  const loadSeqRef = useRef(0);
+  /** The shown image already had its automatic retry. */
+  const imageRetriedRef = useRef(false);
+  const imageRetryTimerRef = useRef<number | null>(null);
 
   const generationMode = !!generationId;
   const catalogImageMode = !!catalogImageId;
@@ -111,49 +139,104 @@ export function OutputViewerPage() {
     return response.download_url;
   }
 
+  function showLoadError(err: unknown) {
+    console.error("[output-viewer] image load failed", err);
+    setImageUrl(null);
+    setLoadError(true);
+    setStatusText("");
+  }
+
   async function loadGenerationView() {
     if (!accessToken || !generationId) return;
 
+    const seq = ++loadSeqRef.current;
     setLoading(true);
+    setLoadError(false);
     try {
-      const row = await apiFetch<GenerationRow>(`/generations/${generationId}`, accessToken, {
-        method: "GET",
-      });
+      const row = await withOneRetry(() =>
+        apiFetch<GenerationRow>(`/generations/${generationId}`, accessToken, {
+          method: "GET",
+        })
+      );
+      if (seq !== loadSeqRef.current) return;
       setGeneration(row);
 
       if (row.status === "done" && row.output_path) {
-        const signed = await fetchGenerationDownloadUrl(generationId);
+        const signed = await withOneRetry(() => fetchGenerationDownloadUrl(generationId));
+        if (seq !== loadSeqRef.current) return;
         setImageUrl(signed);
         setStatusText(catalogMode ? "Catalog image" : "Output ready");
       } else if (isPendingStatus(row.status)) {
         setImageUrl(null);
         setStatusText("Visualizing...");
       } else {
+        // The raw backend error only goes to the console.
+        if (row.error) console.error("[output-viewer] generation failed", row.error);
         setImageUrl(null);
-        setStatusText(row.error || "Output not available");
+        setStatusText(row.status === "failed" ? GENERIC_ERROR_MESSAGE : "Output not available");
       }
     } catch (err) {
-      setStatusText(`Load failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+      if (seq === loadSeqRef.current) showLoadError(err);
     } finally {
-      setLoading(false);
+      if (seq === loadSeqRef.current) setLoading(false);
     }
   }
 
   async function loadCatalogImageView() {
     if (!catalogImageMode || !accessToken || !catalogImageId) return;
 
+    const seq = ++loadSeqRef.current;
     setLoading(true);
+    setLoadError(false);
     try {
-      const signed = await fetchCatalogImageDownloadUrl(catalogImageId);
+      const signed = await withOneRetry(() => fetchCatalogImageDownloadUrl(catalogImageId));
+      if (seq !== loadSeqRef.current) return;
       setImageUrl(signed);
       setStatusText("Catalog image");
     } catch (err) {
-      setImageUrl(null);
-      setStatusText(`Load failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+      if (seq === loadSeqRef.current) showLoadError(err);
     } finally {
-      setLoading(false);
+      if (seq === loadSeqRef.current) setLoading(false);
     }
   }
+
+  function clearImageRetryTimer() {
+    if (imageRetryTimerRef.current !== null) window.clearTimeout(imageRetryTimerRef.current);
+    imageRetryTimerRef.current = null;
+  }
+
+  /** Fetches a fresh link (or reloads a plain imageUrl). */
+  function reloadImage() {
+    if (generationMode) void loadGenerationView();
+    else if (catalogImageMode) void loadCatalogImageView();
+    else if (externalImageUrl) {
+      setLoadError(false);
+      setImageUrl(externalImageUrl);
+      setImageKey((key) => key + 1);
+    }
+  }
+
+  function handleRetryImage() {
+    clearImageRetryTimer();
+    imageRetriedRef.current = false;
+    reloadImage();
+  }
+
+  /** The signed link may have expired or hiccuped: one automatic retry, then the error. */
+  function handleImageError() {
+    if (imageRetriedRef.current) {
+      showLoadError(new Error("image failed to load"));
+      return;
+    }
+    imageRetriedRef.current = true;
+    clearImageRetryTimer();
+    imageRetryTimerRef.current = window.setTimeout(() => {
+      imageRetryTimerRef.current = null;
+      reloadImage();
+    }, IMAGE_RETRY_MS);
+  }
+
+  useEffect(() => clearImageRetryTimer, []);
 
   async function loadCatalogRows() {
     if (!catalogMode || !accessToken || !catalogFolderId) {
@@ -188,10 +271,17 @@ export function OutputViewerPage() {
   }
 
   useEffect(() => {
+    // A new image (or a fresh load) gets its own automatic retry.
+    clearImageRetryTimer();
+    imageRetriedRef.current = false;
+    setLoadError(false);
+
     if (generationMode) {
       if (catalogMode) {
         const cachedRow = generationCatalogVisibleRows.find((row) => row.id === generationId);
         if (cachedRow) {
+          loadSeqRef.current += 1;
+          setLoading(false);
           setGeneration(cachedRow);
           setImageUrl(cachedRow.download_url ?? null);
           setStatusText("Catalog image");
@@ -293,9 +383,11 @@ export function OutputViewerPage() {
 
       return URL.createObjectURL(blob);
     } catch (err) {
-      // TryOnFlow shows this error's message as is.
-      reportNoResponse(accessToken, err, err instanceof Error ? err.message : "Something went wrong");
-      throw err;
+      console.error("[output-viewer] look try-on failed", err);
+      // TryOnFlow shows this error's message as is, so it gets the plain one.
+      const message = friendlyError(err);
+      reportNoResponse(accessToken, err, message);
+      throw withMessage(err, message);
     }
   }
 
@@ -418,15 +510,32 @@ export function OutputViewerPage() {
             <div className="loading-box dark">
               <div className="spinner" />
             </div>
+          ) : loadError ? (
+            <div className="loading-box dark" role="alert">
+              <p className="tiny muted-light">{IMAGE_LOAD_ERROR}</p>
+              <button className="btn btn-light" type="button" onClick={handleRetryImage}>
+                Retry
+              </button>
+            </div>
           ) : imageUrl ? (
-            <img src={imageUrl} alt={title} />
+            <img
+              key={imageKey}
+              src={imageUrl}
+              alt={title}
+              onLoad={() => {
+                imageRetriedRef.current = false;
+              }}
+              onError={handleImageError}
+            />
           ) : (
             <div className="loading-box dark">
               {isPendingStatus(generation?.status) ? <div className="spinner" /> : null}
               <p className="tiny muted-light">
                 {isPendingStatus(generation?.status)
                   ? "Visualizing..."
-                  : generation?.error || "No image available"}
+                  : generation?.status === "failed"
+                    ? GENERIC_ERROR_MESSAGE
+                    : "No image available"}
               </p>
             </div>
           )}
@@ -490,6 +599,7 @@ export function OutputViewerPage() {
                 👤 Try On Customer
               </button>
             ) : null}
+            {generationMode && !catalogImageMode ? <p className="credit-cost-hint">Uses 50 credits</p> : null}
           </div>
         ) : null}
 
@@ -548,6 +658,7 @@ export function OutputViewerPage() {
             >
               👤 Try On Customer
             </button>
+            <p className="credit-cost-hint">Uses 50 credits</p>
           </div>
         ) : null}
 

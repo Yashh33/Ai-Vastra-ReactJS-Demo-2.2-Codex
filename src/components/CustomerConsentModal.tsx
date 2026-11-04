@@ -84,6 +84,7 @@ export function CustomerConsentModal({ onConsent, onCancel }: Props) {
             "Deleted immediately after the preview is created",
             "Never saved to our servers",
             "Used only for this single visualization",
+            "The customer's photo is not stored. The generated try-on image may be kept for up to 7 days for quality checks, then deleted automatically.",
           ].map((point, idx) => (
             <div
               key={idx}

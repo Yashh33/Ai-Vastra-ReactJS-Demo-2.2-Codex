@@ -1,3 +1,4 @@
+import { ApiError } from "./apiError";
 import { APP_ENV } from "./env";
 
 /** One Generate / Try-on click, as the backend's attempt log ("Operations") knows it. */
@@ -41,20 +42,24 @@ export function newAttempt(attemptType: AttemptType, garmentTypeId?: string | nu
 }
 
 /** A failed generation call: either no response at all, or an error response the backend already logged. */
-export class AttemptError extends Error {
+export class AttemptError extends ApiError {
   attempt: Attempt;
-  noResponse: boolean;
   backendRequestId?: string;
   clientError: string;
 
   constructor(
     message: string,
-    fields: { attempt: Attempt; noResponse: boolean; backendRequestId?: string | null; clientError?: string }
+    fields: {
+      attempt: Attempt;
+      noResponse: boolean;
+      status?: number | null;
+      backendRequestId?: string | null;
+      clientError?: string;
+    }
   ) {
-    super(message);
+    super(message, { status: fields.status ?? null, noResponse: fields.noResponse });
     this.name = "AttemptError";
     this.attempt = fields.attempt;
-    this.noResponse = fields.noResponse;
     this.backendRequestId = fields.backendRequestId || undefined;
     this.clientError = fields.clientError ?? message;
   }
@@ -66,6 +71,7 @@ export function withMessage(err: unknown, message: string): Error {
   return new AttemptError(message, {
     attempt: err.attempt,
     noResponse: err.noResponse,
+    status: err.status,
     backendRequestId: err.backendRequestId,
     clientError: err.clientError
   });
