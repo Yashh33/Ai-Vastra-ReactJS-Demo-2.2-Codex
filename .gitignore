@@ -9,3 +9,13 @@ dist/
 references/
 !.env.example
 *_latest*.txt
+
+# Old dump files (removed from the repo)
+frontend_code.txt
+frontend_latest.txt
+frontend_latest1.txt
+frontend_latest2.txt
+lazy_files.txt
+matchcolor_latest.txt
+shell_files.txt
+styles_export.txt

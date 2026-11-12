@@ -90,6 +90,8 @@ export type GenerationRow = {
   nano_request_id: string | null;
   output_path: string | null;
   error: string | null;
+  /** Optional: "ai_busy" | "ai_blocked" | "ai_no_image" on a failed row (newer backends only). */
+  error_code?: string | null;
   credits_used: number;
   created_at: string;
   started_at: string | null;

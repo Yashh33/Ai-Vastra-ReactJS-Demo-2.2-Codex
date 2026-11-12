@@ -7,7 +7,7 @@ import { CustomerConsentModal } from "../components/CustomerConsentModal";
 import { PhotoPickStatus } from "../components/PhotoPickStatus";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
-import { friendlyError, GENERIC_ERROR_MESSAGE, MissingFabricError } from "../lib/apiError";
+import { errorCodeMessage, friendlyError, GENERIC_ERROR_MESSAGE, MissingFabricError } from "../lib/apiError";
 import { type Attempt, attemptRef, newAttempt, refFromId, reportNoResponse, withMessage } from "../lib/attempt";
 import { useAuth } from "../lib/auth";
 import { useGarmentTypes, useMe } from "../lib/queries";
@@ -278,7 +278,12 @@ export function GeneratePage() {
     if (!accessToken || !visualizingGenerationId) return;
     let cancelled = false;
 
-    const handleStatusRow = (row: { id: string; status: string; error: string | null }) => {
+    const handleStatusRow = (row: {
+      id: string;
+      status: string;
+      error: string | null;
+      error_code?: string | null;
+    }) => {
       if (cancelled) return;
 
       if (row.status === "done" || row.status === "failed") {
@@ -300,10 +305,10 @@ export function GeneratePage() {
       }
 
       if (row.status === "failed") {
-        console.error("[generate] generation failed", row.error);
+        console.error("[generate] generation failed", row.error, row.error_code ?? "");
         setVisualizingGenerationId(null);
         setStatusText("");
-        showGenerationError(GENERIC_ERROR_MESSAGE, failureRefRef.current);
+        showGenerationError(errorCodeMessage(row.error_code, "look") ?? GENERIC_ERROR_MESSAGE, failureRefRef.current);
         return;
       }
 

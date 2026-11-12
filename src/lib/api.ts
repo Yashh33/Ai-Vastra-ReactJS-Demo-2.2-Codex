@@ -6,6 +6,8 @@ import { APP_ENV } from "./env";
 type ErrorPayload = {
   detail?: string;
   request_id?: string;
+  /** Optional: "ai_busy" | "ai_blocked" | "ai_no_image" (newer backends only). */
+  error_code?: string | null;
 };
 
 function buildHeaders(init: RequestInit, accessToken: string, attempt?: Attempt) {
@@ -50,12 +52,19 @@ function parsePayload(text: string): unknown {
 function errorFor(response: Response, payload: unknown, attempt?: Attempt): Error {
   const body = typeof payload === "object" && payload !== null ? (payload as ErrorPayload) : null;
   const detail = body && "detail" in body ? String(body.detail) : `HTTP ${response.status}`;
+  const errorCode = typeof body?.error_code === "string" ? body.error_code : null;
 
-  if (!attempt) return new ApiError(detail, { status: response.status, noResponse: false });
+  if (!attempt) return new ApiError(detail, { status: response.status, noResponse: false, errorCode });
   // The backend logged this attempt; its id comes back in the body or the X-Request-Id header.
   const backendRequestId =
     (typeof body?.request_id === "string" ? body.request_id : null) ?? response.headers.get("X-Request-Id");
-  return new AttemptError(detail, { attempt, noResponse: false, status: response.status, backendRequestId });
+  return new AttemptError(detail, {
+    attempt,
+    noResponse: false,
+    status: response.status,
+    backendRequestId,
+    errorCode
+  });
 }
 
 /** `attempt`: a Generate / Try-on call; sends X-Client-Request-Id and throws AttemptError on failure. */

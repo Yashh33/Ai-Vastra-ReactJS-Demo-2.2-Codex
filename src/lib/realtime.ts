@@ -4,6 +4,8 @@ export type GenerationRealtimeRow = {
   id: string;
   status: string;
   error: string | null;
+  /** Optional: "ai_busy" | "ai_blocked" | "ai_no_image" on a failed row (newer backends only). */
+  error_code?: string | null;
   output_path: string | null;
 };
 

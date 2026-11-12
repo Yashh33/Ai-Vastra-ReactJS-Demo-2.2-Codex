@@ -55,9 +55,10 @@ export class AttemptError extends ApiError {
       status?: number | null;
       backendRequestId?: string | null;
       clientError?: string;
+      errorCode?: string | null;
     }
   ) {
-    super(message, { status: fields.status ?? null, noResponse: fields.noResponse });
+    super(message, { status: fields.status ?? null, noResponse: fields.noResponse, errorCode: fields.errorCode });
     this.name = "AttemptError";
     this.attempt = fields.attempt;
     this.backendRequestId = fields.backendRequestId || undefined;
@@ -73,7 +74,8 @@ export function withMessage(err: unknown, message: string): Error {
     noResponse: err.noResponse,
     status: err.status,
     backendRequestId: err.backendRequestId,
-    clientError: err.clientError
+    clientError: err.clientError,
+    errorCode: err.errorCode
   });
 }
 
