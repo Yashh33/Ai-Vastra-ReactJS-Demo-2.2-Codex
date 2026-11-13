@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { LookImage } from "../components/LookImage";
 import { useMe } from "../lib/queries";
 import { fetchCarouselLooks, type CarouselRow } from "../lib/screenData";
 import { supabase } from "../lib/supabase";
@@ -25,7 +26,11 @@ export function CarouselPage() {
 
   const [rows, setRows] = useState<CarouselRow[]>([]);
   const [rowsLoaded, setRowsLoaded] = useState(false);
-  const slide = useCarouselSlides(rows, true, CAROUSEL_INTERVAL_MS, SIGNED_URL_TTL_SECONDS);
+  // The phone shows each look's light view copy when it has one (the TV keeps the originals).
+  const slide = useCarouselSlides(rows, true, CAROUSEL_INTERVAL_MS, SIGNED_URL_TTL_SECONDS, { preferView: true });
+  const slideRow = slide ? rows.find((row) => row.id === slide.id) ?? null : null;
+  // Until the first slide is ready, the first look's thumbnail is shown at once.
+  const firstRow = rows[0] ?? null;
 
   useEffect(() => {
     if (!shopId) return;
@@ -74,12 +79,31 @@ export function CarouselPage() {
   } else if (slide) {
     body = (
       <>
-        <img key={slide.id} className="mt-carousel-image" src={slide.url} alt="Approved look" />
+        {slideRow ? (
+          // Same key as the first-look placeholder below, so the first slide just sharpens in place.
+          <LookImage
+            key={slide.id}
+            className="mt-carousel-image"
+            outputPath={slideRow.output_path}
+            sharpUrl={slide.url}
+            alt="Approved look"
+          />
+        ) : (
+          <img key={slide.id} className="mt-carousel-image" src={slide.url} alt="Approved look" />
+        )}
         {rows.length > 1 ? (
           <span className="mt-carousel-counter">
             {slide.index + 1} / {rows.length}
           </span>
         ) : null}
+      </>
+    );
+  } else if (firstRow) {
+    // Same shape as the slide branch above, so React keeps this image when the first slide arrives.
+    body = (
+      <>
+        <LookImage key={firstRow.id} className="mt-carousel-image" outputPath={firstRow.output_path} alt="Approved look" />
+        {null}
       </>
     );
   } else {

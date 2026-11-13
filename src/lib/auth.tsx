@@ -1,6 +1,7 @@
 import type { Session, User } from "@supabase/supabase-js";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
+import { clearSignedUrlCache } from "./storage";
 import { supabase } from "./supabase";
 
 type AuthContextValue = {
@@ -32,7 +33,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (mounted) setLoading(false);
       });
 
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      // Saved picture links belong to this login; forget them on logout.
+      if (event === "SIGNED_OUT") clearSignedUrlCache();
       if (!mounted) return;
       setSession(nextSession ?? null);
       setUser(nextSession?.user ?? null);
@@ -52,6 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       accessToken: session?.access_token ?? null,
       signOut: async () => {
+        clearSignedUrlCache();
         const { error } = await supabase.auth.signOut();
         if (error) {
           throw error;

@@ -1,22 +1,20 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
+import { type InfiniteData, useQueryClient } from "@tanstack/react-query";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
+import { FabricImage } from "../components/FabricImage";
 import { PhotoPickStatus } from "../components/PhotoPickStatus";
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { compressImage, PHOTO_READ_ERROR } from "../lib/compressImage";
 import { debugLog, debugLogPicked } from "../lib/debugLog";
-import { useFabricImages, useMe } from "../lib/queries";
-import { createSignedUrl, uploadToStorage } from "../lib/storage";
+import { FABRIC_IMAGES_QUERY_KEY, useFabricImagePages, useMe } from "../lib/queries";
+import { uploadFabricPhoto } from "../lib/storage";
 import type { FabricImageRow } from "../lib/types";
 import { guessFileExtension, makeRandomSuffix } from "../lib/utils";
 
-type PreviewMap = Record<string, string>;
-
 type FabricTileProps = {
   row: FabricImageRow;
-  imageUrl?: string;
   pickerMode: boolean;
   onSelect: (row: FabricImageRow) => void;
 };
@@ -41,49 +39,17 @@ function getFabricLabel(row: FabricImageRow) {
   return label || "Fabric";
 }
 
-function FabricTile({ row, imageUrl, pickerMode, onSelect, onVisible }: FabricTileProps & { onVisible: (id: string) => void }) {
-  const tileRef = useRef<HTMLElement | null>(null);
-  const observedRef = useRef(false);
-
-  useEffect(() => {
-    const el = tileRef.current;
-    if (!el) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting && !observedRef.current) {
-            observedRef.current = true;
-            onVisible(row.id);
-            observer.disconnect();
-          }
-        }
-      },
-      { rootMargin: "200px" }
-    );
-
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [row.id, onVisible]);
-
+// Tiles show the fabric's small copy (the full photo when it has none). Their links are
+// signed together: tiles mounting at the same time share one request.
+function FabricTile({ row, pickerMode, onSelect }: FabricTileProps) {
   return (
-    <article ref={tileRef} className="catalog-tile">
+    <article className="catalog-tile">
       <button
         className="catalog-image-btn"
         type="button"
         onClick={pickerMode ? () => onSelect(row) : undefined}
       >
-        {imageUrl ? (
-          <img
-            className="catalog-image"
-            src={imageUrl}
-            alt="fabric"
-          />
-        ) : (
-          <div className="image-placeholder">
-            <div className="spinner spinner-small" />
-          </div>
-        )}
+        <FabricImage className="catalog-image" storagePath={row.storage_path} alt="fabric" />
       </button>
 
       <div className="catalog-meta-row">
@@ -115,11 +81,18 @@ export function FabricSiloPage() {
     data: fabricImagesData,
     isLoading: loadingRows,
     error: fabricImagesError,
-    refetch: refetchFabricImages
-  } = useFabricImages();
-  const rows = fabricImagesData ?? [];
+    refetch: refetchFabricImages,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage
+  } = useFabricImagePages();
+  const rows = useMemo(() => {
+    // A fabric can show up on two pages when one was added meanwhile; list it once.
+    const seen = new Set<string>();
+    return (fabricImagesData?.pages ?? []).flat().filter((row) => (seen.has(row.id) ? false : (seen.add(row.id), true)));
+  }, [fabricImagesData]);
+  const hasMoreRows = !!hasNextPage;
 
-  const [previewUrls, setPreviewUrls] = useState<PreviewMap>({});
   const [statusText, setStatusText] = useState("Loading fabric silo...");
   const skipStatusUpdateRef = useRef(false);
 
@@ -159,7 +132,6 @@ export function FabricSiloPage() {
   }, [loadingRows, fabricImagesError, rows.length]);
 
   async function loadRows() {
-    setPreviewUrls({});
     await refetchFabricImages();
   }
 
@@ -224,7 +196,7 @@ export function FabricSiloPage() {
       const storagePath = `${shopContext.shop_id}/${filename}`;
 
       setStatusText("Saving fabric...");
-      await uploadToStorage("fabric-images", storagePath, draftFile);
+      await uploadFabricPhoto(storagePath, draftFile);
 
       const row = await apiFetch<FabricImageRow>("/fabric-images", accessToken, {
         method: "POST",
@@ -238,17 +210,13 @@ export function FabricSiloPage() {
         })
       });
 
-      createSignedUrl("fabric-images", row.storage_path, 3600)
-        .then((url) => {
-          setPreviewUrls((prev) => ({ ...prev, [row.id]: url }));
-        })
-        .catch((err) => {
-          console.error("Signed URL failed for", row.storage_path, err);
-        });
-
       skipStatusUpdateRef.current = true;
-      queryClient.setQueryData<FabricImageRow[]>(["fabric-images"], (prev) => [row, ...(prev ?? [])]);
-      void queryClient.invalidateQueries({ queryKey: ["fabric-images"] });
+      queryClient.setQueryData<InfiniteData<FabricImageRow[], number>>(FABRIC_IMAGES_QUERY_KEY, (prev) =>
+        prev
+          ? { ...prev, pages: [[row, ...(prev.pages[0] ?? [])], ...prev.pages.slice(1)] }
+          : { pages: [[row]], pageParams: [0] }
+      );
+      void queryClient.invalidateQueries({ queryKey: FABRIC_IMAGES_QUERY_KEY });
 
       setStatusText(draftFabricColor.trim() ? `Saved ${fabricCode} (${draftFabricColor.trim()}).` : `Saved ${fabricCode}.`);
       closeAddSheet();
@@ -273,18 +241,6 @@ export function FabricSiloPage() {
     navigate(`/generate?fabric_image_id=${encodeURIComponent(row.id)}`);
   }
 
-  const handleTileVisible = useCallback(async (id: string) => {
-    if (!accessToken) return;
-    const row = rows.find((r) => r.id === id);
-    if (!row) return;
-    try {
-      const url = await createSignedUrl("fabric-images", row.storage_path, 3600);
-      setPreviewUrls((prev) => ({ ...prev, [id]: url }));
-    } catch (err) {
-      console.error("Signed URL failed for", row.storage_path, err);
-    }
-  }, [accessToken, rows]);
-
   return (
     <main className="screen catalog-screen">
       <section className="catalog-shell">
@@ -292,7 +248,11 @@ export function FabricSiloPage() {
           <div className="catalog-header-left">
             <div className="catalog-title-wrap">
               <h1 className="catalog-title">{pageTitle}</h1>
-              <p className="catalog-subtitle">{rows.length} cloths saved</p>
+              {/* With more pages to come only the loaded count is known, so it gets a "+". */}
+              <p className="catalog-subtitle">
+                {rows.length}
+                {hasMoreRows ? "+" : ""} cloths saved
+              </p>
             </div>
           </div>
 
@@ -415,18 +375,23 @@ export function FabricSiloPage() {
         ) : rows.length === 0 ? (
           <div className="empty-box">No cloths saved yet. Tap + to add your first cloth.</div>
         ) : (
-          <section className="catalog-grid">
-            {rows.map((row) => (
-              <FabricTile
-                key={row.id}
-                row={row}
-                imageUrl={previewUrls[row.id]}
-                pickerMode={pickerMode}
-                onSelect={selectFabric}
-                onVisible={handleTileVisible}
-              />
-            ))}
-          </section>
+          <>
+            <section className="catalog-grid">
+              {rows.map((row) => (
+                <FabricTile key={row.id} row={row} pickerMode={pickerMode} onSelect={selectFabric} />
+              ))}
+            </section>
+            {hasMoreRows ? (
+              <button
+                className="btn btn-light"
+                type="button"
+                onClick={() => void fetchNextPage()}
+                disabled={isFetchingNextPage}
+              >
+                {isFetchingNextPage ? "Loading..." : "Load more"}
+              </button>
+            ) : null}
+          </>
         )}
 
         <div className="fab-wrap">

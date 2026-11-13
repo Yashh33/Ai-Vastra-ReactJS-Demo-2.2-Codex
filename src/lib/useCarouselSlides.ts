@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { CarouselRow } from "./screenData";
-import { preloadImage, signUrlsBatch } from "./storage";
+import { preloadImage, preloadLookImages, signLookImageUrls, signUrlsBatch } from "./storage";
 
 const BUCKET = "generated-outputs";
 const PRELOAD_AHEAD = 2;
@@ -26,12 +26,42 @@ async function loadSlide(row: CarouselRow, ttlSeconds: number) {
 }
 
 /**
+ * Like loadSlide, but shows the look's light view copy when it has one (asked
+ * for in the same request as the original), falling back to the original.
+ * Uses the app's default link lifetime (6 hours), the same as the phone carousel asks for.
+ */
+async function loadSlidePreferView(row: CarouselRow) {
+  for (const bypassCache of [false, true]) {
+    try {
+      const urls = await signLookImageUrls(row.output_path, { bypassCache });
+      if (urls.view && (await preloadImage(urls.view))) return urls.view;
+      if (urls.original && (await preloadImage(urls.original))) return urls.original;
+    } catch (err) {
+      console.error("carousel: failed to sign slide", row.id, err);
+    }
+  }
+  return null;
+}
+
+export type CarouselSlidesOptions = {
+  /** Show each look's light view copy when it has one (the phone app). Off by default (the TV). */
+  preferView?: boolean;
+};
+
+/**
  * Drives the look carousel shared by the app and the TV. Shows each look's full
  * image for `intervalMs`, preloads the next two, and only moves on to a slide
  * whose image has already loaded - otherwise the current one stays a bit longer,
  * so there is never a blank frame between slides.
  */
-export function useCarouselSlides(rows: CarouselRow[], active: boolean, intervalMs: number, ttlSeconds: number) {
+export function useCarouselSlides(
+  rows: CarouselRow[],
+  active: boolean,
+  intervalMs: number,
+  ttlSeconds: number,
+  options: CarouselSlidesOptions = {}
+) {
+  const preferView = !!options.preferView;
   const [slide, setSlide] = useState<CarouselSlide | null>(null);
   const indexRef = useRef(0);
 
@@ -63,6 +93,10 @@ export function useCarouselSlides(rows: CarouselRow[], active: boolean, interval
         if (row) paths.push(row.output_path);
       }
       if (!paths.length) return;
+      if (preferView) {
+        if (!cancelled) await preloadLookImages(paths);
+        return;
+      }
       try {
         const urls = await signUrlsBatch(BUCKET, paths, ttlSeconds);
         if (!cancelled) Object.values(urls).forEach((url) => void preloadImage(url));
@@ -75,7 +109,7 @@ export function useCarouselSlides(rows: CarouselRow[], active: boolean, interval
       let index = indexRef.current % length;
       while (!cancelled) {
         const row = rows[index];
-        const url = row ? await loadSlide(row, ttlSeconds) : null;
+        const url = row ? await (preferView ? loadSlidePreferView(row) : loadSlide(row, ttlSeconds)) : null;
         if (cancelled) return;
 
         if (!row || !url) {
@@ -105,7 +139,7 @@ export function useCarouselSlides(rows: CarouselRow[], active: boolean, interval
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [rows, active, intervalMs, ttlSeconds]);
+  }, [rows, active, intervalMs, ttlSeconds, preferView]);
 
   return slide;
 }

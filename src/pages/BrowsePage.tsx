@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { ColorStudio } from "../components/ColorStudio";
 import { CustomerConsentModal } from "../components/CustomerConsentModal";
 import { LookDetails } from "../components/LookDetails";
+import { LookImage } from "../components/LookImage";
 import { PushLookToScreenButton } from "../components/PushLookToScreenButton";
 import { SignedImage } from "../components/SignedImage";
 import { TryOnFlow } from "../components/TryOnFlow";
@@ -14,11 +15,11 @@ import { restoreOriginalColor, saveColorCorrected } from "../lib/colorStudio/sav
 import { useMe } from "../lib/queries";
 import {
   fetchBrowseGarmentTypes,
-  fetchBrowseLooks,
+  fetchBrowseLooksPage,
   type BrowseGarmentType,
   type BrowseLookRow
 } from "../lib/screenData";
-import { lookThumbnailPathFor, preloadSignedImages, signUrlsBatch } from "../lib/storage";
+import { lookThumbnailPathFor, preloadLookImages, signUrlsBatch } from "../lib/storage";
 import { supabase } from "../lib/supabase";
 
 // Mirrors the TV's browse mode (ScreenPage) using the same shared queries, but is driven by
@@ -27,8 +28,6 @@ import { supabase } from "../lib/supabase";
 // and "Push to big screen" on an open look.
 
 const OUTPUT_BUCKET = "generated-outputs";
-// Full-size looks get longer than a thumbnail before a load counts as stuck.
-const FULL_IMAGE_TIMEOUT_MS = 30000;
 const DESCRIPTION_MAX_LENGTH = 300;
 // Remembers the open garment type for this browser session, so it survives switching tabs.
 const BROWSE_GARMENT_STORAGE_KEY = "aivastra-browse-garment-type";
@@ -79,6 +78,17 @@ export function BrowsePage() {
   /** X-Client-Request-Id of the latest try-on; push-to-screen sends it to link the stored result. */
   const tryOnRequestIdRef = useRef<string | null>(null);
   const [looks, setLooks] = useState<BrowseLookRow[]>([]);
+  // Looks load 30 at a time; the next page comes when the grid nears its end.
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const looksRef = useRef<BrowseLookRow[]>([]);
+  looksRef.current = looks;
+  /** How many looks the server has handed out so far: the offset of the next page. */
+  const nextOffsetRef = useRef(0);
+  /** Bumped whenever the list starts over (other garment type, refresh), so stale pages are dropped. */
+  const listSeqRef = useRef(0);
+  const loadMorePromiseRef = useRef<Promise<{ added: BrowseLookRow[]; ok: boolean }> | null>(null);
+  const gridEndRef = useRef<HTMLDivElement | null>(null);
   const [tabsLoading, setTabsLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -154,6 +164,13 @@ export function BrowsePage() {
   }, [shopId, refreshKey]);
 
   useEffect(() => {
+    listSeqRef.current += 1;
+    const seq = listSeqRef.current;
+    nextOffsetRef.current = 0;
+    loadMorePromiseRef.current = null;
+    setLoadingMore(false);
+    setHasMore(false);
+
     if (!shopId || !selectedGarmentTypeId) {
       setLooks([]);
       return;
@@ -161,23 +178,77 @@ export function BrowsePage() {
 
     const currentShopId = shopId;
     const folderId = selectedGarmentTypeId;
-    let cancelled = false;
 
     async function loadLooks() {
       try {
-        const rows = await fetchBrowseLooks(supabase, currentShopId, folderId);
-        if (!cancelled) setLooks(rows);
+        const page = await fetchBrowseLooksPage(supabase, currentShopId, folderId, 0);
+        if (seq !== listSeqRef.current) return;
+        nextOffsetRef.current = page.rows.length;
+        setLooks(page.rows);
+        setHasMore(page.hasMore);
       } catch (err) {
         console.error("BrowsePage: failed to load looks", err);
       }
     }
 
     void loadLooks();
-
-    return () => {
-      cancelled = true;
-    };
   }, [shopId, selectedGarmentTypeId, refreshKey]);
+
+  /** Loads the next page of looks; `added` are the new ones. Concurrent calls share one request. */
+  function loadMore(): Promise<{ added: BrowseLookRow[]; ok: boolean }> {
+    if (loadMorePromiseRef.current) return loadMorePromiseRef.current;
+    if (!shopId || !selectedGarmentTypeId || !hasMore) return Promise.resolve({ added: [], ok: false });
+
+    const seq = listSeqRef.current;
+    const currentShopId = shopId;
+    const folderId = selectedGarmentTypeId;
+    setLoadingMore(true);
+    // Assigned before the request can finish, so the cleanup below can tell whether it is still current.
+    let promise: Promise<{ added: BrowseLookRow[]; ok: boolean }> | null = null;
+    promise = (async () => {
+      try {
+        const page = await fetchBrowseLooksPage(supabase, currentShopId, folderId, nextOffsetRef.current);
+        if (seq !== listSeqRef.current) return { added: [], ok: false };
+        nextOffsetRef.current += page.rows.length;
+        // A look can come round twice when the order shifted (e.g. a hero change); keep the first.
+        const known = new Set(looksRef.current.map((row) => row.id));
+        const added = page.rows.filter((row) => !known.has(row.id));
+        setLooks((prev) => {
+          const ids = new Set(prev.map((row) => row.id));
+          return [...prev, ...page.rows.filter((row) => !ids.has(row.id))];
+        });
+        setHasMore(page.hasMore);
+        return { added, ok: true };
+      } catch (err) {
+        console.error("BrowsePage: failed to load more looks", err);
+        return { added: [], ok: false };
+      } finally {
+        if (loadMorePromiseRef.current === promise) loadMorePromiseRef.current = null;
+        if (seq === listSeqRef.current) setLoadingMore(false);
+      }
+    })();
+    loadMorePromiseRef.current = promise;
+    return promise;
+  }
+
+  // The grid's end coming near the screen loads the next page (again, while it stays in view).
+  useEffect(() => {
+    const end = gridEndRef.current;
+    if (!end || !hasMore || loadingMore || detailLook || typeof IntersectionObserver !== "function") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          observer.disconnect();
+          void loadMore();
+        }
+      },
+      { rootMargin: "600px 0px" }
+    );
+    observer.observe(end);
+    return () => observer.disconnect();
+    // loadMore reads the same state listed here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasMore, loadingMore, detailLook, looks.length, shopId, selectedGarmentTypeId]);
 
   useEffect(() => {
     if (!detailLook) return;
@@ -203,17 +274,20 @@ export function BrowsePage() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [detailLook, looks, editingDetails, detailsSaving, colourStudioOpen, tryOnConsentOpen, tryOnOpen]);
+  }, [detailLook, looks, hasMore, editingDetails, detailsSaving, colourStudioOpen, tryOnConsentOpen, tryOnOpen]);
 
-  // The arrows flip to the neighbouring looks, so have their full images ready.
+  // The arrows flip to the neighbouring looks, so have their sharp pictures ready
+  // (the light view copy, or the original for a look without one).
   useEffect(() => {
     if (!detailLook || looks.length <= 1) return;
     const index = looks.findIndex((look) => look.id === detailLook.id);
     if (index === -1) return;
-    const neighbours = [looks[(index + 1) % looks.length], looks[(index - 1 + looks.length) % looks.length]];
+    // On the last loaded look with more to come, "next" is the next page rather than the first look.
+    const next = index + 1 < looks.length ? looks[index + 1] : hasMore ? undefined : looks[0];
+    const neighbours = [next, looks[(index - 1 + looks.length) % looks.length]];
     const paths = neighbours.flatMap((look) => (look && look.id !== detailLook.id ? [look.output_path] : []));
-    void preloadSignedImages(OUTPUT_BUCKET, paths);
-  }, [detailLook?.id, looks]);
+    void preloadLookImages(paths);
+  }, [detailLook?.id, looks, hasMore]);
 
   function cancelEditDetails() {
     setEditingDetails(false);
@@ -360,10 +434,28 @@ export function BrowsePage() {
   }
 
   function navigateDetail(direction: 1 | -1) {
-    if (!detailLook || looks.length <= 1) return;
+    if (!detailLook) return;
 
     const currentIndex = looks.findIndex((look) => look.id === detailLook.id);
     if (currentIndex === -1) return;
+
+    // Next on the last loaded look loads the next page and opens its first look.
+    if (direction === 1 && currentIndex === looks.length - 1 && hasMore) {
+      const fromId = detailLook.id;
+      void loadMore().then(({ added, ok }) => {
+        if (!ok) return;
+        // Nothing new after all: wrap round to the first look, as before.
+        const nextLook = added[0] ?? (looksRef.current.length > 1 ? looksRef.current[0] : undefined);
+        if (!nextLook) return;
+        setDetailLook((prev) => (prev && prev.id === fromId ? nextLook : prev));
+        setHeroError(null);
+        setDeleteError(null);
+        clearColourMessages();
+        cancelEditDetails();
+      });
+      return;
+    }
+    if (looks.length <= 1) return;
 
     const nextIndex = (currentIndex + direction + looks.length) % looks.length;
     const nextLook = looks[nextIndex];
@@ -389,6 +481,8 @@ export function BrowsePage() {
       if (!accessToken) throw new Error("Not authenticated");
       await apiFetch(`/generations/${look.id}`, accessToken, { method: "DELETE" });
       const remaining = looks.filter((row) => row.id !== look.id);
+      // The server list is one shorter now, so the next page starts one earlier.
+      nextOffsetRef.current = Math.max(0, nextOffsetRef.current - 1);
       setLooks(remaining);
       closeDetail();
       // An emptied category should drop out of the rail, so re-run the tab query.
@@ -418,6 +512,12 @@ export function BrowsePage() {
         p_is_hero: nextIsHero
       });
       if (error) throw error;
+      // A look that is no longer a hero may now belong after the loaded pages; the next page
+      // then starts one earlier so no look is skipped (a repeat is dropped when it arrives).
+      if (!nextIsHero && hasMore) {
+        const sorted = sortBrowseLooks(looksRef.current);
+        if (sorted[sorted.length - 1]?.id === look.id) nextOffsetRef.current = Math.max(0, nextOffsetRef.current - 1);
+      }
     } catch (err) {
       console.error("BrowsePage: failed to update hero flag", look.id, err);
       setDetailLook((prev) => (prev && prev.id === look.id ? { ...prev, is_hero: previousIsHero } : prev));
@@ -458,7 +558,7 @@ export function BrowsePage() {
         </div>
         {heroError ? <div className="mt-browse-hero-error">{heroError}</div> : null}
         <div className="mt-browse-detail-media">
-          {looks.length > 1 ? (
+          {looks.length > 1 || hasMore ? (
             <button
               type="button"
               className="mt-browse-nav-btn mt-browse-nav-prev"
@@ -469,12 +569,11 @@ export function BrowsePage() {
             </button>
           ) : null}
           <div className="mt-browse-detail-frame">
-            <SignedImage
-              bucket={OUTPUT_BUCKET}
-              path={detailLook.output_path}
+            {/* Thumbnail at once, then the sharp picture; a new output_path (Match colour, Restore) starts over. */}
+            <LookImage
+              key={`${detailLook.id}:${detailLook.output_path}`}
+              outputPath={detailLook.output_path}
               alt="Look detail"
-              eager
-              timeoutMs={FULL_IMAGE_TIMEOUT_MS}
             />
             {detailLook.is_hero ? (
               <span className="mt-browse-hero-badge mt-browse-hero-badge-lg" aria-label="Hero look">
@@ -482,7 +581,7 @@ export function BrowsePage() {
               </span>
             ) : null}
           </div>
-          {looks.length > 1 ? (
+          {looks.length > 1 || hasMore ? (
             <button
               type="button"
               className="mt-browse-nav-btn mt-browse-nav-next"
@@ -716,6 +815,17 @@ export function BrowsePage() {
               />
             ))
           )}
+          {hasMore ? (
+            <div className="mt-browse-grid-end" ref={gridEndRef}>
+              {loadingMore ? (
+                <div className="spinner spinner-small" aria-label="Loading more looks" />
+              ) : (
+                <button type="button" className="mt-browse-load-more" onClick={() => void loadMore()}>
+                  Load more
+                </button>
+              )}
+            </div>
+          ) : null}
         </div>
       </div>
     );
@@ -888,6 +998,19 @@ export function BrowsePage() {
         }
         .mt-browse-hero-badge-lg { top: 12px; right: 12px; width: clamp(36px, 4vw, 56px); height: clamp(36px, 4vw, 56px); font-size: clamp(1.1rem, 2vw, 1.6rem); }
 
+        .mt-browse-grid-end { grid-column: 1 / -1; display: flex; justify-content: center; padding: 8px 0 24px; }
+        .mt-browse-load-more {
+          font: inherit;
+          font-size: 0.9rem;
+          font-weight: 700;
+          color: var(--navy);
+          background: var(--card);
+          border: 1px solid var(--border);
+          border-radius: 10px;
+          padding: 10px 20px;
+          cursor: pointer;
+        }
+
         .mt-browse-empty { font-size: clamp(1.1rem, 2.5vw, 2rem); color: var(--muted); }
         .mt-browse-grid-empty { grid-column: 1 / -1; text-align: center; padding: 48px 0; }
 
@@ -952,6 +1075,13 @@ export function BrowsePage() {
           object-fit: contain;
           animation: mt-browse-fade-in 0.4s ease;
           border-radius: 8px;
+        }
+        /* Sized from the look's shape, so the thumbnail and the sharp picture fill the same box. */
+        .mt-browse-detail-frame .look-image {
+          width: min(calc(100vw - 64px), calc((100svh - 310px) * var(--look-aspect, 0.75)));
+          max-width: 100%;
+          border-radius: 8px;
+          animation: mt-browse-fade-in 0.4s ease;
         }
         /* Holds the frame open at roughly a look's shape until the full image arrives. */
         .mt-browse-detail-frame .signed-image-skeleton,

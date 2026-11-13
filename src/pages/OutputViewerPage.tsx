@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { ColorStudio } from "../components/ColorStudio";
 import { CustomerConsentModal } from "../components/CustomerConsentModal";
+import { LookImage } from "../components/LookImage";
 import { PushLookToScreenButton } from "../components/PushLookToScreenButton";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
@@ -82,6 +83,10 @@ export function OutputViewerPage() {
   const dataMode = generationMode || catalogImageMode;
   const catalogMode = dataMode && viewMode === "catalog";
   const generationReady = !!generation && generation.status === "done" && !!generation.output_path;
+  // A finished look (not a try-on) is shown thumbnail-first; imageUrl stays the original for
+  // Share / Save, Match colour and try-on.
+  const showsLook =
+    generationMode && generationReady && generation?.id === generationId && (generation.generation_type ?? "look") === "look";
 
   const generationCatalogVisibleRows = useMemo(
     () => catalogGenerationRows.filter((row) => row.status === "done" && !!row.output_path),
@@ -517,6 +522,17 @@ export function OutputViewerPage() {
                 Retry
               </button>
             </div>
+          ) : imageUrl && showsLook && generation?.output_path ? (
+            // Thumbnail at once, then the light view copy (or this original link when there is none).
+            <LookImage
+              outputPath={generation.output_path}
+              originalUrl={imageUrl}
+              alt={title}
+              onSharpLoad={() => {
+                imageRetriedRef.current = false;
+              }}
+              onError={handleImageError}
+            />
           ) : imageUrl ? (
             <img
               key={imageKey}

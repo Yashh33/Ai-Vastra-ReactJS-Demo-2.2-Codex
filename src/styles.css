@@ -975,6 +975,36 @@ h2 { font-size: 1rem; font-weight: 700; }
   to { background-position: -100% 0; }
 }
 
+/* A look shown large (LookImage): the thumbnail at once, the sharp picture faded in over it.
+   The page sizes the wrapper; every layer fills it. */
+.look-image {
+  position: relative;
+  display: block;
+  aspect-ratio: var(--look-aspect, 3 / 4);
+  overflow: hidden;
+}
+.look-image > .look-image-layer {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border-radius: 0;
+  object-fit: contain;
+  animation: none;
+}
+.look-image > .look-image-sharp { opacity: 0; transition: opacity 0.25s ease; }
+.look-image > .look-image-sharp.is-loaded { opacity: 1; }
+.look-image > .look-image-skeleton {
+  background: linear-gradient(100deg, #EFEDE8 30%, #F8F7F4 50%, #EFEDE8 70%);
+  background-size: 200% 100%;
+  animation: signed-image-shimmer 1.4s ease-in-out infinite;
+}
+.look-image > .look-image-placeholder { background: linear-gradient(135deg, #F5F4F1, #EFEDE8); }
+
 /* File inputs opened from a button. Kept in the layout (not display:none / hidden) because
    iOS Safari can ignore click() and change events on inputs that are not rendered. */
 .visually-hidden-input {
@@ -1062,6 +1092,7 @@ h2 { font-size: 1rem; font-weight: 700; }
   display: grid;
 }
 .viewer-card img { width: 100%; height: 100%; object-fit: contain; background: #111827; }
+.viewer-card .look-image { width: 100%; min-height: 58svh; background: #111827; }
 
 /* Carousel */
 .carousel-screen { background: #020617; }

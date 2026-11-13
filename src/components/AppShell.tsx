@@ -8,6 +8,7 @@ import {
   useCreateCreditOrder,
   useRefreshCreditsAfterPayment
 } from "../lib/payments";
+import { clearSignedUrlCache } from "../lib/storage";
 import { supabase } from "../lib/supabase";
 
 const STARTER_PACK_ID = "starter";
@@ -90,6 +91,7 @@ export function AppShell() {
     } catch {
       // ignore errors
     } finally {
+      clearSignedUrlCache();
       window.location.href = "/login";
     }
   };

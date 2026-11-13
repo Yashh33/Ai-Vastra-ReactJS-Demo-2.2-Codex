@@ -224,6 +224,33 @@ export async function normalizeToJpeg(file: File, options: NormalizeOptions = {}
 }
 
 /**
+ * A small JPEG copy of an already-readable photo (e.g. a fabric photo just
+ * prepared for upload): longest edge `maxEdge`, never upscaled, one encode at
+ * `quality`. Throws if the photo cannot be decoded; callers treat the copy as optional.
+ */
+export async function makeThumbnailJpeg(file: Blob, maxEdge: number, quality: number): Promise<Blob> {
+  const decoded = await decodeNatively(file);
+  try {
+    const scale = Math.min(1, maxEdge / Math.max(decoded.width, decoded.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(decoded.width * scale));
+    canvas.height = Math.max(1, Math.round(decoded.height * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas context unavailable");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(decoded.source, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((result) => resolve(result), "image/jpeg", quality);
+    });
+    if (!blob || blob.size === 0) throw new Error("Canvas toBlob failed");
+    return blob;
+  } finally {
+    decoded.cleanup();
+  }
+}
+
+/**
  * normalizeToJpeg plus a size limit: the result is a JPEG no larger than
  * `maxDimension` on its longest edge. This is what every photo picker calls, so
  * a picked photo is normalised and compressed in a single encode.

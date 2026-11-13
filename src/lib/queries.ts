@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { apiFetch } from "./api";
 import { useAuth } from "./auth";
@@ -34,12 +34,25 @@ export function useGarmentTypes() {
   });
 }
 
-export function useFabricImages() {
+export const FABRIC_PAGE_SIZE = 60;
+export const FABRIC_IMAGES_QUERY_KEY = ["fabric-images", "pages"] as const;
+
+/** The fabric library, newest first, loaded FABRIC_PAGE_SIZE at a time (GET /fabric-images limit + offset). */
+export function useFabricImagePages() {
   const { accessToken } = useAuth();
 
-  return useQuery({
-    queryKey: ["fabric-images"],
-    queryFn: () => apiFetch<FabricImageRow[]>("/fabric-images?limit=100", accessToken as string, { method: "GET" }),
+  return useInfiniteQuery({
+    queryKey: FABRIC_IMAGES_QUERY_KEY,
+    queryFn: ({ pageParam }) =>
+      apiFetch<FabricImageRow[]>(
+        `/fabric-images?limit=${FABRIC_PAGE_SIZE}&offset=${pageParam}`,
+        accessToken as string,
+        { method: "GET" }
+      ),
+    initialPageParam: 0,
+    // A full page means there may be more; the next one starts after everything loaded so far.
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length >= FABRIC_PAGE_SIZE ? allPages.reduce((total, page) => total + page.length, 0) : undefined,
     enabled: !!accessToken
   });
 }

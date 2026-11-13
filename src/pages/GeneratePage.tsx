@@ -12,7 +12,7 @@ import { type Attempt, attemptRef, newAttempt, refFromId, reportNoResponse, with
 import { useAuth } from "../lib/auth";
 import { useGarmentTypes, useMe } from "../lib/queries";
 import { subscribeToGeneration } from "../lib/realtime";
-import { createSignedUrl, uploadToStorage } from "../lib/storage";
+import { signFabricPreviewUrl, uploadFabricPhoto, uploadToStorage } from "../lib/storage";
 import { supabase } from "../lib/supabase";
 import type {
   ApplyToTarget,
@@ -129,6 +129,11 @@ export function GeneratePage() {
   const failureRefRef = useRef<string | null>(null);
   /** X-Client-Request-Id of the latest try-on; push-to-screen sends it to link the stored result. */
   const tryOnRequestIdRef = useRef<string | null>(null);
+  /**
+   * The single-flow fabric photo already saved, so a retry or the next try-on reuses it
+   * instead of uploading it again. Tied to that exact File: a new photo or a colour fix uploads afresh.
+   */
+  const uploadedFabricRef = useRef<{ file: File; row: FabricImageRow } | null>(null);
 
   const pickedFabricImageId =
     searchParams.get("fabric_image_id") ?? searchParams.get("selectedFabricImageId") ?? "";
@@ -250,7 +255,7 @@ export function GeneratePage() {
           return;
         }
 
-        const signed = await createSignedUrl("fabric-images", row.storage_path, 3600).catch(() => null);
+        const signed = await signFabricPreviewUrl(row.storage_path);
         if (cancelled) return;
 
         setExistingFabricImage(row);
@@ -420,7 +425,7 @@ export function GeneratePage() {
               accessToken,
               { method: "GET" }
             );
-            const signed = await createSignedUrl("fabric-images", row.storage_path, 3600).catch(() => null);
+            const signed = await signFabricPreviewUrl(row.storage_path);
             if (cancelled) return;
             setMultiSelections((prev) =>
               prev[slotId] ? { ...prev, [slotId]: { ...prev[slotId], previewUrl: signed } } : prev
@@ -459,7 +464,7 @@ export function GeneratePage() {
           accessToken,
           { method: "GET" }
         );
-        const signed = await createSignedUrl("fabric-images", row.storage_path, 3600).catch(() => null);
+        const signed = await signFabricPreviewUrl(row.storage_path);
         if (cancelled) return;
         assignFabricToSlot(slotId as string, {
           fabricImageId: row.id,
@@ -575,8 +580,7 @@ export function GeneratePage() {
     const filename = `${Date.now()}-${makeRandomSuffix()}.${ext}`;
     const storagePath = `${shopContext.shop_id}/${filename}`;
 
-    setStatusText("Uploading fabric image...");
-    await uploadToStorage("fabric-images", storagePath, file);
+    await uploadFabricPhoto(storagePath, file);
 
     return apiFetch<FabricImageRow>("/fabric-images", accessToken, {
       method: "POST",
@@ -614,9 +618,17 @@ export function GeneratePage() {
     });
   }
 
-  async function ensureFabricImage() {
+  /** The chosen fabric's saved row; a new photo is uploaded once and then reused. */
+  async function ensureFabricImage(options: { showStatus?: boolean } = {}) {
     if (existingFabricImage?.id) return existingFabricImage;
-    if (fabricFile) return uploadFabricImage(fabricFile);
+    if (fabricFile) {
+      const saved = uploadedFabricRef.current;
+      if (saved && saved.file === fabricFile) return saved.row;
+      if (options.showStatus) setStatusText("Uploading fabric image...");
+      const row = await uploadFabricImage(fabricFile);
+      uploadedFabricRef.current = { file: fabricFile, row };
+      return row;
+    }
     throw new MissingFabricError("Select a fabric image first.");
   }
 
@@ -652,7 +664,7 @@ export function GeneratePage() {
     const attempt = newAttempt("look", selectedGarment.id);
     setCreatingGeneration(true);
     try {
-      const fabricImage = await ensureFabricImage();
+      const fabricImage = await ensureFabricImage({ showStatus: true });
       const heroImageId = await ensureHeroImageId(selectedGarment);
 
       const fabricAssignment: GenerationFabricAssignmentPayload = {
@@ -713,26 +725,8 @@ export function GeneratePage() {
     let fabricImageId = selectedFabricImageId;
 
     if (!fabricImageId && fabricFile) {
-      const ext = guessFileExtension(fabricFile.name, fabricFile.type);
-      const path = `${shopContext.shop_id}/${Date.now()}-${makeRandomSuffix()}.${ext}`;
-      await uploadToStorage(
-        "fabric-images",
-        path,
-        fabricFile
-      );
-      const uploaded = await apiFetch<{ id: string }>(
-        "/fabric-images",
-        accessToken,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            storage_path: path,
-            original_filename: fabricFile.name,
-            mime_type: fabricFile.type,
-            file_size_bytes: fabricFile.size,
-          }),
-        }
-      );
+      // Uploaded once: a retry or the next try-on (or Sew) reuses the saved fabric.
+      const uploaded = await ensureFabricImage();
       fabricImageId = uploaded.id;
     }
 
@@ -763,7 +757,7 @@ export function GeneratePage() {
     const filename = `${Date.now()}-${makeRandomSuffix()}.${ext}`;
     const storagePath = `${shopContext.shop_id}/${filename}`;
 
-    await uploadToStorage("fabric-images", storagePath, file);
+    await uploadFabricPhoto(storagePath, file);
 
     return apiFetch<FabricImageRow>("/fabric-images", accessToken, {
       method: "POST",
