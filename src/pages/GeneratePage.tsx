@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { ColorStudio } from "../components/ColorStudio";
 import { CustomerConsentModal } from "../components/CustomerConsentModal";
+import { FabricPickerOverlay, getFabricLabel } from "../components/FabricLibrary";
 import { PhotoPickStatus } from "../components/PhotoPickStatus";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
@@ -71,6 +72,9 @@ type PhotoPicker = "fabric" | "hero" | "multi";
 
 /** Which freshly picked fabric photo the Match colour studio is open for. */
 type ColourTarget = { kind: "single" } | { kind: "multi"; slotId: string };
+
+/** Which fabric card the "My Fabrics" picker was opened from. */
+type FabricPickerTarget = { kind: "single" } | { kind: "multi"; slotId: string };
 
 function isSlotFilled(selection: MultiFabricSelection | undefined) {
   return !!selection && (!!selection.fabricImageId || !!selection.pendingFile);
@@ -154,6 +158,7 @@ export function GeneratePage() {
   const [fabricPreviewUrl, setFabricPreviewUrl] = useState<string | null>(null);
   const [fabricColourAdjusted, setFabricColourAdjusted] = useState(false);
   const [colourTarget, setColourTarget] = useState<ColourTarget | null>(null);
+  const [fabricPickerTarget, setFabricPickerTarget] = useState<FabricPickerTarget | null>(null);
   const [preparingPhoto, setPreparingPhoto] = useState<PhotoPicker | null>(null);
   const [photoError, setPhotoError] = useState<{ picker: PhotoPicker; message: string } | null>(null);
   /** Slot the multi photo spinner / read error belongs to. */
@@ -224,6 +229,30 @@ export function GeneratePage() {
     if (!fabricPreviewUrl?.startsWith("blob:")) return;
     return () => URL.revokeObjectURL(fabricPreviewUrl);
   }, [fabricPreviewUrl]);
+
+  // The phone's Back button closes the "My Fabrics" picker instead of leaving Generate:
+  // while it is open there is one extra history entry (same URL); Back pops it. Closing
+  // it any other way removes that entry again. Runs once per open (GeneratePage is
+  // already mounted then), so StrictMode's double mount does not add a second entry.
+  const fabricPickerOpen = !!fabricPickerTarget;
+  useEffect(() => {
+    if (!fabricPickerOpen) return;
+    let poppedByBack = false;
+    try {
+      window.history.pushState({ ...(window.history.state ?? {}), aivastraFabricPicker: true }, "");
+    } catch {
+      return;
+    }
+    function handlePopState() {
+      poppedByBack = true;
+      setFabricPickerTarget(null);
+    }
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+      if (!poppedByBack && window.history.state?.aivastraFabricPicker) window.history.back();
+    };
+  }, [fabricPickerOpen]);
 
   useEffect(() => {
     if (!heroReplacementPreviewUrl?.startsWith("blob:")) return;
@@ -482,6 +511,30 @@ export function GeneratePage() {
       cancelled = true;
     };
   }, [accessToken, searchParams]);
+
+  /**
+   * A saved fabric picked in the "My Fabrics" picker. It is used by its id (never
+   * uploaded again), exactly like a fabric returned from /fabric-silo.
+   */
+  async function handleSavedFabricPicked(row: FabricImageRow) {
+    const target = fabricPickerTarget;
+    setFabricPickerTarget(null);
+    if (!target) return;
+
+    // The tile already signed this link, so this is normally instant.
+    const previewUrl = await signFabricPreviewUrl(row.storage_path);
+    if (target.kind === "single") {
+      setExistingFabricImage(row);
+      setFabricFile(null);
+      setFabricColourAdjusted(false);
+      setFabricPreviewUrl(previewUrl);
+      setPhotoError((prev) => (prev?.picker === "fabric" ? null : prev));
+    } else {
+      assignFabricToSlot(target.slotId, { fabricImageId: row.id, previewUrl, label: getFabricLabel(row) });
+      if (photoSlotId === target.slotId) setPhotoError((prev) => (prev?.picker === "multi" ? null : prev));
+    }
+    setErrorText(null);
+  }
 
   function clearFabricSelection() {
     setFabricFile(null);
@@ -1004,9 +1057,11 @@ export function GeneratePage() {
     onRemove: (() => void) | null;
     onCapture: () => void;
     onGallery: () => void;
+    /** Opens the saved-fabric picker for this card. */
+    onMyFabrics: () => void;
     onMatchColour: (() => void) | null;
     colourAdjusted: boolean;
-    /** Shown under Capture / Gallery (the White / Black choice of an empty optional slot). */
+    /** Shown beside the picture (the White / Black choice of an empty optional slot). */
     belowActions?: ReactNode;
     status: ReactNode;
   }) {
@@ -1045,14 +1100,6 @@ export function GeneratePage() {
           </div>
 
           <div className="fabric-card-actions">
-            <div className="row">
-              <button className="btn btn-light flex-1" type="button" onClick={card.onCapture} disabled={actionBusy}>
-                Capture
-              </button>
-              <button className="btn btn-light flex-1" type="button" onClick={card.onGallery} disabled={actionBusy}>
-                Gallery
-              </button>
-            </div>
             {card.onMatchColour || card.colourAdjusted ? (
               <div className="row">
                 {card.onMatchColour ? (
@@ -1071,6 +1118,19 @@ export function GeneratePage() {
             ) : null}
             {card.belowActions}
           </div>
+        </div>
+
+        {/* Full card width, so all three fit on one line even on a 320 px phone. */}
+        <div className="fabric-card-pick-row">
+          <button className="btn btn-light" type="button" onClick={card.onCapture} disabled={actionBusy}>
+            Capture
+          </button>
+          <button className="btn btn-light" type="button" onClick={card.onGallery} disabled={actionBusy}>
+            Gallery
+          </button>
+          <button className="btn btn-light" type="button" onClick={card.onMyFabrics} disabled={actionBusy}>
+            My Fabrics
+          </button>
         </div>
 
         {card.status}
@@ -1207,6 +1267,7 @@ export function GeneratePage() {
                     onRemove: selection ? () => removeSlotFabric(slot.id) : null,
                     onCapture: () => openMultiPicker(slot.id, "camera"),
                     onGallery: () => openMultiPicker(slot.id, "gallery"),
+                    onMyFabrics: () => setFabricPickerTarget({ kind: "multi", slotId: slot.id }),
                     onMatchColour: selection?.pendingFile
                       ? () => setColourTarget({ kind: "multi", slotId: slot.id })
                       : null,
@@ -1254,6 +1315,7 @@ export function GeneratePage() {
                     debugLog("input clicked");
                     galleryInputRef.current?.click();
                   },
+                  onMyFabrics: () => setFabricPickerTarget({ kind: "single" }),
                   onMatchColour: fabricFile ? () => setColourTarget({ kind: "single" }) : null,
                   colourAdjusted: fabricColourAdjusted,
                   status: (
@@ -1427,6 +1489,13 @@ export function GeneratePage() {
           onClose={() => setColourTarget(null)}
         />
       )}
+
+      {fabricPickerTarget ? (
+        <FabricPickerOverlay
+          onSelect={(row) => void handleSavedFabricPicked(row)}
+          onClose={() => setFabricPickerTarget(null)}
+        />
+      ) : null}
 
       {showConsentModal && (
         <CustomerConsentModal

@@ -569,6 +569,19 @@ h2 { font-size: 1rem; font-weight: 700; }
   gap: 8px;
 }
 
+/* Capture / Gallery / My Fabrics: one row, equal widths, fits a 320 px phone without wrapping. */
+.fabric-card-pick-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.fabric-card-pick-row .btn {
+  min-width: 0;
+  padding: 0 4px;
+  font-size: clamp(11px, 3.4vw, 13px);
+  white-space: nowrap;
+}
+
 .fabric-card-optional {
   font-size: 12px;
   font-weight: 500;
@@ -803,6 +816,20 @@ h2 { font-size: 1rem; font-weight: 700; }
   border-radius: 14px;
   overflow: hidden;
 }
+
+/* "Select a fabric" picker: the whole tile is one button. */
+.fabric-pick-tile {
+  display: block;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.fabric-pick-tile:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.fabric-pick-tile .catalog-meta-row { display: flex; }
 
 .catalog-image-btn {
   border: none;

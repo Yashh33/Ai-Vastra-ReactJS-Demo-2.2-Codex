@@ -1,23 +1,17 @@
 import { type InfiniteData, useQueryClient } from "@tanstack/react-query";
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
-import { FabricImage } from "../components/FabricImage";
+import { FabricLibraryGrid, useFabricLibrary } from "../components/FabricLibrary";
 import { PhotoPickStatus } from "../components/PhotoPickStatus";
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { compressImage, PHOTO_READ_ERROR } from "../lib/compressImage";
 import { debugLog, debugLogPicked } from "../lib/debugLog";
-import { FABRIC_IMAGES_QUERY_KEY, useFabricImagePages, useMe } from "../lib/queries";
+import { FABRIC_IMAGES_QUERY_KEY, useMe } from "../lib/queries";
 import { uploadFabricPhoto } from "../lib/storage";
 import type { FabricImageRow } from "../lib/types";
 import { guessFileExtension, makeRandomSuffix } from "../lib/utils";
-
-type FabricTileProps = {
-  row: FabricImageRow;
-  pickerMode: boolean;
-  onSelect: (row: FabricImageRow) => void;
-};
 
 function RefreshIcon() {
   return (
@@ -34,36 +28,6 @@ function RefreshIcon() {
   );
 }
 
-function getFabricLabel(row: FabricImageRow) {
-  const label = row.original_filename?.trim();
-  return label || "Fabric";
-}
-
-// Tiles show the fabric's small copy (the full photo when it has none). Their links are
-// signed together: tiles mounting at the same time share one request.
-function FabricTile({ row, pickerMode, onSelect }: FabricTileProps) {
-  return (
-    <article className="catalog-tile">
-      <button
-        className="catalog-image-btn"
-        type="button"
-        onClick={pickerMode ? () => onSelect(row) : undefined}
-      >
-        <FabricImage className="catalog-image" storagePath={row.storage_path} alt="fabric" />
-      </button>
-
-      <div className="catalog-meta-row">
-        <p className="catalog-garment-label">{getFabricLabel(row)}</p>
-        {pickerMode ? (
-          <button className="catalog-chip-btn catalog-chip-download" type="button" onClick={() => onSelect(row)}>
-            Select
-          </button>
-        ) : null}
-      </div>
-    </article>
-  );
-}
-
 export function FabricSiloPage() {
   const { accessToken } = useAuth();
   const navigate = useNavigate();
@@ -77,21 +41,14 @@ export function FabricSiloPage() {
   const { data: me, error: meError } = useMe();
   const shopContext = me ?? null;
 
+  // Same query as the grid below (and the Generate page's picker); react-query shares it.
   const {
-    data: fabricImagesData,
+    rows,
+    hasMore: hasMoreRows,
     isLoading: loadingRows,
     error: fabricImagesError,
-    refetch: refetchFabricImages,
-    hasNextPage,
-    fetchNextPage,
-    isFetchingNextPage
-  } = useFabricImagePages();
-  const rows = useMemo(() => {
-    // A fabric can show up on two pages when one was added meanwhile; list it once.
-    const seen = new Set<string>();
-    return (fabricImagesData?.pages ?? []).flat().filter((row) => (seen.has(row.id) ? false : (seen.add(row.id), true)));
-  }, [fabricImagesData]);
-  const hasMoreRows = !!hasNextPage;
+    refetch: refetchFabricImages
+  } = useFabricLibrary();
 
   const [statusText, setStatusText] = useState("Loading fabric silo...");
   const skipStatusUpdateRef = useRef(false);
@@ -368,31 +325,11 @@ export function FabricSiloPage() {
           </section>
         ) : null}
 
-        {loadingRows ? (
-          <div className="loading-box">
-            <div className="spinner" />
-          </div>
-        ) : rows.length === 0 ? (
-          <div className="empty-box">No cloths saved yet. Tap + to add your first cloth.</div>
-        ) : (
-          <>
-            <section className="catalog-grid">
-              {rows.map((row) => (
-                <FabricTile key={row.id} row={row} pickerMode={pickerMode} onSelect={selectFabric} />
-              ))}
-            </section>
-            {hasMoreRows ? (
-              <button
-                className="btn btn-light"
-                type="button"
-                onClick={() => void fetchNextPage()}
-                disabled={isFetchingNextPage}
-              >
-                {isFetchingNextPage ? "Loading..." : "Load more"}
-              </button>
-            ) : null}
-          </>
-        )}
+        <FabricLibraryGrid
+          variant="silo"
+          onSelect={pickerMode ? selectFabric : undefined}
+          emptyText="No cloths saved yet. Tap + to add your first cloth."
+        />
 
         <div className="fab-wrap">
           <button
