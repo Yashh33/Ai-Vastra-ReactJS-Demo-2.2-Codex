@@ -683,6 +683,105 @@ h2 { font-size: 1rem; font-weight: 700; }
   padding: 10px 12px;
 }
 
+/* Calm note (not an error), e.g. "This is taking longer than usual." */
+.info-box {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gold-muted);
+  background: var(--gold-light);
+  border: 1px solid var(--gold-border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin: 0;
+}
+
+/* Plain text link, e.g. "Recent try-ons" under the try-on button. */
+.text-link-btn {
+  justify-self: center;
+  background: transparent;
+  border: none;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--navy);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.text-link-btn:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; border-radius: 6px; }
+
+/* Generate: "Your look is ready" banner for a look that finished while nobody waited. */
+.look-ready-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 10px 14px;
+  background: var(--navy);
+  color: var(--white);
+  border-radius: 14px;
+}
+.look-ready-text { flex: 1; min-width: 0; font-size: 14px; font-weight: 700; }
+.look-ready-view {
+  min-height: 36px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 999px;
+  background: var(--gold);
+  color: var(--navy);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.look-ready-dismiss {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: #CBD5E1;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* Header profile menu: Recent try-ons / Log out. */
+.profile-menu-wrap { position: relative; }
+.profile-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  min-width: 170px;
+  padding: 6px;
+  background: var(--white);
+  border: 1px solid var(--mt-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  display: grid;
+  gap: 2px;
+}
+.profile-menu-item {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.profile-menu-item:hover, .profile-menu-item:focus-visible { background: var(--surface); outline: none; }
+
+/* Recent try-ons */
+.recent-tryon-note { font-size: 13px; color: var(--text-muted); margin: 0; line-height: 1.4; }
+.recent-tryon-time { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+
 /* Save to silo toggle row */
 .silo-toggle-row {
   display: flex;

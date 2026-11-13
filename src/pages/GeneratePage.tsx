@@ -7,14 +7,17 @@ import { CustomerConsentModal } from "../components/CustomerConsentModal";
 import { FabricPickerOverlay, getFabricLabel } from "../components/FabricLibrary";
 import { PhotoPickStatus } from "../components/PhotoPickStatus";
 import { TryOnFlow } from "../components/TryOnFlow";
-import { apiFetch, apiFetchBinary } from "../lib/api";
+import { apiFetch } from "../lib/api";
 import { ApiError, errorCodeMessage, friendlyError, GENERIC_ERROR_MESSAGE, MissingFabricError } from "../lib/apiError";
-import { type Attempt, attemptRef, newAttempt, refFromId, reportNoResponse, withMessage } from "../lib/attempt";
+import { type Attempt, attemptRef, newAttempt, refFromId, reportNoResponse } from "../lib/attempt";
 import { useAuth } from "../lib/auth";
+import { forgetLook, listPendingLooks, pendingLookCreatedAt, rememberLook } from "../lib/pendingLooks";
 import { FABRIC_IMAGES_QUERY_KEY, useGarmentTypes, useMe } from "../lib/queries";
 import { subscribeToGeneration } from "../lib/realtime";
+import { createSewTicketBook, withSewRetries } from "../lib/sewTicket";
 import { signFabricPreviewUrl, signUrlsBatch, uploadFabricPhoto, uploadToStorage } from "../lib/storage";
 import { supabase } from "../lib/supabase";
+import { sendTryOn, tryOnFailure } from "../lib/tryOnTicket";
 import type {
   ApplyToTarget,
   FabricImageRow,
@@ -56,6 +59,13 @@ function fabricLookError(garmentName: string, slotCount: number) {
 }
 
 const MULTI_DRAFT_STORAGE_KEY = "aivastra-multi-draft";
+
+/** After this long the waiting state stops blocking the page; the look is still checked quietly. */
+const SEW_WAIT_LIMIT_MS = 6 * 60 * 1000;
+/** How often remembered looks that are not being waited on are checked. */
+const QUIET_CHECK_MS = 15 * 1000;
+const SLOW_LOOK_MESSAGE =
+  "This is taking longer than usual. It will appear in Browse when it is ready. You do not need to sew it again.";
 
 type MultiFabricSelection = {
   /** Empty while a freshly picked photo is still waiting to be uploaded. */
@@ -154,6 +164,18 @@ export function GeneratePage() {
    * instead of uploading it again. Tied to that exact File: a new photo or a colour fix uploads afresh.
    */
   const uploadedFabricRef = useRef<{ file: File; row: FabricImageRow } | null>(null);
+  /** Same for a replacement model photo, so a retry sends the same request (and ticket). */
+  const uploadedHeroRef = useRef<{ file: File; id: string } | null>(null);
+  /** A second tap on Sew while the first is running does nothing (set before any await). */
+  const sewBusyRef = useRef(false);
+  /** One ticket per unchanged Sew request; a finished attempt or any change gets a new one. */
+  const sewTicketsRef = useRef(createSewTicketBook());
+  const mountedRef = useRef(true);
+  const checkingLooksRef = useRef(false);
+  /** Looks already shown in the "Your look is ready" banner (not fetched again meanwhile). */
+  const readyLookIdsRef = useRef<string[]>([]);
+  /** Looks the "taking longer than usual" note was already shown for. */
+  const slowNotedRef = useRef(new Set<string>());
 
   const pickedFabricImageId =
     searchParams.get("fabric_image_id") ?? searchParams.get("selectedFabricImageId") ?? "";
@@ -204,6 +226,9 @@ export function GeneratePage() {
   const [errorRef, setErrorRef] = useState<{ forText: string; ref: string } | null>(null);
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [showTryOnFlow, setShowTryOnFlow] = useState(false);
+  /** Remembered looks that finished while nobody was waiting; the first one gets the banner. */
+  const [readyLookIds, setReadyLookIds] = useState<string[]>([]);
+  const [slowLookNote, setSlowLookNote] = useState(false);
 
   const [multiSelections, setMultiSelections] = useState<Record<string, MultiFabricSelection>>({});
   /** White / Black per optional slot id; a slot not listed here uses White. */
@@ -225,6 +250,11 @@ export function GeneratePage() {
   const requiredSlotFilled = !!requiredSlot && isSlotFilled(multiSelections[requiredSlot.id]);
 
   const selectedFabricImageId = existingFabricImage?.id ?? "";
+  const shopId = shopContext?.shop_id ?? null;
+  // Read by the remembered-look checks, which run outside React's render.
+  const visualizingIdRef = useRef<string | null>(null);
+  visualizingIdRef.current = visualizingGenerationId;
+  readyLookIdsRef.current = readyLookIds;
   const garmentHasHero = !!(selectedGarment?.hero_thumb_signed_url || selectedGarment?.hero_image_signed_url);
 
   const fabricReady = !!fabricFile || !!existingFabricImage?.id;
@@ -347,6 +377,8 @@ export function GeneratePage() {
       }
 
       if (row.status === "done") {
+        // Opened right away, so it is not offered again as "Your look is ready".
+        forgetLook(shopId, row.id);
         setVisualizingGenerationId(null);
         setStatusText("Generation ready.");
         setMultiSelections({});
@@ -361,6 +393,7 @@ export function GeneratePage() {
 
       if (row.status === "failed") {
         console.error("[generate] generation failed", row.error, row.error_code ?? "");
+        forgetLook(shopId, row.id);
         setVisualizingGenerationId(null);
         setStatusText("");
         showGenerationError(errorCodeMessage(row.error_code, "look") ?? GENERIC_ERROR_MESSAGE, failureRefRef.current);
@@ -393,11 +426,129 @@ export function GeneratePage() {
       unsubscribe();
       window.clearInterval(timer);
     };
-  }, [accessToken, navigate, queryClient, visualizingGenerationId]);
+  }, [accessToken, navigate, queryClient, visualizingGenerationId, shopId]);
 
   function showGenerationError(message: string, ref: string | null) {
     setErrorText(message);
     setErrorRef(ref ? { forText: message, ref } : null);
+  }
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // Waiting limit: after 6 minutes (counted from when the look was made) the page is no
+  // longer blocked; the look keeps being checked quietly so the banner can still appear.
+  useEffect(() => {
+    if (!visualizingGenerationId) return;
+    const id = visualizingGenerationId;
+    const createdAt = pendingLookCreatedAt(shopId, id) ?? Date.now();
+    const timer = window.setTimeout(() => {
+      if (visualizingIdRef.current !== id) return;
+      slowNotedRef.current.add(id);
+      setVisualizingGenerationId(null);
+      setStatusText("");
+      setSlowLookNote(true);
+    }, Math.max(0, createdAt + SEW_WAIT_LIMIT_MS - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [visualizingGenerationId, shopId]);
+
+  /**
+   * Looks this phone made in the last 30 minutes that nobody is waiting on: still
+   * running -> the normal waiting state again (or quietly, past the waiting limit);
+   * done -> "Your look is ready" banner; failed -> its message, once.
+   */
+  async function checkRememberedLooks() {
+    if (!accessToken || !shopId || checkingLooksRef.current) return;
+    const looks = listPendingLooks(shopId).filter(
+      (look) => look.id !== visualizingIdRef.current && !readyLookIdsRef.current.includes(look.id)
+    );
+    if (!looks.length) return;
+    checkingLooksRef.current = true;
+    try {
+      // Newest first: the newest look still running is the one waited on.
+      for (const look of looks) {
+        let row: GenerationRow;
+        try {
+          row = await apiFetch<GenerationRow>(`/generations/${encodeURIComponent(look.id)}`, accessToken, {
+            method: "GET"
+          });
+        } catch (err) {
+          // Gone (deleted): nothing to wait for. Anything else: try again later.
+          if (err instanceof ApiError && err.status === 404) forgetLook(shopId, look.id);
+          else console.warn("[generate] remembered look check failed", look.id, err);
+          continue;
+        }
+        if (!mountedRef.current) return;
+        if (row.id !== look.id) continue;
+
+        if (row.status === "done") {
+          setReadyLookIds((prev) => (prev.includes(row.id) ? prev : [...prev, row.id]));
+          setSlowLookNote(false);
+          void queryClient.invalidateQueries({ queryKey: ["me"] });
+        } else if (row.status === "failed") {
+          forgetLook(shopId, row.id);
+          console.error("[generate] remembered look failed", row.id, row.error, row.error_code ?? "");
+          setSlowLookNote(false);
+          showGenerationError(errorCodeMessage(row.error_code, "look") ?? GENERIC_ERROR_MESSAGE, null);
+          // A failed look may have been refunded.
+          void queryClient.invalidateQueries({ queryKey: ["me"] });
+        } else if (isPendingStatus(row.status)) {
+          const waitedMs = Date.now() - look.createdAt;
+          if (waitedMs < SEW_WAIT_LIMIT_MS) {
+            if (!visualizingIdRef.current && !sewBusyRef.current) {
+              // As if it had just been created.
+              failureRefRef.current = null;
+              visualizingIdRef.current = row.id;
+              setVisualizingGenerationId(row.id);
+              setStatusText("Generating look...");
+            }
+          } else if (!slowNotedRef.current.has(row.id)) {
+            slowNotedRef.current.add(row.id);
+            setSlowLookNote(true);
+          }
+        }
+      }
+    } finally {
+      checkingLooksRef.current = false;
+    }
+  }
+  const checkLooksRef = useRef(checkRememberedLooks);
+  checkLooksRef.current = checkRememberedLooks;
+
+  // When Generate opens, when the app comes back to the front, and quietly every
+  // 15 s while a remembered look is not being waited on.
+  useEffect(() => {
+    if (!accessToken || !shopId) return;
+    void checkLooksRef.current();
+    function handleVisible() {
+      if (document.visibilityState === "visible") void checkLooksRef.current();
+    }
+    document.addEventListener("visibilitychange", handleVisible);
+    window.addEventListener("pageshow", handleVisible);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      if (listPendingLooks(shopId).some((look) => look.id !== visualizingIdRef.current)) void checkLooksRef.current();
+    }, QUIET_CHECK_MS);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisible);
+      window.removeEventListener("pageshow", handleVisible);
+      window.clearInterval(timer);
+    };
+  }, [accessToken, shopId]);
+
+  function viewReadyLook(id: string) {
+    forgetLook(shopId, id);
+    setReadyLookIds((prev) => prev.filter((item) => item !== id));
+    navigate(`/output-viewer?generationId=${encodeURIComponent(id)}`);
+  }
+
+  function dismissReadyLook(id: string) {
+    forgetLook(shopId, id);
+    setReadyLookIds((prev) => prev.filter((item) => item !== id));
   }
 
   function assignFabricToSlot(slotId: string, selection: MultiFabricSelection) {
@@ -716,7 +867,10 @@ export function GeneratePage() {
 
   async function ensureHeroImageId(garment: GarmentType) {
     if (heroReplacementFile) {
+      const saved = uploadedHeroRef.current;
+      if (saved && saved.file === heroReplacementFile) return saved.id;
       const row = await uploadHeroReplacement(heroReplacementFile, garment);
+      uploadedHeroRef.current = { file: heroReplacementFile, id: row.id };
       return row.id;
     }
 
@@ -725,8 +879,57 @@ export function GeneratePage() {
     throw new Error("This garment type has no default hero image.");
   }
 
+  /**
+   * POST /generations with one ticket per unchanged request (same garment, fabrics,
+   * default fabric choices and product details = same body = same ticket). No answer
+   * or 503: sent again with the same ticket after 2 s and 5 s. A "duplicate": true
+   * answer is the look already made for this ticket, not charged again.
+   */
+  async function postGeneration(garmentId: string, body: Record<string, unknown>) {
+    if (!accessToken) throw new Error("Not authenticated");
+    const tickets = sewTicketsRef.current;
+    const attempt = newAttempt("look", garmentId, tickets.ticketFor(JSON.stringify([garmentId, body])));
+    setStatusText("Creating generation job...");
+    try {
+      const response = await withSewRetries(
+        () =>
+          apiFetch<GenerationCreateResponse>(
+            "/generations",
+            accessToken,
+            { method: "POST", body: JSON.stringify(body) },
+            attempt
+          ),
+        { onRetry: () => setStatusText("Connection slow, trying again...") }
+      );
+      tickets.finish();
+      return { response, attempt };
+    } catch (err) {
+      // No answer / 503 keeps the ticket, so a manual retry can never be charged twice.
+      tickets.finish(err);
+      throw err;
+    }
+  }
+
+  /** A look was created (or found again for this ticket): remember it and wait for it. */
+  function startWaitingForLook(response: GenerationCreateResponse, attempt: Attempt) {
+    void queryClient.invalidateQueries({ queryKey: ["generations"] });
+
+    if (!response.duplicate && Number.isFinite(response.balance_after)) {
+      queryClient.setQueryData(["me"], (prev: typeof me) =>
+        prev ? { ...prev, credits_balance: response.balance_after } : prev
+      );
+    }
+    void queryClient.invalidateQueries({ queryKey: ["me"] });
+
+    rememberLook(shopId, response.id);
+    failureRefRef.current = refFromId(response.request_id ?? attempt.requestId);
+    visualizingIdRef.current = response.id;
+    setVisualizingGenerationId(response.id);
+    setStatusText("Generating look...");
+  }
+
   async function handleCreateGeneration() {
-    if (!accessToken || !selectedGarment) return;
+    if (!accessToken || !selectedGarment || sewBusyRef.current) return;
     setErrorText(null);
 
     // Optional product details: only the filled fields are sent with the create request.
@@ -743,7 +946,8 @@ export function GeneratePage() {
     }
 
     const fabricMessage = fabricLookError(selectedGarment.name, 0);
-    const attempt = newAttempt("look", selectedGarment.id);
+    sewBusyRef.current = true;
+    setSlowLookNote(false);
     setCreatingGeneration(true);
     try {
       const fabricImage = await ensureFabricImage({ showStatus: true });
@@ -756,29 +960,13 @@ export function GeneratePage() {
         fabric_color: null
       };
 
-      setStatusText("Creating generation job...");
-      const response = await apiFetch<GenerationCreateResponse>("/generations", accessToken, {
-        method: "POST",
-        body: JSON.stringify({
-          hero_image_id: heroImageId,
-          fabric_image_id: fabricImage.id,
-          fabrics: [fabricAssignment],
-          ...productDetails
-        })
-      }, attempt);
-
-      void queryClient.invalidateQueries({ queryKey: ["generations"] });
-
-      if (Number.isFinite(response.balance_after)) {
-        queryClient.setQueryData(["me"], (prev: typeof me) =>
-          prev ? { ...prev, credits_balance: response.balance_after } : prev
-        );
-      }
-      void queryClient.invalidateQueries({ queryKey: ["me"] });
-
-      failureRefRef.current = refFromId(response.request_id ?? attempt.requestId);
-      setVisualizingGenerationId(response.id);
-      setStatusText("Generating look...");
+      const { response, attempt } = await postGeneration(selectedGarment.id, {
+        hero_image_id: heroImageId,
+        fabric_image_id: fabricImage.id,
+        fabrics: [fabricAssignment],
+        ...productDetails
+      });
+      startWaitingForLook(response, attempt);
     } catch (err) {
       console.error("[generate] create failed", err);
       setStatusText("");
@@ -789,6 +977,7 @@ export function GeneratePage() {
       void queryClient.invalidateQueries({ queryKey: ["me"] });
     } finally {
       setCreatingGeneration(false);
+      sewBusyRef.current = false;
     }
   }
 
@@ -824,11 +1013,7 @@ export function GeneratePage() {
     formData.set("consent_confirmed", "true");
     formData.set("customer_photo", compressedPhoto);
 
-    const blob = await apiFetchBinary("/tryon/quick/v2", accessToken, {
-      method: "POST",
-      body: formData,
-    }, attempt);
-
+    const blob = await sendTryOn("/tryon/quick/v2", accessToken, formData, attempt);
     return URL.createObjectURL(blob);
   }
 
@@ -1075,11 +1260,12 @@ export function GeneratePage() {
   }
 
   async function handleCreateMultiGeneration() {
-    if (!accessToken || !selectedGarment || !requiredSlotFilled) return;
+    if (!accessToken || !selectedGarment || !requiredSlotFilled || sewBusyRef.current) return;
+    sewBusyRef.current = true;
     setErrorText(null);
+    setSlowLookNote(false);
 
     const fabricMessage = fabricLookError(selectedGarment.name, sortedFabricSlots.length);
-    const attempt = newAttempt("look", selectedGarment.id);
     setCreatingGeneration(true);
     try {
       const selections = await uploadPendingMultiFabrics();
@@ -1101,28 +1287,12 @@ export function GeneratePage() {
         });
       const defaultFabrics = buildDefaultFabrics(selections);
 
-      setStatusText("Creating generation job...");
-      const response = await apiFetch<GenerationCreateResponse>("/generations", accessToken, {
-        method: "POST",
-        body: JSON.stringify({
-          hero_image_id: heroImageId,
-          fabrics,
-          ...(defaultFabrics ? { default_fabrics: defaultFabrics } : {})
-        })
-      }, attempt);
-
-      void queryClient.invalidateQueries({ queryKey: ["generations"] });
-
-      if (Number.isFinite(response.balance_after)) {
-        queryClient.setQueryData(["me"], (prev: typeof me) =>
-          prev ? { ...prev, credits_balance: response.balance_after } : prev
-        );
-      }
-      void queryClient.invalidateQueries({ queryKey: ["me"] });
-
-      failureRefRef.current = refFromId(response.request_id ?? attempt.requestId);
-      setVisualizingGenerationId(response.id);
-      setStatusText("Generating look...");
+      const { response, attempt } = await postGeneration(selectedGarment.id, {
+        hero_image_id: heroImageId,
+        fabrics,
+        ...(defaultFabrics ? { default_fabrics: defaultFabrics } : {})
+      });
+      startWaitingForLook(response, attempt);
     } catch (err) {
       console.error("[generate] create failed", err);
       setStatusText("");
@@ -1133,6 +1303,7 @@ export function GeneratePage() {
       void queryClient.invalidateQueries({ queryKey: ["me"] });
     } finally {
       setCreatingGeneration(false);
+      sewBusyRef.current = false;
     }
   }
 
@@ -1180,18 +1351,14 @@ export function GeneratePage() {
     const defaultFabrics = buildDefaultFabrics(selections);
     if (defaultFabrics) formData.set("default_fabrics", JSON.stringify(defaultFabrics));
 
-    const blob = await apiFetchBinary("/tryon/multi/v2", accessToken, {
-      method: "POST",
-      body: formData
-    }, attempt);
-
+    const blob = await sendTryOn("/tryon/multi/v2", accessToken, formData, attempt);
     return URL.createObjectURL(blob);
   }
 
   /** Try-on errors shown in the flow are plain text; the raw error goes to the console. */
-  async function handleTryOnSubmit(customerPhotoFile: File): Promise<string> {
-    // One id per Generate Preview click.
-    const attempt = newAttempt("tryon", isMulti ? selectedGarment?.id : selectedGarmentId);
+  async function handleTryOnSubmit(customerPhotoFile: File, ticket: string): Promise<string> {
+    // One ticket per try-on (TryOnFlow keeps it for a retry of the same photo and selection).
+    const attempt = newAttempt("tryon", isMulti ? selectedGarment?.id : selectedGarmentId, ticket);
     tryOnRequestIdRef.current = attempt.requestId;
     try {
       return await (isMulti
@@ -1200,12 +1367,12 @@ export function GeneratePage() {
     } catch (err) {
       console.error("[try-on] failed", err);
       if (err instanceof Error && err.message === PHOTO_READ_ERROR) throw err;
-      const message = friendlyError(
-        err,
-        `Couldn't create the try-on for ${selectedGarment?.name ?? "this style"}. Check the fabrics and try again.`
+      throw tryOnFailure(err, accessToken, () =>
+        friendlyError(
+          err,
+          `Couldn't create the try-on for ${selectedGarment?.name ?? "this style"}. Check the fabrics and try again.`
+        )
       );
-      reportNoResponse(accessToken, err, message);
-      throw withMessage(err, message);
     }
   }
 
@@ -1323,6 +1490,23 @@ export function GeneratePage() {
             <h1>Sew a New Look</h1>
           </div>
         </header>
+
+        {readyLookIds[0] ? (
+          <div className="look-ready-banner" role="status">
+            <span className="look-ready-text">Your look is ready</span>
+            <button className="look-ready-view" type="button" onClick={() => viewReadyLook(readyLookIds[0] as string)}>
+              View
+            </button>
+            <button
+              className="look-ready-dismiss"
+              type="button"
+              aria-label="Dismiss"
+              onClick={() => dismissReadyLook(readyLookIds[0] as string)}
+            >
+              ×
+            </button>
+          </div>
+        ) : null}
 
         <section className="card stack-sm">
           <div className="between">
@@ -1612,12 +1796,21 @@ export function GeneratePage() {
             👤 Try on customer
           </button>
           <p className="credit-cost-hint">Uses 50 credits</p>
+          <button className="text-link-btn" type="button" onClick={() => navigate("/recent-tryons")}>
+            Recent try-ons
+          </button>
 
           {actionBusy && !loadingGarmentTypes ? (
             <div className="loading-box">
               <div className="spinner" />
               <p className="tiny muted">{statusText || "Working..."}</p>
             </div>
+          ) : null}
+
+          {slowLookNote && !actionBusy ? (
+            <p className="info-box" role="status">
+              {SLOW_LOOK_MESSAGE}
+            </p>
           ) : null}
 
           {errorText ? (

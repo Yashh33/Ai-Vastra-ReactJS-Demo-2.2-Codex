@@ -6,9 +6,9 @@ import { CustomerConsentModal } from "../components/CustomerConsentModal";
 import { LookImage } from "../components/LookImage";
 import { PushLookToScreenButton } from "../components/PushLookToScreenButton";
 import { TryOnFlow } from "../components/TryOnFlow";
-import { apiFetch, apiFetchBinary } from "../lib/api";
-import { friendlyError, GENERIC_ERROR_MESSAGE } from "../lib/apiError";
-import { newAttempt, reportNoResponse, withMessage } from "../lib/attempt";
+import { apiFetch } from "../lib/api";
+import { errorCodeMessage, friendlyError, GENERIC_ERROR_MESSAGE } from "../lib/apiError";
+import { newAttempt } from "../lib/attempt";
 import { useAuth } from "../lib/auth";
 import { saveColorCorrected } from "../lib/colorStudio/saveCorrected";
 import { useGarmentTypes } from "../lib/queries";
@@ -20,6 +20,8 @@ import type {
   DownloadUrlResponse,
   GenerationRow,
 } from "../lib/types";
+import { forgetLook } from "../lib/pendingLooks";
+import { sendTryOn, tryOnFailure } from "../lib/tryOnTicket";
 import { isPendingStatus } from "../lib/utils";
 
 /** A failed image link / image load is retried once, this long after, before the error shows. */
@@ -28,6 +30,12 @@ const IMAGE_LOAD_ERROR = "Couldn't load the image. Tap to retry.";
 
 function wait(ms: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+}
+
+/** A failed look's (or try-on's) message for its error_code; the generic one without a known code. */
+function failedLookMessage(row: Pick<GenerationRow, "error_code" | "generation_type">) {
+  const kind = (row.generation_type ?? "look") === "look" ? "look" : "tryon";
+  return errorCodeMessage(row.error_code, kind) ?? GENERIC_ERROR_MESSAGE;
 }
 
 async function withOneRetry<T>(load: () => Promise<T>): Promise<T> {
@@ -165,6 +173,8 @@ export function OutputViewerPage() {
       );
       if (seq !== loadSeqRef.current) return;
       setGeneration(row);
+      // Viewed (or shown as failed) here: Generate no longer offers it as "Your look is ready".
+      if (row.status === "done" || row.status === "failed") forgetLook(row.shop_id, row.id);
 
       if (row.status === "done" && row.output_path) {
         const signed = await withOneRetry(() => fetchGenerationDownloadUrl(generationId));
@@ -178,7 +188,7 @@ export function OutputViewerPage() {
         // The raw backend error only goes to the console.
         if (row.error) console.error("[output-viewer] generation failed", row.error);
         setImageUrl(null);
-        setStatusText(row.status === "failed" ? GENERIC_ERROR_MESSAGE : "Output not available");
+        setStatusText(row.status === "failed" ? failedLookMessage(row) : "Output not available");
       }
     } catch (err) {
       if (seq === loadSeqRef.current) showLoadError(err);
@@ -369,30 +379,24 @@ export function OutputViewerPage() {
     }
   }
 
-  async function handleTryOnSubmit(customerPhotoFile: File): Promise<string> {
+  async function handleTryOnSubmit(customerPhotoFile: File, ticket: string): Promise<string> {
     if (!accessToken) throw new Error("Not authenticated");
     if (!generationId) throw new Error("No generation selected");
 
-    // One id per Generate Preview click.
-    const attempt = newAttempt("look_tryon", generation?.id === generationId ? generation.folder_id : null);
+    // One ticket per try-on (TryOnFlow keeps it for a retry of the same photo).
+    const attempt = newAttempt("look_tryon", generation?.id === generationId ? generation.folder_id : null, ticket);
     const formData = new FormData();
     formData.set("generation_id", generationId);
     formData.set("consent_confirmed", "true");
     formData.set("customer_photo", customerPhotoFile);
 
     try {
-      const blob = await apiFetchBinary("/tryon/v2", accessToken, {
-        method: "POST",
-        body: formData,
-      }, attempt);
-
+      const blob = await sendTryOn("/tryon/v2", accessToken, formData, attempt);
       return URL.createObjectURL(blob);
     } catch (err) {
       console.error("[output-viewer] look try-on failed", err);
       // TryOnFlow shows this error's message as is, so it gets the plain one.
-      const message = friendlyError(err);
-      reportNoResponse(accessToken, err, message);
-      throw withMessage(err, message);
+      throw tryOnFailure(err, accessToken, () => friendlyError(err));
     }
   }
 
@@ -550,7 +554,7 @@ export function OutputViewerPage() {
                 {isPendingStatus(generation?.status)
                   ? "Visualizing..."
                   : generation?.status === "failed"
-                    ? GENERIC_ERROR_MESSAGE
+                    ? failedLookMessage(generation)
                     : "No image available"}
               </p>
             </div>

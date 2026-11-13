@@ -5,7 +5,7 @@ import { APP_ENV } from "./env";
 export type AttemptType = "look" | "tryon" | "look_tryon";
 
 export type Attempt = {
-  /** Sent as X-Client-Request-Id; one per click. */
+  /** Sent as X-Client-Request-Id; one per request (a retry of the same request sends it again). */
   requestId: string;
   attemptType: AttemptType;
   garmentTypeId?: string | null;
@@ -37,8 +37,9 @@ export function newRequestId(): string {
   return uuidFromBytes(bytes);
 }
 
-export function newAttempt(attemptType: AttemptType, garmentTypeId?: string | null): Attempt {
-  return { requestId: newRequestId(), attemptType, garmentTypeId: garmentTypeId || null };
+/** `requestId`: an existing ticket to send again (a retry of the same request); a new one otherwise. */
+export function newAttempt(attemptType: AttemptType, garmentTypeId?: string | null, requestId?: string): Attempt {
+  return { requestId: requestId || newRequestId(), attemptType, garmentTypeId: garmentTypeId || null };
 }
 
 /** A failed generation call: either no response at all, or an error response the backend already logged. */

@@ -2,28 +2,41 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
 import { GENERIC_ERROR_MESSAGE } from "../lib/apiError";
-import { attemptRef } from "../lib/attempt";
+import { attemptRef, newRequestId } from "../lib/attempt";
 import { compressImage, PHOTO_READ_ERROR } from "../lib/compressImage";
 import { debugLog, debugLogPicked } from "../lib/debugLog";
+import { RECENT_TRYONS_QUERY_KEY } from "../lib/queries";
+import { tryOnTicketSpent } from "../lib/tryOnTicket";
 import { ColorStudio } from "./ColorStudio";
 import { PhotoPickStatus } from "./PhotoPickStatus";
 
 type Props = {
   onClose: () => void;
-  /** Runs the try-on and returns a URL for the result image. */
-  onSubmit?: (customerPhotoFile: File) => Promise<string>;
+  /**
+   * Runs the try-on and returns a URL for the result image. `ticket` is its
+   * X-Client-Request-Id: the same photo keeps the same ticket until a result or a
+   * definite failure is shown, so a retry is never charged twice.
+   */
+  onSubmit?: (customerPhotoFile: File, ticket: string) => Promise<string>;
   /** Alternative to onSubmit: the caller picks the endpoint and hands back the result image. */
-  submitTryOn?: (photo: File, consent: boolean) => Promise<Blob>;
+  submitTryOn?: (photo: File, consent: boolean, ticket: string) => Promise<Blob>;
   onPushToScreen?: (resultBlob: Blob) => Promise<void>;
   onShowCarousel?: () => Promise<void>;
+  /** Opens straight on an existing result (Recent try-ons); with no submit function there is no "Try Another Photo". */
+  initialResultUrl?: string;
 };
 
-export function TryOnFlow({ onClose, onSubmit, submitTryOn, onPushToScreen, onShowCarousel }: Props) {
+export function TryOnFlow({ onClose, onSubmit, submitTryOn, onPushToScreen, onShowCarousel, initialResultUrl }: Props) {
   const queryClient = useQueryClient();
   const [customerPhoto, setCustomerPhoto] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [resultUrl, setResultUrl] = useState<string | null>(initialResultUrl ?? null);
   const [busy, setBusy] = useState(false);
+  /** A second tap on Generate Preview while one is running does nothing. */
+  const busyRef = useRef(false);
+  /** The ticket of the try-on for this exact photo; cleared once a result or a definite failure is shown. */
+  const ticketRef = useRef<{ photo: File; id: string } | null>(null);
+  const canTryOn = !!(submitTryOn || onSubmit);
   const [error, setError] = useState<string | null>(null);
   /** Short attempt-log id shown under a try-on error, so the shop can read it out. */
   const [errorRef, setErrorRef] = useState<string | null>(null);
@@ -78,22 +91,36 @@ export function TryOnFlow({ onClose, onSubmit, submitTryOn, onPushToScreen, onSh
   }
 
   async function handleGenerate() {
-    if (!customerPhoto) return;
+    if (!customerPhoto || busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     setErrorRef(null);
+    const photo = customerPhoto;
+    if (ticketRef.current?.photo !== photo) ticketRef.current = { photo, id: newRequestId() };
+    const ticket = ticketRef.current.id;
     try {
+      let shown = false;
       if (submitTryOn) {
         // This flow only opens after the consent step, so consent is always given here.
-        setResultUrl(URL.createObjectURL(await submitTryOn(customerPhoto, true)));
+        setResultUrl(URL.createObjectURL(await submitTryOn(photo, true, ticket)));
+        shown = true;
       } else if (onSubmit) {
-        setResultUrl(await onSubmit(customerPhoto));
+        setResultUrl(await onSubmit(photo, ticket));
+        shown = true;
+      }
+      if (shown) {
+        ticketRef.current = null;
+        void queryClient.invalidateQueries({ queryKey: RECENT_TRYONS_QUERY_KEY });
       }
     } catch (err) {
+      // A definite failure ends this ticket; no answer / still running keeps it for the retry.
+      if (tryOnTicketSpent(err) && ticketRef.current?.id === ticket) ticketRef.current = null;
       // Callers hand over a plain message; anything else gets the generic one.
       setError(err instanceof Error && err.message ? err.message : GENERIC_ERROR_MESSAGE);
       setErrorRef(attemptRef(err));
     } finally {
+      busyRef.current = false;
       setBusy(false);
       // A try-on costs credits; a failed one may have been refunded.
       void queryClient.invalidateQueries({ queryKey: ["me"] });
@@ -348,31 +375,33 @@ export function TryOnFlow({ onClose, onSubmit, submitTryOn, onPushToScreen, onSh
             >
               🎨 Match colour
             </button>
-            <button
-              onClick={() => {
-                setResultUrl(null);
-                setCustomerPhoto(null);
-                setPreviewUrl(null);
-              }}
-              style={{
-                width: "100%",
-                minHeight: "44px",
-                background: "transparent",
-                color: "var(--text-muted)",
-                border: "0.5px solid var(--border)",
-                borderRadius: "12px",
-                fontSize: "14px",
-                fontWeight: 600,
-                cursor: "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              Try Another Photo
-            </button>
+            {canTryOn ? (
+              <button
+                onClick={() => {
+                  setResultUrl(null);
+                  setCustomerPhoto(null);
+                  setPreviewUrl(null);
+                }}
+                style={{
+                  width: "100%",
+                  minHeight: "44px",
+                  background: "transparent",
+                  color: "var(--text-muted)",
+                  border: "0.5px solid var(--border)",
+                  borderRadius: "12px",
+                  fontSize: "14px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                Try Another Photo
+              </button>
+            ) : null}
           </>
         )}
 
-        {!resultUrl && (
+        {!resultUrl && canTryOn && (
           <>
             {!previewUrl && (
               <div
@@ -489,6 +518,7 @@ export function TryOnFlow({ onClose, onSubmit, submitTryOn, onPushToScreen, onSh
                   />
                   <button
                     onClick={() => {
+                      if (busyRef.current) return;
                       setCustomerPhoto(null);
                       setPreviewUrl(null);
                     }}

@@ -7,9 +7,9 @@ import { LookImage } from "../components/LookImage";
 import { PushLookToScreenButton } from "../components/PushLookToScreenButton";
 import { SignedImage } from "../components/SignedImage";
 import { TryOnFlow } from "../components/TryOnFlow";
-import { apiFetch, apiFetchBinary } from "../lib/api";
+import { apiFetch } from "../lib/api";
 import { friendlyError } from "../lib/apiError";
-import { newAttempt, reportNoResponse, withMessage } from "../lib/attempt";
+import { newAttempt } from "../lib/attempt";
 import { useAuth } from "../lib/auth";
 import { restoreOriginalColor, saveColorCorrected } from "../lib/colorStudio/saveCorrected";
 import { useMe } from "../lib/queries";
@@ -20,7 +20,9 @@ import {
   type BrowseLookRow
 } from "../lib/screenData";
 import { lookThumbnailPathFor, preloadLookImages, signUrlsBatch } from "../lib/storage";
+import { forgetLook } from "../lib/pendingLooks";
 import { supabase } from "../lib/supabase";
+import { sendTryOn, tryOnFailure } from "../lib/tryOnTicket";
 
 // Mirrors the TV's browse mode (ScreenPage) using the same shared queries, but is driven by
 // local state only: browsing never reads or writes shop_screen_state, so it can't change the TV.
@@ -289,6 +291,11 @@ export function BrowsePage() {
     void preloadLookImages(paths);
   }, [detailLook?.id, looks, hasMore]);
 
+  // A look opened here has been viewed: Generate no longer offers it as "Your look is ready".
+  useEffect(() => {
+    if (detailLook?.id) forgetLook(shopId, detailLook.id);
+  }, [detailLook?.id, shopId]);
+
   function cancelEditDetails() {
     setEditingDetails(false);
     setDetailsError(null);
@@ -396,23 +403,21 @@ export function BrowsePage() {
   }
 
   // The customer photo goes straight to the try-on endpoint and is never stored.
-  async function submitLookTryOn(look: BrowseLookRow, photo: File, consent: boolean) {
+  async function submitLookTryOn(look: BrowseLookRow, photo: File, consent: boolean, ticket: string) {
     if (!accessToken) throw new Error("Not authenticated");
-    // One id per Generate Preview click.
-    const attempt = newAttempt("look_tryon", look.folder_id);
+    // One ticket per try-on (TryOnFlow keeps it for a retry of the same photo).
+    const attempt = newAttempt("look_tryon", look.folder_id, ticket);
     tryOnRequestIdRef.current = attempt.requestId;
     const formData = new FormData();
     formData.set("generation_id", look.id);
     formData.set("consent_confirmed", consent ? "true" : "false");
     formData.set("customer_photo", photo);
     try {
-      return await apiFetchBinary("/tryon/v2", accessToken, { method: "POST", body: formData }, attempt);
+      return await sendTryOn("/tryon/v2", accessToken, formData, attempt);
     } catch (err) {
       console.error("BrowsePage: look try-on failed", look.id, err);
       // TryOnFlow shows this error's message as is, so it gets the plain one.
-      const message = friendlyError(err);
-      reportNoResponse(accessToken, err, message);
-      throw withMessage(err, message);
+      throw tryOnFailure(err, accessToken, () => friendlyError(err));
     }
   }
 
@@ -720,7 +725,7 @@ export function BrowsePage() {
         {tryOnOpen ? (
           <TryOnFlow
             onClose={() => setTryOnOpen(false)}
-            submitTryOn={(photo, consent) => submitLookTryOn(detailLook, photo, consent)}
+            submitTryOn={(photo, consent, ticket) => submitLookTryOn(detailLook, photo, consent, ticket)}
             onPushToScreen={(blob) => pushTryOnToScreen(detailLook, blob)}
             onShowCarousel={showCarouselOnTv}
           />

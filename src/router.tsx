@@ -18,6 +18,9 @@ const OutputHistoryPage = lazy(() =>
 const OutputViewerPage = lazy(() =>
   import("./pages/OutputViewerPage").then((m) => ({ default: m.OutputViewerPage }))
 );
+const RecentTryOnsPage = lazy(() =>
+  import("./pages/RecentTryOnsPage").then((m) => ({ default: m.RecentTryOnsPage }))
+);
 const ScreenPage = lazy(() => import("./pages/ScreenPage").then((m) => ({ default: m.ScreenPage })));
 const UploadTestPage = lazy(() => import("./pages/UploadTestPage").then((m) => ({ default: m.UploadTestPage })));
 
@@ -48,6 +51,7 @@ export function AppRouter() {
             <Route path="/output-viewer" element={<OutputViewerPage />} />
             <Route path="/match-color" element={<MatchColorPage />} />
             <Route path="/carousel" element={<CarouselPage />} />
+            <Route path="/recent-tryons" element={<RecentTryOnsPage />} />
             <Route path="/upload-test" element={<UploadTestPage />} />
           </Route>
         </Route>

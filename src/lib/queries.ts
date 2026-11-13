@@ -1,8 +1,9 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { apiFetch } from "./api";
+import { ApiError } from "./apiError";
 import { useAuth } from "./auth";
-import type { FabricImageRow, GarmentType, GenerationRow, ShopContext } from "./types";
+import type { FabricImageRow, GarmentType, GenerationRow, RecentTryOn, ShopContext } from "./types";
 
 export type MeResponse = ShopContext & {
   shop_name?: string | null;
@@ -87,5 +88,35 @@ export function useGenerations(params: GenerationsParams, options?: { enabled?: 
         method: "GET"
       }),
     enabled: !!accessToken && (options?.enabled ?? true)
+  });
+}
+
+export const RECENT_TRYONS_QUERY_KEY = ["tryon-recent"] as const;
+
+/** The list from GET /tryon/recent (a bare array, or wrapped in items / tryons). */
+function toRecentTryOns(payload: unknown): RecentTryOn[] {
+  const box = payload as { items?: unknown; tryons?: unknown } | null;
+  const list = Array.isArray(payload) ? payload : Array.isArray(box?.items) ? box.items : Array.isArray(box?.tryons) ? box.tryons : [];
+  return (list as RecentTryOn[]).filter((row) => !!row && typeof row.request_id === "string" && !!row.request_id);
+}
+
+/** This shop's try-ons of the last 24 hours. A backend without the endpoint (404/405) gives an empty list. */
+export function useRecentTryOns() {
+  const { accessToken } = useAuth();
+
+  return useQuery({
+    queryKey: RECENT_TRYONS_QUERY_KEY,
+    queryFn: async () => {
+      try {
+        return toRecentTryOns(await apiFetch<unknown>("/tryon/recent", accessToken as string, { method: "GET" }));
+      } catch (err) {
+        if (err instanceof ApiError && (err.status === 404 || err.status === 405)) return [];
+        throw err;
+      }
+    },
+    enabled: !!accessToken,
+    // The picture links are signed and expire; a list left open is refreshed now and then.
+    refetchInterval: 10 * 60 * 1000,
+    refetchOnWindowFocus: true
   });
 }

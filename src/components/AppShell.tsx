@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { useMe } from "../lib/queries";
@@ -64,6 +64,8 @@ export function AppShell() {
   const location = useLocation();
 
   const [loggingOut, setLoggingOut] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const [buyCreditsBusy, setBuyCreditsBusy] = useState(false);
   const [buyCreditsMessage, setBuyCreditsMessage] = useState<string | null>(null);
 
@@ -82,6 +84,27 @@ export function AppShell() {
         : location.pathname === "/carousel"
           ? "carousel"
           : "";
+
+  // The profile menu closes on a tap outside it, on Escape, and when the page changes.
+  useEffect(() => {
+    if (!profileMenuOpen) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (!profileMenuRef.current?.contains(event.target as Node)) setProfileMenuOpen(false);
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setProfileMenuOpen(false);
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [profileMenuOpen]);
+
+  useEffect(() => {
+    setProfileMenuOpen(false);
+  }, [location.pathname]);
 
   const handleLogout = async () => {
     const confirmed = window.confirm("Log out of this device?");
@@ -155,16 +178,46 @@ export function AppShell() {
               {buyCreditsBusy ? "Starting..." : "Buy 5 looks - Rs.70"}
             </button>
           ) : null}
-          <button
-            className="catalog-icon-btn"
-            type="button"
-            onClick={() => void handleLogout()}
-            disabled={loggingOut}
-            aria-label="Logout"
-            title="Logout"
-          >
-            <PersonIcon />
-          </button>
+          <div className="profile-menu-wrap" ref={profileMenuRef}>
+            <button
+              className="catalog-icon-btn"
+              type="button"
+              onClick={() => setProfileMenuOpen((open) => !open)}
+              disabled={loggingOut}
+              aria-label="Profile menu"
+              aria-haspopup="menu"
+              aria-expanded={profileMenuOpen}
+              title="Profile"
+            >
+              <PersonIcon />
+            </button>
+            {profileMenuOpen ? (
+              <div className="profile-menu" role="menu">
+                <button
+                  className="profile-menu-item"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setProfileMenuOpen(false);
+                    navigate("/recent-tryons");
+                  }}
+                >
+                  Recent try-ons
+                </button>
+                <button
+                  className="profile-menu-item"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setProfileMenuOpen(false);
+                    void handleLogout();
+                  }}
+                >
+                  Log out
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </header>
 

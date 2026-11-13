@@ -112,6 +112,8 @@ export type GenerationCreateResponse = {
   warning?: string;
   /** Attempt-log id (newer backends only). */
   request_id?: string;
+  /** true: this ticket was already used; the answer is the look made then, not charged again (newer backends only). */
+  duplicate?: boolean;
 };
 
 export type DownloadUrlResponse = {
@@ -156,4 +158,14 @@ export type MatchColorEditPayload = {
   lightness_delta_percent: number;
 };
 
-
+/** One of this shop's try-ons of the last 24 hours (GET /tryon/recent, newer backends only). */
+export type RecentTryOn = {
+  request_id: string;
+  attempt_type?: string | null;
+  garment_type_id?: string | null;
+  garment_type_name?: string | null;
+  created_at: string;
+  expires_at?: string | null;
+  image_url?: string | null;
+  thumb_url?: string | null;
+};
