@@ -8,12 +8,12 @@ import { FabricPickerOverlay, getFabricLabel } from "../components/FabricLibrary
 import { PhotoPickStatus } from "../components/PhotoPickStatus";
 import { TryOnFlow } from "../components/TryOnFlow";
 import { apiFetch, apiFetchBinary } from "../lib/api";
-import { errorCodeMessage, friendlyError, GENERIC_ERROR_MESSAGE, MissingFabricError } from "../lib/apiError";
+import { ApiError, errorCodeMessage, friendlyError, GENERIC_ERROR_MESSAGE, MissingFabricError } from "../lib/apiError";
 import { type Attempt, attemptRef, newAttempt, refFromId, reportNoResponse, withMessage } from "../lib/attempt";
 import { useAuth } from "../lib/auth";
-import { useGarmentTypes, useMe } from "../lib/queries";
+import { FABRIC_IMAGES_QUERY_KEY, useGarmentTypes, useMe } from "../lib/queries";
 import { subscribeToGeneration } from "../lib/realtime";
-import { signFabricPreviewUrl, uploadFabricPhoto, uploadToStorage } from "../lib/storage";
+import { signFabricPreviewUrl, signUrlsBatch, uploadFabricPhoto, uploadToStorage } from "../lib/storage";
 import { supabase } from "../lib/supabase";
 import type {
   ApplyToTarget,
@@ -72,6 +72,22 @@ type PhotoPicker = "fabric" | "hero" | "multi";
 
 /** Which freshly picked fabric photo the Match colour studio is open for. */
 type ColourTarget = { kind: "single" } | { kind: "multi"; slotId: string };
+
+/** A saved fabric open in the colour studio, with its full photo already downloaded. */
+type SavedColourSession = { target: ColourTarget; fabricImageId: string; source: Blob };
+
+const SAVED_FABRIC_LOAD_ERROR = "Couldn't load this fabric. Please try again.";
+const SAVED_FABRIC_SAVE_ERROR = "Couldn't save the colour change. Please try again.";
+
+/** The card a colour target belongs to: "single" or the slot id (same keys as renderFabricCard). */
+function colourCardKey(target: ColourTarget) {
+  return target.kind === "single" ? "single" : target.slotId;
+}
+
+/** POST /fabric-images/{id}/replace-photo is not on this backend yet (or the fabric is gone). */
+function isMissingReplaceEndpoint(err: unknown) {
+  return err instanceof ApiError && (err.status === 404 || err.status === 405);
+}
 
 /** Which fabric card the "My Fabrics" picker was opened from. */
 type FabricPickerTarget = { kind: "single" } | { kind: "multi"; slotId: string };
@@ -159,6 +175,11 @@ export function GeneratePage() {
   const [fabricColourAdjusted, setFabricColourAdjusted] = useState(false);
   const [colourTarget, setColourTarget] = useState<ColourTarget | null>(null);
   const [fabricPickerTarget, setFabricPickerTarget] = useState<FabricPickerTarget | null>(null);
+  /** Match colour for a saved fabric (fresh photos use colourTarget, unchanged). */
+  const [savedColour, setSavedColour] = useState<SavedColourSession | null>(null);
+  /** Card whose saved fabric is being opened in / saved from the colour studio; its buttons are disabled. */
+  const [colourBusyCard, setColourBusyCard] = useState<string | null>(null);
+  const [colourCardError, setColourCardError] = useState<{ card: string; message: string } | null>(null);
   const [preparingPhoto, setPreparingPhoto] = useState<PhotoPicker | null>(null);
   const [photoError, setPhotoError] = useState<{ picker: PhotoPicker; message: string } | null>(null);
   /** Slot the multi photo spinner / read error belongs to. */
@@ -383,7 +404,12 @@ export function GeneratePage() {
     setMultiSelections((prev) => ({ ...prev, [slotId]: selection }));
   }
 
+  function dismissColourCardError(card: string) {
+    setColourCardError((prev) => (prev?.card === card ? null : prev));
+  }
+
   function removeSlotFabric(slotId: string) {
+    dismissColourCardError(slotId);
     setMultiSelections((prev) => {
       const next = { ...prev };
       delete next[slotId];
@@ -521,6 +547,7 @@ export function GeneratePage() {
     setFabricPickerTarget(null);
     if (!target) return;
 
+    dismissColourCardError(colourCardKey(target));
     // The tile already signed this link, so this is normally instant.
     const previewUrl = await signFabricPreviewUrl(row.storage_path);
     if (target.kind === "single") {
@@ -537,6 +564,7 @@ export function GeneratePage() {
   }
 
   function clearFabricSelection() {
+    dismissColourCardError("single");
     setFabricFile(null);
     setFabricColourAdjusted(false);
     setExistingFabricImage(null);
@@ -593,6 +621,7 @@ export function GeneratePage() {
     if (!file) return;
     const compressed = await preparePhoto(file, "fabric");
     if (!compressed) return;
+    dismissColourCardError("single");
     setFabricFile(compressed);
     setFabricColourAdjusted(false);
     setExistingFabricImage(null);
@@ -833,6 +862,7 @@ export function GeneratePage() {
     setPhotoSlotId(slotId);
     const compressed = await preparePhoto(file, "multi");
     if (!compressed) return;
+    dismissColourCardError(slotId);
     assignFabricToSlot(slotId, {
       fabricImageId: "",
       previewUrl: URL.createObjectURL(compressed),
@@ -890,6 +920,138 @@ export function GeneratePage() {
       });
     }
     setColourTarget(null);
+  }
+
+  /** A saved fabric's full photo (not the small copy) as a Blob for the colour studio. */
+  async function downloadFabricPhoto(storagePath: string): Promise<Blob> {
+    // Second try re-signs, in case the cached link has expired.
+    for (const bypassCache of [false, true]) {
+      const urls = await signUrlsBatch("fabric-images", [storagePath], undefined, { bypassCache });
+      const url = urls[storagePath];
+      // No link means the file is not there; signing again would not help.
+      if (!url) break;
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        if (blob.size > 0) return blob;
+      } catch (err) {
+        console.warn("[generate] fabric photo download failed", err);
+      }
+    }
+    throw new Error("Fabric photo could not be downloaded");
+  }
+
+  /** Opens the colour studio on a saved fabric's full photo. On failure only a message is shown. */
+  async function openSavedFabricColour(target: ColourTarget, fabricImageId: string, storagePath?: string) {
+    if (colourBusyCard) return;
+    const card = colourCardKey(target);
+    setColourCardError(null);
+    setColourBusyCard(card);
+    try {
+      let path = storagePath;
+      if (!path) {
+        if (!accessToken) throw new Error("Not authenticated");
+        const row = await apiFetch<FabricImageRow>(`/fabric-images/${encodeURIComponent(fabricImageId)}`, accessToken, {
+          method: "GET"
+        });
+        path = row.storage_path;
+      }
+      const source = await downloadFabricPhoto(path);
+      setSavedColour({ target, fabricImageId, source });
+    } catch (err) {
+      console.error("[generate] couldn't open saved fabric for Match colour", fabricImageId, err);
+      setColourCardError({ card, message: SAVED_FABRIC_LOAD_ERROR });
+    } finally {
+      setColourBusyCard(null);
+    }
+  }
+
+  /**
+   * Saves a colour-corrected saved fabric: uploads the new photo (plus small copy)
+   * and points the same fabric at it, so its id stays the same. Without the
+   * replace-photo endpoint (404/405) the corrected picture becomes this card's
+   * fresh photo instead. Any other failure leaves the saved fabric as it was;
+   * the thrown message is shown in the studio, which stays open for another try.
+   */
+  async function handleSavedFabricColourSaved(blob: Blob) {
+    const session = savedColour;
+    if (!session) return;
+    const card = colourCardKey(session.target);
+    setColourBusyCard(card);
+    setColourCardError(null);
+    try {
+      if (!accessToken || !shopContext) throw new Error("Shop context is still loading.");
+      const corrected = await compressImage(new File([blob], "fabric.jpg", { type: "image/jpeg" }), 1600);
+      const ext = guessFileExtension(corrected.name, corrected.type);
+      const storagePath = `${shopContext.shop_id}/${Date.now()}-${makeRandomSuffix()}.${ext}`;
+      await uploadFabricPhoto(storagePath, corrected);
+
+      let updated: FabricImageRow | null;
+      try {
+        updated = await apiFetch<FabricImageRow | null>(
+          `/fabric-images/${encodeURIComponent(session.fabricImageId)}/replace-photo`,
+          accessToken,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              storage_path: storagePath,
+              mime_type: corrected.type || "image/jpeg",
+              file_size_bytes: corrected.size
+            })
+          }
+        );
+      } catch (err) {
+        if (!isMissingReplaceEndpoint(err)) throw err;
+        // Older backend: use the corrected picture as this card's fresh photo, as if just captured.
+        const previewUrl = URL.createObjectURL(corrected);
+        if (session.target.kind === "single") {
+          setExistingFabricImage(null);
+          setFabricFile(corrected);
+          setFabricPreviewUrl(previewUrl);
+          setFabricColourAdjusted(true);
+        } else {
+          assignFabricToSlot(session.target.slotId, {
+            fabricImageId: "",
+            previewUrl,
+            label: "New fabric",
+            pendingFile: corrected,
+            colourAdjusted: true
+          });
+        }
+        setSavedColour(null);
+        return;
+      }
+
+      // Same fabric id, new photo.
+      const fabricImageId = session.fabricImageId;
+      const previewUrl = URL.createObjectURL(corrected);
+      if (session.target.kind === "single") {
+        setExistingFabricImage((prev) =>
+          prev && prev.id === fabricImageId
+            ? { ...prev, ...(updated ?? {}), id: fabricImageId, storage_path: updated?.storage_path ?? storagePath }
+            : prev
+        );
+        setFabricPreviewUrl(previewUrl);
+        setFabricColourAdjusted(true);
+      } else {
+        const slotId = session.target.slotId;
+        setMultiSelections((prev) => {
+          const selection = prev[slotId];
+          if (!selection || selection.fabricImageId !== fabricImageId) return prev;
+          return { ...prev, [slotId]: { ...selection, previewUrl, colourAdjusted: true } };
+        });
+      }
+      // My Fabrics shows the corrected picture (the fabric is still listed once).
+      void queryClient.invalidateQueries({ queryKey: FABRIC_IMAGES_QUERY_KEY });
+      setSavedColour(null);
+    } catch (err) {
+      console.error("[generate] saving colour change for saved fabric failed", session.fabricImageId, err);
+      setColourCardError({ card, message: SAVED_FABRIC_SAVE_ERROR });
+      throw new Error(SAVED_FABRIC_SAVE_ERROR);
+    } finally {
+      setColourBusyCard(null);
+    }
   }
 
   function openMultiPicker(slotId: string, source: "camera" | "gallery") {
@@ -1065,6 +1227,10 @@ export function GeneratePage() {
     belowActions?: ReactNode;
     status: ReactNode;
   }) {
+    // A saved fabric being opened in / saved from the colour studio locks this card only.
+    const colourBusy = colourBusyCard === card.key;
+    const cardBusy = actionBusy || colourBusy;
+    const colourError = colourCardError?.card === card.key ? colourCardError.message : null;
     return (
       <div key={card.key} className="fabric-card">
         <div className="fabric-card-head">
@@ -1091,7 +1257,7 @@ export function GeneratePage() {
                 type="button"
                 className="fabric-card-remove"
                 onClick={card.onRemove}
-                disabled={actionBusy}
+                disabled={cardBusy}
                 aria-label="Remove fabric"
               >
                 &times;
@@ -1108,7 +1274,7 @@ export function GeneratePage() {
                     type="button"
                     style={{ minHeight: "36px", padding: "0 12px", fontSize: "12px" }}
                     onClick={card.onMatchColour}
-                    disabled={actionBusy}
+                    disabled={cardBusy}
                   >
                     🎨 Match colour
                   </button>
@@ -1122,17 +1288,28 @@ export function GeneratePage() {
 
         {/* Full card width, so all three fit on one line even on a 320 px phone. */}
         <div className="fabric-card-pick-row">
-          <button className="btn btn-light" type="button" onClick={card.onCapture} disabled={actionBusy}>
+          <button className="btn btn-light" type="button" onClick={card.onCapture} disabled={cardBusy}>
             Capture
           </button>
-          <button className="btn btn-light" type="button" onClick={card.onGallery} disabled={actionBusy}>
+          <button className="btn btn-light" type="button" onClick={card.onGallery} disabled={cardBusy}>
             Gallery
           </button>
-          <button className="btn btn-light" type="button" onClick={card.onMyFabrics} disabled={actionBusy}>
+          <button className="btn btn-light" type="button" onClick={card.onMyFabrics} disabled={cardBusy}>
             My Fabrics
           </button>
         </div>
 
+        {colourBusy ? (
+          <div className="photo-pick-status" role="status">
+            <div className="spinner spinner-small" />
+            <span>{savedColour ? "Saving colour…" : "Loading fabric…"}</span>
+          </div>
+        ) : null}
+        {colourError ? (
+          <p className="error-text" role="alert">
+            {colourError}
+          </p>
+        ) : null}
         {card.status}
       </div>
     );
@@ -1270,7 +1447,9 @@ export function GeneratePage() {
                     onMyFabrics: () => setFabricPickerTarget({ kind: "multi", slotId: slot.id }),
                     onMatchColour: selection?.pendingFile
                       ? () => setColourTarget({ kind: "multi", slotId: slot.id })
-                      : null,
+                      : selection?.fabricImageId
+                        ? () => void openSavedFabricColour({ kind: "multi", slotId: slot.id }, selection.fabricImageId)
+                        : null,
                     colourAdjusted: !!selection?.colourAdjusted,
                     belowActions:
                       optional && !isSlotFilled(selection) ? (
@@ -1316,7 +1495,16 @@ export function GeneratePage() {
                     galleryInputRef.current?.click();
                   },
                   onMyFabrics: () => setFabricPickerTarget({ kind: "single" }),
-                  onMatchColour: fabricFile ? () => setColourTarget({ kind: "single" }) : null,
+                  onMatchColour: fabricFile
+                    ? () => setColourTarget({ kind: "single" })
+                    : existingFabricImage
+                      ? () =>
+                          void openSavedFabricColour(
+                            { kind: "single" },
+                            existingFabricImage.id,
+                            existingFabricImage.storage_path
+                          )
+                      : null,
                   colourAdjusted: fabricColourAdjusted,
                   status: (
                     <PhotoPickStatus
@@ -1489,6 +1677,16 @@ export function GeneratePage() {
           onClose={() => setColourTarget(null)}
         />
       )}
+
+      {savedColour ? (
+        <ColorStudio
+          source={savedColour.source}
+          allowSegment
+          defaultSegment={false}
+          onSave={handleSavedFabricColourSaved}
+          onClose={() => setSavedColour(null)}
+        />
+      ) : null}
 
       {fabricPickerTarget ? (
         <FabricPickerOverlay
